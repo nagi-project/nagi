@@ -1,0 +1,7 @@
+[tasks.check]
+description = "Run fmt, clippy, and test"
+run = """
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+"""
