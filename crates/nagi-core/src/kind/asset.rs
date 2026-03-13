@@ -59,12 +59,14 @@ pub enum DesiredCondition {
         /// If omitted, freshness is determined from table metadata instead of a column value.
         column: Option<String>,
     },
-    NotNull {
-        column: String,
-    },
     /// Query must return a scalar boolean. Ready when the result is true.
     SQL {
         query: String,
+    },
+    /// Runs an external command. Ready when the process exits with code 0.
+    /// `run` is argv: the first element is the program, the rest are arguments.
+    Command {
+        run: Vec<String>,
     },
 }
 
@@ -97,10 +99,16 @@ impl DesiredCondition {
     fn validate(&self) -> Result<(), KindError> {
         match self {
             DesiredCondition::Freshness { .. } => {}
-            DesiredCondition::NotNull { column } => {
-                Self::require_non_empty(column, "NotNull.column")?
-            }
             DesiredCondition::SQL { query } => Self::require_non_empty(query, "SQL.query")?,
+            DesiredCondition::Command { run } => {
+                if run.is_empty() {
+                    return Err(KindError::InvalidSpec {
+                        kind: KIND.to_string(),
+                        message: "Command.run must not be empty".to_string(),
+                    });
+                }
+                Self::require_non_empty(&run[0], "Command.run[0]")?;
+            }
         }
         Ok(())
     }
@@ -124,10 +132,10 @@ desired:
     interval: 6h
     checkAt: "0 3 * * *"
     column: updated_at
-  - type: NotNull
-    column: amount
   - type: SQL
     query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
+  - type: Command
+    run: [dbt, test, --select, daily_sales]
 autoSync: true
 sync:
   ref: dbt-default
@@ -157,11 +165,11 @@ resync:
         ));
         assert!(matches!(
             &spec.desired[1],
-            DesiredCondition::NotNull { column } if column == "amount"
+            DesiredCondition::SQL { query } if query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
         ));
         assert!(matches!(
             &spec.desired[2],
-            DesiredCondition::SQL { query } if query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
+            DesiredCondition::Command { run } if run == &["dbt", "test", "--select", "daily_sales"]
         ));
 
         assert!(spec.auto_sync);
@@ -238,8 +246,8 @@ desired:
     fn auto_sync_defaults_to_true() {
         let yaml = r#"
 desired:
-  - type: NotNull
-    column: id
+  - type: SQL
+    query: "SELECT true"
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(spec.auto_sync);
@@ -249,8 +257,8 @@ desired:
     fn auto_sync_can_be_set_to_false() {
         let yaml = r#"
 desired:
-  - type: NotNull
-    column: id
+  - type: SQL
+    query: "SELECT true"
 autoSync: false
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
@@ -274,13 +282,53 @@ autoSync: false
     fn validate_accepts_valid_spec() {
         let spec = AssetSpec {
             sources: vec![],
-            desired: vec![DesiredCondition::NotNull {
-                column: "id".to_string(),
+            desired: vec![DesiredCondition::SQL {
+                query: "SELECT true".to_string(),
             }],
             auto_sync: true,
             sync: None,
             resync: None,
         };
         assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn parse_command_condition() {
+        let yaml = r#"
+desired:
+  - type: Command
+    run: [dbt, test, --select, my_model]
+"#;
+        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            &spec.desired[0],
+            DesiredCondition::Command { run } if run == &["dbt", "test", "--select", "my_model"]
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_empty_command_run() {
+        let spec = AssetSpec {
+            sources: vec![],
+            desired: vec![DesiredCondition::Command { run: vec![] }],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
+    }
+
+    #[test]
+    fn validate_rejects_blank_command_program() {
+        let spec = AssetSpec {
+            sources: vec![],
+            desired: vec![DesiredCondition::Command { run: vec!["".to_string()] }],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
     }
 }

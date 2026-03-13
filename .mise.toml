@@ -5,3 +5,7 @@ cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
 """
+
+[tasks.audit]
+description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
+run = "cargo audit"
