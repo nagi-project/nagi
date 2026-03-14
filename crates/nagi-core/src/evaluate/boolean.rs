@@ -25,7 +25,10 @@ mod tests {
 
     #[test]
     fn bool_true_is_ready() {
-        assert_eq!(evaluate_boolean(Value::Bool(true)).unwrap(), ConditionStatus::Ready);
+        assert_eq!(
+            evaluate_boolean(Value::Bool(true)).unwrap(),
+            ConditionStatus::Ready
+        );
     }
 
     #[test]

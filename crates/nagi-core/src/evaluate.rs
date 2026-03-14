@@ -6,7 +6,7 @@ mod freshness;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{Connection, ConnectionError};
-use crate::kind::asset::AssetSpec;
+use crate::kind::asset::{AssetSpec, DesiredSetEntry};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,9 +50,17 @@ pub async fn evaluate_asset(
     conn: &dyn Connection,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let mut results = Vec::new();
-    for (i, condition) in spec.desired.iter().enumerate() {
-        let result = condition::evaluate_condition(i, asset_name, condition, conn).await?;
-        results.push(result);
+    for (i, entry) in spec.desired_sets.iter().enumerate() {
+        match entry {
+            DesiredSetEntry::Ref(_) => {
+                // DesiredGroup refs are resolved at compile time; skip during evaluation.
+                continue;
+            }
+            DesiredSetEntry::Inline(condition) => {
+                let result = condition::evaluate_condition(i, asset_name, condition, conn).await?;
+                results.push(result);
+            }
+        }
     }
     let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
     Ok(AssetEvalResult {
@@ -70,7 +78,7 @@ mod tests {
     use super::*;
     use crate::db::ConnectionError;
     use crate::duration::Duration;
-    use crate::kind::asset::{AssetSpec, DesiredCondition};
+    use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -97,7 +105,13 @@ mod tests {
     }
 
     fn asset_spec_with(condition: DesiredCondition) -> AssetSpec {
-        AssetSpec { sources: vec![], desired: vec![condition], auto_sync: true, sync: None, resync: None }
+        AssetSpec {
+            sources: vec![],
+            desired_sets: vec![DesiredSetEntry::Inline(condition)],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        }
     }
 
     fn duration(secs: u64) -> Duration {
@@ -126,9 +140,13 @@ mod tests {
     #[tokio::test]
     async fn freshness_ready_when_within_max_age() {
         // last updated 1 hour ago, max age 2 hours
-        let conn = MockConnection { response: epoch_secs_ago(3600.0) };
+        let conn = MockConnection {
+            response: epoch_secs_ago(3600.0),
+        };
         let spec = asset_spec_with(freshness_condition(7200, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, &conn).await.unwrap();
+        let result = evaluate_asset("my_dataset.my_table", &spec, &conn)
+            .await
+            .unwrap();
         assert!(result.ready);
         assert_eq!(result.conditions[0].status, ConditionStatus::Ready);
     }
@@ -136,16 +154,25 @@ mod tests {
     #[tokio::test]
     async fn freshness_not_ready_when_exceeds_max_age() {
         // last updated 25 hours ago, max age 24 hours
-        let conn = MockConnection { response: epoch_secs_ago(25.0 * 3600.0) };
+        let conn = MockConnection {
+            response: epoch_secs_ago(25.0 * 3600.0),
+        };
         let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, &conn).await.unwrap();
+        let result = evaluate_asset("my_dataset.my_table", &spec, &conn)
+            .await
+            .unwrap();
         assert!(!result.ready);
-        assert!(matches!(&result.conditions[0].status, ConditionStatus::NotReady { .. }));
+        assert!(matches!(
+            &result.conditions[0].status,
+            ConditionStatus::NotReady { .. }
+        ));
     }
 
     #[tokio::test]
     async fn freshness_accepts_rfc3339_timestamp() {
-        let conn = MockConnection { response: Value::String("2099-01-01T00:00:00Z".to_string()) };
+        let conn = MockConnection {
+            response: Value::String("2099-01-01T00:00:00Z".to_string()),
+        };
         let spec = asset_spec_with(freshness_condition(86400, Some("updated_at")));
         let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
         assert!(result.ready);
@@ -153,7 +180,9 @@ mod tests {
 
     #[tokio::test]
     async fn freshness_returns_error_on_unexpected_value() {
-        let conn = MockConnection { response: Value::Null };
+        let conn = MockConnection {
+            response: Value::Null,
+        };
         let spec = asset_spec_with(freshness_condition(86400, None));
         let result = evaluate_asset("my_table", &spec, &conn).await;
         assert!(matches!(result, Err(EvaluateError::UnexpectedResult(_))));
@@ -163,16 +192,24 @@ mod tests {
 
     #[tokio::test]
     async fn sql_ready_when_true() {
-        let conn = MockConnection { response: Value::Bool(true) };
-        let spec = asset_spec_with(DesiredCondition::SQL { query: "SELECT true".to_string() });
+        let conn = MockConnection {
+            response: Value::Bool(true),
+        };
+        let spec = asset_spec_with(DesiredCondition::SQL {
+            query: "SELECT true".to_string(),
+        });
         let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
         assert!(result.ready);
     }
 
     #[tokio::test]
     async fn sql_not_ready_when_false() {
-        let conn = MockConnection { response: Value::Bool(false) };
-        let spec = asset_spec_with(DesiredCondition::SQL { query: "SELECT false".to_string() });
+        let conn = MockConnection {
+            response: Value::Bool(false),
+        };
+        let spec = asset_spec_with(DesiredCondition::SQL {
+            query: "SELECT false".to_string(),
+        });
         let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
         assert!(!result.ready);
     }
@@ -188,7 +225,11 @@ mod tests {
         impl Connection for CountingConnection<'_> {
             async fn query_scalar(&self, _sql: &str) -> Result<Value, ConnectionError> {
                 let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if n == 0 { Ok(Value::Bool(true)) } else { Ok(Value::Bool(false)) }
+                if n == 0 {
+                    Ok(Value::Bool(true))
+                } else {
+                    Ok(Value::Bool(false))
+                }
             }
 
             fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
@@ -197,17 +238,26 @@ mod tests {
         }
         let spec = AssetSpec {
             sources: vec![],
-            desired: vec![
-                DesiredCondition::SQL { query: "SELECT true".to_string() },
-                DesiredCondition::SQL { query: "SELECT false".to_string() },
+            desired_sets: vec![
+                DesiredSetEntry::Inline(DesiredCondition::SQL {
+                    query: "SELECT true".to_string(),
+                }),
+                DesiredSetEntry::Inline(DesiredCondition::SQL {
+                    query: "SELECT false".to_string(),
+                }),
             ],
             auto_sync: true,
             sync: None,
             resync: None,
         };
-        let result = evaluate_asset("my_table", &spec, &CountingConnection(&call_count)).await.unwrap();
+        let result = evaluate_asset("my_table", &spec, &CountingConnection(&call_count))
+            .await
+            .unwrap();
         assert!(!result.ready);
         assert_eq!(result.conditions[0].status, ConditionStatus::Ready);
-        assert!(matches!(result.conditions[1].status, ConditionStatus::NotReady { .. }));
+        assert!(matches!(
+            result.conditions[1].status,
+            ConditionStatus::NotReady { .. }
+        ));
     }
 }

@@ -4,7 +4,6 @@ use serde_json::Value;
 
 use super::{ConditionStatus, EvaluateError};
 
-
 pub(super) fn evaluate_freshness(
     value: Value,
     max_age: std::time::Duration,
@@ -49,4 +48,3 @@ fn parse_timestamp(value: &Value) -> Option<f64> {
         _ => None,
     }
 }
-

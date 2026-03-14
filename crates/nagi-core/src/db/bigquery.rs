@@ -64,12 +64,19 @@ impl BigQueryConfig {
             .get("job_execution_timeout_seconds")
             .and_then(|v| v.as_u64())
             .map(|secs| {
-                u32::try_from(secs.saturating_mul(1000)).map_err(|_| ConnectionError::InvalidField {
-                    field: "job_execution_timeout_seconds".to_string(),
+                u32::try_from(secs.saturating_mul(1000)).map_err(|_| {
+                    ConnectionError::InvalidField {
+                        field: "job_execution_timeout_seconds".to_string(),
+                    }
                 })
             })
             .transpose()?;
-        Ok(Self { project, dataset, auth, timeout_ms })
+        Ok(Self {
+            project,
+            dataset,
+            auth,
+            timeout_ms,
+        })
     }
 }
 
@@ -81,7 +88,9 @@ fn require_str(
         .get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| ConnectionError::MissingField { field: key.to_string() })
+        .ok_or_else(|| ConnectionError::MissingField {
+            field: key.to_string(),
+        })
 }
 
 // ── Token acquisition ────────────────────────────────────────────────────────
@@ -140,11 +149,19 @@ async fn token_from_adc_path(
     let adc: AdcFile = serde_json::from_str(&content)
         .map_err(|e| ConnectionError::AuthFailed(format!("cannot parse ADC file: {e}")))?;
     match adc {
-        AdcFile::AuthorizedUser { client_id, client_secret, refresh_token } => {
-            refresh_token_exchange(client, &client_id, &client_secret, &refresh_token).await
-        }
+        AdcFile::AuthorizedUser {
+            client_id,
+            client_secret,
+            refresh_token,
+        } => refresh_token_exchange(client, &client_id, &client_secret, &refresh_token).await,
         AdcFile::ServiceAccount(creds) => {
-            service_account_token(client, &creds.client_email, &creds.private_key, &creds.token_uri).await
+            service_account_token(
+                client,
+                &creds.client_email,
+                &creds.private_key,
+                &creds.token_uri,
+            )
+            .await
         }
     }
 }
@@ -157,7 +174,13 @@ async fn token_from_keyfile(
         .map_err(|e| ConnectionError::AuthFailed(format!("cannot read keyfile: {e}")))?;
     let creds: Credentials = serde_json::from_str(&content)
         .map_err(|e| ConnectionError::AuthFailed(format!("cannot parse keyfile: {e}")))?;
-    service_account_token(client, &creds.client_email, &creds.private_key, &creds.token_uri).await
+    service_account_token(
+        client,
+        &creds.client_email,
+        &creds.private_key,
+        &creds.token_uri,
+    )
+    .await
 }
 
 async fn refresh_token_exchange(
@@ -403,15 +426,26 @@ my_project:
         let output = OutputConfig {
             adapter_type: "bigquery".to_string(),
             fields: [
-                ("project".to_string(), serde_yaml::Value::String("p".to_string())),
-                ("dataset".to_string(), serde_yaml::Value::String("d".to_string())),
-                ("job_execution_timeout_seconds".to_string(), serde_yaml::Value::Number(4_295_000.into())),
+                (
+                    "project".to_string(),
+                    serde_yaml::Value::String("p".to_string()),
+                ),
+                (
+                    "dataset".to_string(),
+                    serde_yaml::Value::String("d".to_string()),
+                ),
+                (
+                    "job_execution_timeout_seconds".to_string(),
+                    serde_yaml::Value::Number(4_295_000.into()),
+                ),
             ]
             .into_iter()
             .collect(),
         };
         let err = BigQueryConfig::from_output(&output).unwrap_err();
-        assert!(matches!(err, ConnectionError::InvalidField { field } if field == "job_execution_timeout_seconds"));
+        assert!(
+            matches!(err, ConnectionError::InvalidField { field } if field == "job_execution_timeout_seconds")
+        );
     }
 
     #[test]
@@ -426,9 +460,12 @@ my_project:
     fn rejects_missing_project() {
         let output = OutputConfig {
             adapter_type: "bigquery".to_string(),
-            fields: [("dataset".to_string(), serde_yaml::Value::String("raw".to_string()))]
-                .into_iter()
-                .collect(),
+            fields: [(
+                "dataset".to_string(),
+                serde_yaml::Value::String("raw".to_string()),
+            )]
+            .into_iter()
+            .collect(),
         };
         let err = BigQueryConfig::from_output(&output).unwrap_err();
         assert!(matches!(err, ConnectionError::MissingField { field } if field == "project"));

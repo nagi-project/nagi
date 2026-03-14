@@ -96,14 +96,19 @@ impl DbtProfilesFile {
         profile: &str,
         target: Option<&str>,
     ) -> Result<&OutputConfig, DbtProfileError> {
-        let p = self.profiles.get(profile).ok_or_else(|| DbtProfileError::ProfileNotFound {
-            profile: profile.to_string(),
-        })?;
+        let p = self
+            .profiles
+            .get(profile)
+            .ok_or_else(|| DbtProfileError::ProfileNotFound {
+                profile: profile.to_string(),
+            })?;
         let target_name = target.unwrap_or(&p.default_target);
-        p.outputs.get(target_name).ok_or_else(|| DbtProfileError::TargetNotFound {
-            profile: profile.to_string(),
-            target: target_name.to_string(),
-        })
+        p.outputs
+            .get(target_name)
+            .ok_or_else(|| DbtProfileError::TargetNotFound {
+                profile: profile.to_string(),
+                target: target_name.to_string(),
+            })
     }
 }
 
@@ -173,7 +178,9 @@ other_project:
     fn rejects_unknown_profile() {
         let f = DbtProfilesFile::parse_str(PROFILES_YAML).unwrap();
         let err = f.resolve("no_such_profile", None).unwrap_err();
-        assert!(matches!(err, DbtProfileError::ProfileNotFound { profile } if profile == "no_such_profile"));
+        assert!(
+            matches!(err, DbtProfileError::ProfileNotFound { profile } if profile == "no_such_profile")
+        );
     }
 
     #[test]

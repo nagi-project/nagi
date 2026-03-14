@@ -10,7 +10,9 @@ pub(super) async fn evaluate_condition(
     conn: &dyn Connection,
 ) -> Result<ConditionResult, EvaluateError> {
     let (condition_type, status) = match condition {
-        DesiredCondition::Freshness { max_age, column, .. } => {
+        DesiredCondition::Freshness {
+            max_age, column, ..
+        } => {
             let sql = conn.freshness_sql(asset_name, column.as_deref());
             let value = conn.query_scalar(&sql).await?;
             let status = freshness::evaluate_freshness(value, max_age.as_std())?;
@@ -26,5 +28,9 @@ pub(super) async fn evaluate_condition(
             ("Command".to_string(), status)
         }
     };
-    Ok(ConditionResult { index, condition_type, status })
+    Ok(ConditionResult {
+        index,
+        condition_type,
+        status,
+    })
 }

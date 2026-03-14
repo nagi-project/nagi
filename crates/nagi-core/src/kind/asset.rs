@@ -10,14 +10,15 @@ use super::KindError;
 pub const KIND: &str = "Asset";
 
 /// Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.
-/// The reconciliation loop continuously evaluates `desired` and runs `sync` until all conditions are met.
+/// The reconciliation loop continuously evaluates `desiredSets` and runs `sync` until all conditions are met.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSpec {
     #[serde(default)]
     pub sources: Vec<SourceRef>,
-    /// All conditions are AND-evaluated. All true → Ready.
-    pub desired: Vec<DesiredCondition>,
+    /// All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.
+    #[serde(default)]
+    pub desired_sets: Vec<DesiredSetEntry>,
     /// Controls automatic sync execution in `nagi serve`. Defaults to `true`.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
@@ -44,6 +45,21 @@ pub struct SyncRef {
     pub with: HashMap<String, String>,
 }
 
+/// An entry in `desiredSets`. Either a reference to a `kind: DesiredGroup` or an inline condition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DesiredSetEntry {
+    Ref(DesiredGroupRef),
+    Inline(DesiredCondition),
+}
+
+/// A reference to a `kind: DesiredGroup` resource.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesiredGroupRef {
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+}
+
 /// A single desired state condition. The Asset is Ready only when all conditions are satisfied.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -60,29 +76,52 @@ pub enum DesiredCondition {
         column: Option<String>,
     },
     /// Query must return a scalar boolean. Ready when the result is true.
-    SQL {
-        query: String,
-    },
+    SQL { query: String },
     /// Runs an external command. Ready when the process exits with code 0.
     /// `run` is argv: the first element is the program, the rest are arguments.
-    Command {
-        run: Vec<String>,
-    },
+    Command { run: Vec<String> },
 }
 
 impl AssetSpec {
     pub fn validate(&self) -> Result<(), KindError> {
-        if self.desired.is_empty() {
-            return Err(KindError::InvalidSpec {
-                kind: KIND.to_string(),
-                message: "desired must not be empty".to_string(),
-            });
-        }
-        for condition in &self.desired {
-            condition.validate()?;
+        for entry in &self.desired_sets {
+            entry.validate()?;
         }
         Ok(())
     }
+}
+
+impl DesiredSetEntry {
+    fn validate(&self) -> Result<(), KindError> {
+        match self {
+            DesiredSetEntry::Ref(r) => {
+                if r.ref_name.is_empty() {
+                    return Err(KindError::InvalidSpec {
+                        kind: KIND.to_string(),
+                        message: "desiredSets ref must not be empty".to_string(),
+                    });
+                }
+                Ok(())
+            }
+            DesiredSetEntry::Inline(condition) => condition.validate(),
+        }
+    }
+}
+
+/// Checks that a resolved (flattened) list of conditions contains no duplicates.
+/// Called after compile resolves all `Ref` entries into inline conditions.
+pub fn validate_no_duplicate_conditions(conditions: &[DesiredCondition]) -> Result<(), KindError> {
+    for (i, a) in conditions.iter().enumerate() {
+        for b in &conditions[i + 1..] {
+            if a == b {
+                return Err(KindError::InvalidSpec {
+                    kind: KIND.to_string(),
+                    message: "desiredSets contains duplicate condition".to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 impl DesiredCondition {
@@ -96,7 +135,7 @@ impl DesiredCondition {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), KindError> {
+    pub(crate) fn validate(&self) -> Result<(), KindError> {
         match self {
             DesiredCondition::Freshness { .. } => {}
             DesiredCondition::SQL { query } => Self::require_non_empty(query, "SQL.query")?,
@@ -126,7 +165,8 @@ mod tests {
 sources:
   - ref: raw-sales
   - ref: customer-master
-desired:
+desiredSets:
+  - ref: daily-sla
   - type: Freshness
     maxAge: 24h
     interval: 6h
@@ -150,26 +190,30 @@ resync:
         assert_eq!(spec.sources[0].ref_name, "raw-sales");
         assert_eq!(spec.sources[1].ref_name, "customer-master");
 
-        assert_eq!(spec.desired.len(), 3);
+        assert_eq!(spec.desired_sets.len(), 4);
         assert!(matches!(
-            &spec.desired[0],
-            DesiredCondition::Freshness {
+            &spec.desired_sets[0],
+            DesiredSetEntry::Ref(r) if r.ref_name == "daily-sla"
+        ));
+        assert!(matches!(
+            &spec.desired_sets[1],
+            DesiredSetEntry::Inline(DesiredCondition::Freshness {
                 max_age,
                 interval,
                 check_at: Some(check_at),
                 column: Some(column),
-            } if max_age.as_std() == StdDuration::from_secs(24 * 3600)
+            }) if max_age.as_std() == StdDuration::from_secs(24 * 3600)
                 && interval.as_std() == StdDuration::from_secs(6 * 3600)
                 && check_at.as_str() == "0 3 * * *"
                 && column == "updated_at"
         ));
         assert!(matches!(
-            &spec.desired[1],
-            DesiredCondition::SQL { query } if query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
+            &spec.desired_sets[2],
+            DesiredSetEntry::Inline(DesiredCondition::SQL { query }) if query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
         ));
         assert!(matches!(
-            &spec.desired[2],
-            DesiredCondition::Command { run } if run == &["dbt", "test", "--select", "daily_sales"]
+            &spec.desired_sets[3],
+            DesiredSetEntry::Inline(DesiredCondition::Command { run }) if run == &["dbt", "test", "--select", "daily_sales"]
         ));
 
         assert!(spec.auto_sync);
@@ -184,7 +228,7 @@ resync:
     #[test]
     fn parse_minimal_asset_spec() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: Freshness
     maxAge: 24h
     interval: 6h
@@ -192,35 +236,48 @@ desired:
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
         assert!(spec.sources.is_empty());
-        assert_eq!(spec.desired.len(), 1);
+        assert_eq!(spec.desired_sets.len(), 1);
         assert!(spec.auto_sync, "autoSync should default to true");
         assert!(spec.sync.is_none());
         assert!(spec.resync.is_none());
     }
 
     #[test]
+    fn parse_asset_without_desired_sets() {
+        let yaml = r#"
+sources:
+  - ref: raw-sales
+"#;
+        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(
+            spec.desired_sets.is_empty(),
+            "omitted desiredSets should default to empty (always Ready)"
+        );
+    }
+
+    #[test]
     fn parse_freshness_without_optional_fields() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: Freshness
     maxAge: 24h
     interval: 6h
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(
-            &spec.desired[0],
-            DesiredCondition::Freshness {
+            &spec.desired_sets[0],
+            DesiredSetEntry::Inline(DesiredCondition::Freshness {
                 check_at: None,
                 column: None,
                 ..
-            }
+            })
         ));
     }
 
     #[test]
     fn rejects_invalid_cron_in_freshness() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: Freshness
     maxAge: 24h
     interval: 6h
@@ -233,7 +290,7 @@ desired:
     #[test]
     fn rejects_invalid_duration_in_freshness() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: Freshness
     maxAge: not-a-duration
     interval: 6h
@@ -245,7 +302,7 @@ desired:
     #[test]
     fn auto_sync_defaults_to_true() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: SQL
     query: "SELECT true"
 "#;
@@ -256,7 +313,7 @@ desired:
     #[test]
     fn auto_sync_can_be_set_to_false() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: SQL
     query: "SELECT true"
 autoSync: false
@@ -266,10 +323,55 @@ autoSync: false
     }
 
     #[test]
-    fn validate_rejects_empty_desired() {
+    fn validate_accepts_empty_desired_sets() {
         let spec = AssetSpec {
             sources: vec![],
-            desired: vec![],
+            desired_sets: vec![],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        assert!(
+            spec.validate().is_ok(),
+            "empty desiredSets means always Ready"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_valid_spec() {
+        let spec = AssetSpec {
+            sources: vec![],
+            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
+                query: "SELECT true".to_string(),
+            })],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_ref_entry() {
+        let spec = AssetSpec {
+            sources: vec![],
+            desired_sets: vec![DesiredSetEntry::Ref(DesiredGroupRef {
+                ref_name: "daily-sla".to_string(),
+            })],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_empty_ref_name() {
+        let spec = AssetSpec {
+            sources: vec![],
+            desired_sets: vec![DesiredSetEntry::Ref(DesiredGroupRef {
+                ref_name: "".to_string(),
+            })],
             auto_sync: true,
             sync: None,
             resync: None,
@@ -279,30 +381,16 @@ autoSync: false
     }
 
     #[test]
-    fn validate_accepts_valid_spec() {
-        let spec = AssetSpec {
-            sources: vec![],
-            desired: vec![DesiredCondition::SQL {
-                query: "SELECT true".to_string(),
-            }],
-            auto_sync: true,
-            sync: None,
-            resync: None,
-        };
-        assert!(spec.validate().is_ok());
-    }
-
-    #[test]
     fn parse_command_condition() {
         let yaml = r#"
-desired:
+desiredSets:
   - type: Command
     run: [dbt, test, --select, my_model]
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(
-            &spec.desired[0],
-            DesiredCondition::Command { run } if run == &["dbt", "test", "--select", "my_model"]
+            &spec.desired_sets[0],
+            DesiredSetEntry::Inline(DesiredCondition::Command { run }) if run == &["dbt", "test", "--select", "my_model"]
         ));
     }
 
@@ -310,7 +398,9 @@ desired:
     fn validate_rejects_empty_command_run() {
         let spec = AssetSpec {
             sources: vec![],
-            desired: vec![DesiredCondition::Command { run: vec![] }],
+            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
+                run: vec![],
+            })],
             auto_sync: true,
             sync: None,
             resync: None,
@@ -323,12 +413,81 @@ desired:
     fn validate_rejects_blank_command_program() {
         let spec = AssetSpec {
             sources: vec![],
-            desired: vec![DesiredCondition::Command { run: vec!["".to_string()] }],
+            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
+                run: vec!["".to_string()],
+            })],
             auto_sync: true,
             sync: None,
             resync: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
+    }
+
+    #[test]
+    fn parse_mixed_ref_and_inline() {
+        let yaml = r#"
+desiredSets:
+  - ref: daily-sla
+  - ref: sales-quality-checks
+  - type: SQL
+    query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE region IS NULL"
+"#;
+        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.desired_sets.len(), 3);
+        assert!(
+            matches!(&spec.desired_sets[0], DesiredSetEntry::Ref(r) if r.ref_name == "daily-sla")
+        );
+        assert!(
+            matches!(&spec.desired_sets[1], DesiredSetEntry::Ref(r) if r.ref_name == "sales-quality-checks")
+        );
+        assert!(matches!(
+            &spec.desired_sets[2],
+            DesiredSetEntry::Inline(DesiredCondition::SQL { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_no_duplicates_accepts_distinct_conditions() {
+        let conditions = vec![
+            DesiredCondition::SQL {
+                query: "SELECT true".to_string(),
+            },
+            DesiredCondition::SQL {
+                query: "SELECT false".to_string(),
+            },
+        ];
+        assert!(validate_no_duplicate_conditions(&conditions).is_ok());
+    }
+
+    #[test]
+    fn validate_no_duplicates_rejects_identical_conditions() {
+        let conditions = vec![
+            DesiredCondition::SQL {
+                query: "SELECT true".to_string(),
+            },
+            DesiredCondition::SQL {
+                query: "SELECT true".to_string(),
+            },
+        ];
+        let err = validate_no_duplicate_conditions(&conditions).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, message }
+            if kind == KIND && message.contains("duplicate")));
+    }
+
+    #[test]
+    fn validate_no_duplicates_catches_group_and_inline_overlap() {
+        // Simulates compile having resolved a DesiredGroup ref into the same
+        // Freshness condition that was also declared inline.
+        let condition = DesiredCondition::Freshness {
+            max_age: serde_yaml::from_str("24h").unwrap(),
+            interval: serde_yaml::from_str("6h").unwrap(),
+            check_at: None,
+            column: None,
+        };
+        let conditions = vec![condition.clone(), condition];
+        let err = validate_no_duplicate_conditions(&conditions).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, message }
+            if kind == KIND && message.contains("duplicate")));
     }
 }

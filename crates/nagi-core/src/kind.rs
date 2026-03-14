@@ -3,11 +3,13 @@ use thiserror::Error;
 
 pub mod asset;
 pub mod connection;
+pub mod desired_group;
 pub mod source;
 pub mod sync;
 
 pub use asset::AssetSpec;
 pub use connection::ConnectionSpec;
+pub use desired_group::DesiredGroupSpec;
 pub use source::SourceSpec;
 pub use sync::SyncSpec;
 
@@ -42,6 +44,10 @@ pub enum NagiKind {
         metadata: Metadata,
         spec: AssetSpec,
     },
+    DesiredGroup {
+        metadata: Metadata,
+        spec: DesiredGroupSpec,
+    },
     Sync {
         metadata: Metadata,
         spec: SyncSpec,
@@ -54,6 +60,7 @@ impl NagiKind {
             NagiKind::Connection { metadata, .. } => metadata,
             NagiKind::Source { metadata, .. } => metadata,
             NagiKind::Asset { metadata, .. } => metadata,
+            NagiKind::DesiredGroup { metadata, .. } => metadata,
             NagiKind::Sync { metadata, .. } => metadata,
         }
     }
@@ -63,6 +70,7 @@ impl NagiKind {
             NagiKind::Connection { .. } => connection::KIND,
             NagiKind::Source { .. } => source::KIND,
             NagiKind::Asset { .. } => asset::KIND,
+            NagiKind::DesiredGroup { .. } => desired_group::KIND,
             NagiKind::Sync { .. } => sync::KIND,
         }
     }
@@ -78,6 +86,7 @@ impl NagiKind {
             NagiKind::Connection { spec, .. } => spec.validate(),
             NagiKind::Source { spec, .. } => spec.validate(),
             NagiKind::Asset { spec, .. } => spec.validate(),
+            NagiKind::DesiredGroup { spec, .. } => spec.validate(),
             NagiKind::Sync { spec, .. } => spec.validate(),
         }
     }
@@ -153,7 +162,7 @@ metadata:
 spec:
   sources:
     - ref: raw-sales
-  desired:
+  desiredSets:
     - type: Freshness
       maxAge: 24h
       interval: 6h

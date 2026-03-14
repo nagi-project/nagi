@@ -3,7 +3,9 @@ use tokio::process::Command;
 use super::{ConditionStatus, EvaluateError};
 
 pub(super) async fn evaluate_command(run: &[String]) -> Result<ConditionStatus, EvaluateError> {
-    let (program, args) = run.split_first().expect("run must not be empty; validated at parse time");
+    let (program, args) = run
+        .split_first()
+        .expect("run must not be empty; validated at parse time");
     let status = Command::new(program)
         .args(args)
         .status()
@@ -12,7 +14,10 @@ pub(super) async fn evaluate_command(run: &[String]) -> Result<ConditionStatus, 
     if status.success() {
         Ok(ConditionStatus::Ready)
     } else {
-        let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".to_string());
+        let code = status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "signal".to_string());
         Ok(ConditionStatus::NotReady {
             reason: format!("'{}' exited with code {code}", program),
         })
