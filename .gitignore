@@ -20,6 +20,23 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# IDE
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+.venv/
+
+# maturin build artifacts
+*.so
+*.dylib
+*.pyd
+*.dSYM/
+
 # Project docs (kept locally, excluded from repo)
 CLAUDE.md
 project_spec.md
