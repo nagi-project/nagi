@@ -89,6 +89,21 @@ impl DbtProfilesFile {
         names
     }
 
+    /// Returns profile information as (name, default_target, targets) tuples, sorted by name.
+    pub fn profiles_info(&self) -> Vec<(&str, &str, Vec<&str>)> {
+        let mut info: Vec<_> = self
+            .profiles
+            .iter()
+            .map(|(name, p)| {
+                let mut targets: Vec<&str> = p.outputs.keys().map(|s| s.as_str()).collect();
+                targets.sort();
+                (name.as_str(), p.default_target.as_str(), targets)
+            })
+            .collect();
+        info.sort_by_key(|(name, _, _)| *name);
+        info
+    }
+
     /// Resolves the output config for the given profile and optional target.
     /// Falls back to the profile's default target when `target` is `None`.
     pub fn resolve(
@@ -198,5 +213,18 @@ other_project:
     fn rejects_invalid_yaml() {
         let result = DbtProfilesFile::parse_str("{ invalid: yaml: here }");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn profiles_info_returns_sorted_tuples() {
+        let f = DbtProfilesFile::parse_str(PROFILES_YAML).unwrap();
+        let info = f.profiles_info();
+        assert_eq!(info.len(), 2);
+        assert_eq!(info[0].0, "my_project");
+        assert_eq!(info[0].1, "dev");
+        assert_eq!(info[0].2, vec!["dev", "prod"]);
+        assert_eq!(info[1].0, "other_project");
+        assert_eq!(info[1].1, "staging");
+        assert_eq!(info[1].2, vec!["staging"]);
     }
 }

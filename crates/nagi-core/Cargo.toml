@@ -3,6 +3,10 @@ name = "nagi-core"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "nagi_core"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
@@ -16,3 +20,11 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 jsonwebtoken = "10"
+pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+
+[dev-dependencies]
+tempfile = "3"
