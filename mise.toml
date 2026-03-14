@@ -1,0 +1,30 @@
+[tools]
+uv = "latest"
+
+[tasks.build]
+description = "Build Python package with maturin (creates .venv, installs dependencies, builds nagi CLI)"
+run = "uv sync"
+
+[tasks.check-rust]
+description = "Run fmt, clippy, and test for Rust"
+run = """
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+"""
+
+[tasks.check-python]
+description = "Run ruff and ty on Python code"
+run = """
+uv run ruff check python/
+uv run ruff format --check python/
+uv run ty check python/
+"""
+
+[tasks.check]
+description = "Run all checks (Rust then Python)"
+depends = ["check-rust", "check-python"]
+
+[tasks.audit]
+description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
+run = "cargo audit"
