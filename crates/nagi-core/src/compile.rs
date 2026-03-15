@@ -322,8 +322,7 @@ fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Compile
         std::fs::write(assets_dir.join(format!("{}.yaml", metadata.name)), yaml)?;
     }
 
-    let graph_json = serde_json::to_string_pretty(&output.graph)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let graph_json = serde_json::to_string_pretty(&output.graph).map_err(std::io::Error::other)?;
     std::fs::write(target_dir.join("graph.json"), graph_json)?;
 
     Ok(())
@@ -617,7 +616,9 @@ spec:
         let content = std::fs::read_to_string(&yaml_path).unwrap();
         let kinds = parse_kinds(&content).unwrap();
         assert_eq!(kinds.len(), 1);
-        assert!(matches!(&kinds[0], NagiKind::Asset { metadata, .. } if metadata.name == "daily-sales"));
+        assert!(
+            matches!(&kinds[0], NagiKind::Asset { metadata, .. } if metadata.name == "daily-sales")
+        );
     }
 
     #[test]
