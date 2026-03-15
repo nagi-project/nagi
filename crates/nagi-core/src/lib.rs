@@ -1,3 +1,4 @@
+pub mod compile;
 pub mod cron;
 pub mod db;
 pub mod dbt_profile;
