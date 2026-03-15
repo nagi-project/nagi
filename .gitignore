@@ -38,5 +38,6 @@ dist/
 *.dSYM/
 
 # Project docs (kept locally, excluded from repo)
+AGENTS.md
 CLAUDE.md
 project_spec.md
