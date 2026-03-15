@@ -7,6 +7,7 @@ use thiserror::Error;
 use crate::kind::asset::{
     validate_no_duplicate_conditions, AssetSpec, DesiredCondition, DesiredSetEntry,
 };
+use crate::kind::sync::SyncSpec;
 use crate::kind::{self, KindError, Metadata, NagiKind};
 
 #[derive(Debug, Error)]
@@ -49,8 +50,16 @@ pub struct GraphEdge {
 
 #[derive(Debug)]
 pub struct CompileOutput {
-    pub assets: Vec<(Metadata, AssetSpec)>,
+    pub assets: Vec<ResolvedAsset>,
     pub graph: DependencyGraph,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedAsset {
+    pub metadata: Metadata,
+    pub spec: AssetSpec,
+    pub sync: Option<SyncSpec>,
+    pub resync: Option<SyncSpec>,
 }
 
 /// Compiles all YAML resources from `assets_dir` and writes resolved output to `target_dir`.
@@ -104,7 +113,7 @@ fn load_resources_recursive(
 struct CategorizedResources {
     sources: HashSet<String>,
     desired_groups: HashMap<String, Vec<DesiredCondition>>,
-    syncs: HashSet<String>,
+    syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
 }
 
@@ -113,7 +122,7 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
     let mut result = CategorizedResources {
         sources: HashSet::new(),
         desired_groups: HashMap::new(),
-        syncs: HashSet::new(),
+        syncs: HashMap::new(),
         assets: Vec::new(),
     };
 
@@ -131,10 +140,10 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
             NagiKind::DesiredGroup { spec, .. } => {
                 result.desired_groups.insert(name, spec.0.clone());
             }
-            NagiKind::Sync { .. } => {
-                result.syncs.insert(name);
+            NagiKind::Sync { spec, .. } => {
+                result.syncs.insert(name, spec);
             }
-            NagiKind::Asset { metadata, spec } => {
+            NagiKind::Asset { metadata, spec, .. } => {
                 result.assets.push((metadata, spec));
             }
         }
@@ -153,6 +162,48 @@ fn require_ref(set: &HashSet<String>, kind: &str, name: &str) -> Result<(), Comp
     Ok(())
 }
 
+fn require_sync_ref(syncs: &HashMap<String, SyncSpec>, name: &str) -> Result<(), CompileError> {
+    if !syncs.contains_key(name) {
+        return Err(CompileError::UnresolvedRef {
+            kind: "Sync".to_string(),
+            name: name.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Expands template variables in a SyncSpec's args.
+/// Supported variables: `{{ asset.name }}`, `{{ sync.<key> }}` (from `with` map).
+fn expand_sync_templates(
+    sync_spec: &SyncSpec,
+    asset_name: &str,
+    with: &HashMap<String, String>,
+) -> SyncSpec {
+    let expand_step = |step: &crate::kind::sync::SyncStep| -> crate::kind::sync::SyncStep {
+        crate::kind::sync::SyncStep {
+            step_type: step.step_type.clone(),
+            args: step
+                .args
+                .iter()
+                .map(|arg| expand_template_string(arg, asset_name, with))
+                .collect(),
+        }
+    };
+    SyncSpec {
+        pre: sync_spec.pre.as_ref().map(&expand_step),
+        run: expand_step(&sync_spec.run),
+        post: sync_spec.post.as_ref().map(&expand_step),
+    }
+}
+
+fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, String>) -> String {
+    let mut result = s.replace("{{ asset.name }}", asset_name);
+    for (key, value) in with {
+        result = result.replace(&format!("{{{{ sync.{key} }}}}"), value);
+    }
+    result
+}
+
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let CategorizedResources {
@@ -168,13 +219,29 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         for source_ref in &spec.sources {
             require_ref(&sources, "Source", &source_ref.ref_name)?;
         }
-        // Both sync and resync reference kind: Sync resources.
-        if let Some(sync_ref) = &spec.sync {
-            require_ref(&syncs, "Sync", &sync_ref.ref_name)?;
-        }
-        if let Some(resync_ref) = &spec.resync {
-            require_ref(&syncs, "Sync", &resync_ref.ref_name)?;
-        }
+        // Resolve sync and resync: validate refs and expand templates.
+        let resolved_sync = if let Some(sync_ref) = &spec.sync {
+            require_sync_ref(&syncs, &sync_ref.ref_name)?;
+            let sync_spec = &syncs[&sync_ref.ref_name];
+            Some(expand_sync_templates(
+                sync_spec,
+                &metadata.name,
+                &sync_ref.with,
+            ))
+        } else {
+            None
+        };
+        let resolved_resync = if let Some(resync_ref) = &spec.resync {
+            require_sync_ref(&syncs, &resync_ref.ref_name)?;
+            let sync_spec = &syncs[&resync_ref.ref_name];
+            Some(expand_sync_templates(
+                sync_spec,
+                &metadata.name,
+                &resync_ref.with,
+            ))
+        } else {
+            None
+        };
 
         // Expand DesiredGroup refs to inline conditions.
         let mut resolved_entries = Vec::new();
@@ -209,7 +276,12 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             .collect();
         validate_no_duplicate_conditions(&all_conditions)?;
 
-        resolved_assets.push((metadata, spec));
+        resolved_assets.push(ResolvedAsset {
+            metadata,
+            spec,
+            sync: resolved_sync,
+            resync: resolved_resync,
+        });
     }
 
     let graph = build_graph(&resolved_assets, &sources)?;
@@ -222,7 +294,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
 }
 
 fn build_graph(
-    assets: &[(Metadata, AssetSpec)],
+    assets: &[ResolvedAsset],
     sources: &HashSet<String>,
 ) -> Result<DependencyGraph, CompileError> {
     let mut nodes = Vec::new();
@@ -236,16 +308,16 @@ fn build_graph(
         });
     }
 
-    for (metadata, spec) in assets {
+    for asset in assets {
         nodes.push(GraphNode {
-            name: metadata.name.clone(),
+            name: asset.metadata.name.clone(),
             kind: "Asset".to_string(),
-            tags: spec.tags.clone(),
+            tags: asset.spec.tags.clone(),
         });
-        for source_ref in &spec.sources {
+        for source_ref in &asset.spec.sources {
             edges.push(GraphEdge {
                 from: source_ref.ref_name.clone(),
-                to: metadata.name.clone(),
+                to: asset.metadata.name.clone(),
             });
         }
     }
@@ -309,17 +381,81 @@ fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
     Ok(())
 }
 
+/// Serialization-only struct for writing compiled assets to `target/`.
+/// Embeds resolved SyncSpec directly instead of SyncRef.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompiledAssetYaml<'a> {
+    kind: &'static str,
+    metadata: &'a Metadata,
+    spec: CompiledAssetSpecYaml<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompiledAssetSpecYaml<'a> {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: &'a Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sources: &'a Vec<crate::kind::asset::SourceRef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    desired_sets: &'a Vec<DesiredSetEntry>,
+    auto_sync: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sync: &'a Option<SyncSpec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resync: &'a Option<SyncSpec>,
+}
+
+/// Deserialization struct for reading compiled asset YAML from `target/`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompiledAsset {
+    pub metadata: Metadata,
+    pub spec: CompiledAssetSpec,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompiledAssetSpec {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub sources: Vec<crate::kind::asset::SourceRef>,
+    #[serde(default)]
+    pub desired_sets: Vec<DesiredSetEntry>,
+    #[serde(default = "default_true")]
+    pub auto_sync: bool,
+    pub sync: Option<SyncSpec>,
+    pub resync: Option<SyncSpec>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), CompileError> {
     let assets_dir = target_dir.join("assets");
     std::fs::create_dir_all(&assets_dir)?;
 
-    for (metadata, spec) in &output.assets {
-        let resource = NagiKind::Asset {
-            metadata: metadata.clone(),
-            spec: spec.clone(),
+    for asset in &output.assets {
+        let compiled = CompiledAssetYaml {
+            kind: "Asset",
+            metadata: &asset.metadata,
+            spec: CompiledAssetSpecYaml {
+                tags: &asset.spec.tags,
+                sources: &asset.spec.sources,
+                desired_sets: &asset.spec.desired_sets,
+                auto_sync: asset.spec.auto_sync,
+                sync: &asset.sync,
+                resync: &asset.resync,
+            },
         };
-        let yaml = serde_yaml::to_string(&resource).map_err(KindError::YamlParse)?;
-        std::fs::write(assets_dir.join(format!("{}.yaml", metadata.name)), yaml)?;
+        let yaml = serde_yaml::to_string(&compiled).map_err(KindError::YamlParse)?;
+        std::fs::write(
+            assets_dir.join(format!("{}.yaml", asset.metadata.name)),
+            yaml,
+        )?;
     }
 
     let graph_json = serde_json::to_string_pretty(&output.graph).map_err(std::io::Error::other)?;
@@ -334,6 +470,55 @@ mod tests {
     use crate::kind::parse_kinds;
     use tempfile::TempDir;
 
+    // ── YAML fragments ──────────────────────────────────────────────────
+
+    const CONNECTION_MY_BQ: &str = "\
+kind: Connection
+metadata:
+  name: my-bq
+spec:
+  dbtProfile:
+    profile: my_project";
+
+    const SOURCE_RAW_SALES: &str = "\
+kind: Source
+metadata:
+  name: raw-sales
+spec:
+  connection: my-bq";
+
+    const SYNC_DBT_RUN: &str = "\
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
+
+    const SYNC_DBT_FULL: &str = "\
+kind: Sync
+metadata:
+  name: dbt-full
+spec:
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--full-refresh\", \"--select\", \"{{ asset.name }}\"]";
+
+    const DESIRED_GROUP_DAILY_SLA: &str = "\
+kind: DesiredGroup
+metadata:
+  name: daily-sla
+spec:
+  - type: Freshness
+    maxAge: 24h
+    interval: 6h";
+
+    /// Joins YAML documents with `---` separator.
+    fn yaml_docs(docs: &[&str]) -> String {
+        docs.join("\n---\n")
+    }
+
     fn write_yaml(dir: &Path, filename: &str, content: &str) {
         std::fs::write(dir.join(filename), content).unwrap();
     }
@@ -347,35 +532,27 @@ mod tests {
     #[test]
     fn resolve_minimal_asset() {
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   desiredSets:
     - type: SQL
-      query: "SELECT true"
-"#,
+      query: \"SELECT true\"",
         );
         let output = resolve(resources).unwrap();
         assert_eq!(output.assets.len(), 1);
-        assert_eq!(output.assets[0].0.name, "daily-sales");
+        assert_eq!(output.assets[0].metadata.name, "daily-sales");
         assert_eq!(output.graph.nodes.len(), 1);
         assert!(output.graph.edges.is_empty());
     }
 
     #[test]
     fn resolve_expands_desired_group_ref() {
-        let resources = parse(
-            r#"
-kind: DesiredGroup
-metadata:
-  name: daily-sla
-spec:
-  - type: Freshness
-    maxAge: 24h
-    interval: 6h
----
+        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
+            "\
 kind: Asset
 metadata:
   name: daily-sales
@@ -383,17 +560,16 @@ spec:
   desiredSets:
     - ref: daily-sla
     - type: SQL
-      query: "SELECT true"
-"#,
-        );
+      query: \"SELECT true\"",
+        ]));
         let output = resolve(resources).unwrap();
-        assert_eq!(output.assets[0].1.desired_sets.len(), 2);
+        assert_eq!(output.assets[0].spec.desired_sets.len(), 2);
         assert!(matches!(
-            &output.assets[0].1.desired_sets[0],
+            &output.assets[0].spec.desired_sets[0],
             DesiredSetEntry::Inline(DesiredCondition::Freshness { .. })
         ));
         assert!(matches!(
-            &output.assets[0].1.desired_sets[1],
+            &output.assets[0].spec.desired_sets[1],
             DesiredSetEntry::Inline(DesiredCondition::SQL { .. })
         ));
     }
@@ -401,14 +577,13 @@ spec:
     #[test]
     fn resolve_rejects_unresolved_source_ref() {
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   sources:
-    - ref: nonexistent-source
-"#,
+    - ref: nonexistent-source",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
@@ -418,14 +593,13 @@ spec:
     #[test]
     fn resolve_rejects_unresolved_sync_ref() {
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   sync:
-    ref: nonexistent-sync
-"#,
+    ref: nonexistent-sync",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
@@ -435,14 +609,13 @@ spec:
     #[test]
     fn resolve_rejects_unresolved_desired_group_ref() {
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   desiredSets:
-    - ref: nonexistent-group
-"#,
+    - ref: nonexistent-group",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
@@ -452,7 +625,7 @@ spec:
     #[test]
     fn resolve_rejects_duplicate_asset() {
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
@@ -463,8 +636,7 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  desiredSets: []
-"#,
+  desiredSets: []",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::DuplicateName { kind, name }
@@ -473,21 +645,10 @@ spec:
 
     #[test]
     fn resolve_builds_dependency_graph() {
-        let resources = parse(
-            r#"
-kind: Connection
-metadata:
-  name: my-bq
-spec:
-  dbtProfile:
-    profile: my_project
----
-kind: Source
-metadata:
-  name: raw-sales
-spec:
-  connection: my-bq
----
+        let resources = parse(&yaml_docs(&[
+            CONNECTION_MY_BQ,
+            SOURCE_RAW_SALES,
+            "\
 kind: Asset
 metadata:
   name: daily-sales
@@ -497,9 +658,8 @@ spec:
     - ref: raw-sales
   desiredSets:
     - type: SQL
-      query: "SELECT true"
-"#,
-        );
+      query: \"SELECT true\"",
+        ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.graph.nodes.len(), 2);
 
@@ -518,15 +678,15 @@ spec:
 
     #[test]
     fn resolve_rejects_duplicate_conditions_after_expansion() {
-        let resources = parse(
-            r#"
+        let resources = parse(&yaml_docs(&[
+            "\
 kind: DesiredGroup
 metadata:
   name: my-checks
 spec:
   - type: SQL
-    query: "SELECT true"
----
+    query: \"SELECT true\"",
+            "\
 kind: Asset
 metadata:
   name: daily-sales
@@ -534,25 +694,24 @@ spec:
   desiredSets:
     - ref: my-checks
     - type: SQL
-      query: "SELECT true"
-"#,
-        );
+      query: \"SELECT true\"",
+        ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::Kind(_)));
     }
 
     #[test]
     fn resolve_validates_sync_and_resync_refs() {
-        let resources = parse(
-            r#"
+        let resources = parse(&yaml_docs(&[
+            "\
 kind: Sync
 metadata:
   name: dbt-default
 spec:
   run:
     type: Command
-    args: ["dbt", "run", "--select", "{{ asset.name }}"]
----
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]",
+            "\
 kind: Asset
 metadata:
   name: daily-sales
@@ -560,32 +719,200 @@ spec:
   sync:
     ref: dbt-default
   resync:
-    ref: dbt-default
-"#,
-        );
+    ref: dbt-default",
+        ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.assets.len(), 1);
         assert_eq!(
-            output.assets[0].1.sync.as_ref().unwrap().ref_name,
+            output.assets[0].spec.sync.as_ref().unwrap().ref_name,
             "dbt-default"
+        );
+        let resolved = &output.assets[0];
+        assert_eq!(
+            resolved.sync.as_ref().unwrap().run.args,
+            vec!["dbt", "run", "--select", "daily-sales"]
+        );
+        assert_eq!(
+            resolved.resync.as_ref().unwrap().run.args,
+            vec!["dbt", "run", "--select", "daily-sales"]
         );
     }
 
     #[test]
     fn resolve_rejects_unresolved_resync_ref() {
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   resync:
-    ref: nonexistent-sync
-"#,
+    ref: nonexistent-sync",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
             if kind == "Sync" && name == "nonexistent-sync"));
+    }
+
+    // ── sync template expansion tests ──────────────────────────────────────
+
+    #[test]
+    fn resolve_expands_asset_name_in_sync() {
+        let resources = parse(&yaml_docs(&[
+            SYNC_DBT_RUN,
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  sync:
+    ref: dbt-run",
+        ]));
+        let output = resolve(resources).unwrap();
+        let resolved = &output.assets[0];
+        assert_eq!(
+            resolved.sync.as_ref().unwrap().run.args,
+            vec!["dbt", "run", "--select", "daily-sales"]
+        );
+    }
+
+    #[test]
+    fn resolve_expands_with_variables_in_sync() {
+        let resources = parse(&yaml_docs(&[
+            "\
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ sync.selector }}\"]",
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  sync:
+    ref: dbt-run
+    with:
+      selector: \"+daily_sales\"",
+        ]));
+        let output = resolve(resources).unwrap();
+        let resolved = &output.assets[0];
+        assert_eq!(
+            resolved.sync.as_ref().unwrap().run.args,
+            vec!["dbt", "run", "--select", "+daily_sales"]
+        );
+    }
+
+    #[test]
+    fn resolve_expands_templates_in_all_steps() {
+        let resources = parse(&yaml_docs(&[
+            "\
+kind: Sync
+metadata:
+  name: full-sync
+spec:
+  pre:
+    type: Command
+    args: [\"echo\", \"pre-{{ asset.name }}\"]
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]
+  post:
+    type: Command
+    args: [\"echo\", \"post-{{ asset.name }}\"]",
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  sync:
+    ref: full-sync",
+        ]));
+        let output = resolve(resources).unwrap();
+        let resolved = &output.assets[0];
+        let sync = resolved.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.pre.as_ref().unwrap().args,
+            vec!["echo", "pre-daily-sales"]
+        );
+        assert_eq!(sync.run.args, vec!["dbt", "run", "--select", "daily-sales"]);
+        assert_eq!(
+            sync.post.as_ref().unwrap().args,
+            vec!["echo", "post-daily-sales"]
+        );
+    }
+
+    #[test]
+    fn resolve_expands_resync_separately() {
+        let resources = parse(&yaml_docs(&[
+            SYNC_DBT_RUN,
+            SYNC_DBT_FULL,
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  sync:
+    ref: dbt-run
+  resync:
+    ref: dbt-full",
+        ]));
+        let output = resolve(resources).unwrap();
+        let resolved = &output.assets[0];
+        assert_eq!(
+            resolved.sync.as_ref().unwrap().run.args,
+            vec!["dbt", "run", "--select", "daily-sales"]
+        );
+        assert_eq!(
+            resolved.resync.as_ref().unwrap().run.args,
+            vec!["dbt", "run", "--full-refresh", "--select", "daily-sales"]
+        );
+    }
+
+    #[test]
+    fn resolve_no_sync_no_resolved_syncs() {
+        let resources = parse(
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  desiredSets:
+    - type: SQL
+      query: \"SELECT true\"",
+        );
+        let output = resolve(resources).unwrap();
+        assert!(output.assets[0].sync.is_none());
+        assert!(output.assets[0].resync.is_none());
+    }
+
+    #[test]
+    fn resolve_combines_asset_name_and_with_variables() {
+        let resources = parse(&yaml_docs(&[
+            "\
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ sync.selector }}\", \"--vars\", \"name={{ asset.name }}\"]",
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  sync:
+    ref: dbt-run
+    with:
+      selector: \"+daily_sales\"",
+        ]));
+        let output = resolve(resources).unwrap();
+        let args = &output.assets[0].sync.as_ref().unwrap().run.args;
+        assert_eq!(args[3], "+daily_sales");
+        assert_eq!(args[5], "name=daily-sales");
     }
 
     // ── write_output tests ────────────────────────────────────────────────
@@ -596,15 +923,14 @@ spec:
         let target = tmp.path().join("target");
 
         let resources = parse(
-            r#"
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   desiredSets:
     - type: SQL
-      query: "SELECT true"
-"#,
+      query: \"SELECT true\"",
         );
         let output = resolve(resources).unwrap();
         write_output(&output, &target).unwrap();
@@ -612,7 +938,6 @@ spec:
         let yaml_path = target.join("assets/daily-sales.yaml");
         assert!(yaml_path.exists());
 
-        // Verify the written YAML is parseable and contains the resolved asset.
         let content = std::fs::read_to_string(&yaml_path).unwrap();
         let kinds = parse_kinds(&content).unwrap();
         assert_eq!(kinds.len(), 1);
@@ -626,22 +951,16 @@ spec:
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("target");
 
-        let resources = parse(
-            r#"
-kind: Source
-metadata:
-  name: raw-sales
-spec:
-  connection: my-bq
----
+        let resources = parse(&yaml_docs(&[
+            SOURCE_RAW_SALES,
+            "\
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   sources:
-    - ref: raw-sales
-"#,
-        );
+    - ref: raw-sales",
+        ]));
         let output = resolve(resources).unwrap();
         write_output(&output, &target).unwrap();
 
@@ -651,6 +970,33 @@ spec:
         assert_eq!(graph.edges.len(), 1);
         assert_eq!(graph.edges[0].from, "raw-sales");
         assert_eq!(graph.edges[0].to, "daily-sales");
+    }
+
+    #[test]
+    fn write_output_embeds_resolved_sync_in_asset_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("target");
+
+        let resources = parse(&yaml_docs(&[
+            SYNC_DBT_RUN,
+            "\
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  sync:
+    ref: dbt-run",
+        ]));
+        let output = resolve(resources).unwrap();
+        write_output(&output, &target).unwrap();
+
+        let content = std::fs::read_to_string(target.join("assets/daily-sales.yaml")).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+        let sync_args = &value["spec"]["sync"]["run"]["args"];
+        let args: Vec<String> = serde_yaml::from_value(sync_args.clone()).unwrap();
+        assert_eq!(args, vec!["dbt", "run", "--select", "daily-sales"]);
+        // No separate syncs/ directory.
+        assert!(!target.join("syncs").exists());
     }
 
     // ── load_resources tests ──────────────────────────────────────────────
@@ -665,15 +1011,14 @@ spec:
         write_yaml(
             &subdir,
             "asset.yaml",
-            r#"
+            "\
 kind: Asset
 metadata:
   name: nested-asset
 spec:
   desiredSets:
     - type: SQL
-      query: "SELECT true"
-"#,
+      query: \"SELECT true\"",
         );
 
         let resources = load_resources(&assets).unwrap();
@@ -699,13 +1044,12 @@ spec:
         write_yaml(
             &assets,
             "asset.yaml",
-            r#"
+            "\
 kind: Asset
 metadata:
   name: my-asset
 spec:
-  desiredSets: []
-"#,
+  desiredSets: []",
         );
 
         #[cfg(unix)]

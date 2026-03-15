@@ -7,7 +7,7 @@ use crate::db::bigquery::{BigQueryConfig, BigQueryConnection};
 use crate::db::Connection;
 use crate::dbt_profile::DbtProfilesFile;
 use crate::evaluate;
-use crate::kind::{self, NagiKind};
+use crate::kind;
 use crate::storage::local::LocalCache;
 use crate::storage::Cache;
 
@@ -76,7 +76,7 @@ pub fn test_connection(profile: &str, target: Option<&str>) -> PyResult<String> 
 }
 
 /// Evaluates an asset's desired conditions and writes the result to cache.
-/// `yaml` is the full YAML string for the asset resource.
+/// `yaml` is the compiled asset YAML string from `target/assets/`.
 /// `profile` and `target` identify the dbt profile for the DB connection.
 /// `cache_dir` is optional; defaults to `~/.nagi/cache/`.
 /// Returns the evaluation result as JSON.
@@ -88,14 +88,16 @@ pub fn evaluate_asset(
     target: Option<&str>,
     cache_dir: Option<&str>,
 ) -> PyResult<String> {
-    let kinds = kind::parse_kinds(yaml).map_err(to_py_err)?;
-    let (asset_name, asset_spec) = kinds
-        .iter()
-        .find_map(|k| match k {
-            NagiKind::Asset { metadata, spec } => Some((metadata.name.clone(), spec.clone())),
-            _ => None,
-        })
-        .ok_or_else(|| PyRuntimeError::new_err("no Asset resource found in YAML"))?;
+    let compiled: crate::compile::CompiledAsset = serde_yaml::from_str(yaml).map_err(to_py_err)?;
+    let asset_name = compiled.metadata.name;
+    let asset_spec = crate::kind::asset::AssetSpec {
+        tags: compiled.spec.tags,
+        sources: compiled.spec.sources,
+        desired_sets: compiled.spec.desired_sets,
+        auto_sync: compiled.spec.auto_sync,
+        sync: None,
+        resync: None,
+    };
 
     // Resolve connection from the first Connection resource in the YAML,
     // or fall back to the provided profile/target.
@@ -137,19 +139,19 @@ pub fn read_cache(asset_name: &str, cache_dir: Option<&str>) -> PyResult<Option<
 }
 
 /// Returns a dry-run summary of what evaluate would execute, without running anything.
-/// `yaml` is the full YAML string for the asset resource.
+/// `yaml` is the compiled asset YAML string from `target/assets/`.
 #[pyfunction]
 pub fn dry_run_asset(yaml: &str) -> PyResult<String> {
-    let kinds = kind::parse_kinds(yaml).map_err(to_py_err)?;
-    let (asset_name, asset_spec) = kinds
-        .iter()
-        .find_map(|k| match k {
-            NagiKind::Asset { metadata, spec } => Some((metadata.name.clone(), spec.clone())),
-            _ => None,
-        })
-        .ok_or_else(|| PyRuntimeError::new_err("no Asset resource found in YAML"))?;
-
-    let result = evaluate::dry_run_asset(&asset_name, &asset_spec);
+    let compiled: crate::compile::CompiledAsset = serde_yaml::from_str(yaml).map_err(to_py_err)?;
+    let asset_spec = crate::kind::asset::AssetSpec {
+        tags: compiled.spec.tags,
+        sources: compiled.spec.sources,
+        desired_sets: compiled.spec.desired_sets,
+        auto_sync: compiled.spec.auto_sync,
+        sync: None,
+        resync: None,
+    };
+    let result = evaluate::dry_run_asset(&compiled.metadata.name, &asset_spec);
     serde_json::to_string(&result).map_err(to_py_err)
 }
 
