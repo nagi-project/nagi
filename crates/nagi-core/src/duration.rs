@@ -3,28 +3,36 @@ use std::time::Duration as StdDuration;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A duration parsed from a human-readable string (e.g. "24h", "30m", "1h30m").
-/// Uses `humantime` format. Fails at deserialization time if the string is invalid.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Duration(StdDuration);
+/// Uses `humantime` format. Preserves the original string for serialization.
+#[derive(Debug, Clone)]
+pub struct Duration {
+    inner: StdDuration,
+    raw: String,
+}
 
 impl Duration {
     pub fn as_std(&self) -> StdDuration {
-        self.0
+        self.inner
+    }
+}
+
+impl PartialEq for Duration {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 
 impl<'de> Deserialize<'de> for Duration {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        humantime::parse_duration(&s)
-            .map(Duration)
-            .map_err(serde::de::Error::custom)
+        let inner = humantime::parse_duration(&s).map_err(serde::de::Error::custom)?;
+        Ok(Duration { inner, raw: s })
     }
 }
 
 impl Serialize for Duration {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&humantime::format_duration(self.0).to_string())
+        serializer.serialize_str(&self.raw)
     }
 }
 
@@ -67,10 +75,9 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip() {
-        let w = Wrapper {
-            d: Duration(StdDuration::from_secs(24 * 3600)),
-        };
+        let w: Wrapper = serde_yaml::from_str("d: 24h").unwrap();
         let yaml = serde_yaml::to_string(&w).unwrap();
+        assert!(yaml.contains("24h"));
         let w2: Wrapper = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(w.d, w2.d);
     }
