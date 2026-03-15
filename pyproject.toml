@@ -29,7 +29,7 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "ANN"]
 
 [[tool.ty.overrides]]
-include = ["python/nagi_cli/commands/*.py"]
+include = ["python/nagi_cli/commands/*.py", "python/tests/*.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

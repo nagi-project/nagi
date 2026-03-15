@@ -1,31 +1,53 @@
 from pathlib import Path
 
+# Resource names
+CONNECTION_NAME = "my-bq"
+SOURCE_NAME = "raw-sales"
+ASSET_NAME = "daily-sales"
+SYNC_NAME = "dbt-sync"
+
+# Asset spec values
+FRESHNESS_MAX_AGE = "24h"
+FRESHNESS_INTERVAL = "6h"
+FRESHNESS_COLUMN = "updated_at"
+
 CONNECTION_YAML = (
     "kind: Connection\n"
     "metadata:\n"
-    "  name: my-bq\n"
+    f"  name: {CONNECTION_NAME}\n"
     "spec:\n"
     "  dbtProfile:\n"
     "    profile: my_project\n"
 )
 
-SOURCE_YAML = "kind: Source\nmetadata:\n  name: raw-sales\nspec:\n  connection: my-bq\n"
+SOURCE_YAML = (
+    "kind: Source\n"
+    "metadata:\n"
+    f"  name: {SOURCE_NAME}\n"
+    "spec:\n"
+    f"  connection: {CONNECTION_NAME}\n"
+)
 
 ASSET_YAML = (
     "kind: Asset\n"
     "metadata:\n"
-    "  name: daily-sales\n"
+    f"  name: {ASSET_NAME}\n"
     "spec:\n"
     "  sources:\n"
-    "    - ref: raw-sales\n"
+    f"    - ref: {SOURCE_NAME}\n"
+    "  desiredSets:\n"
+    "    - type: Freshness\n"
+    f"      maxAge: {FRESHNESS_MAX_AGE}\n"
+    f"      interval: {FRESHNESS_INTERVAL}\n"
+    f"      column: {FRESHNESS_COLUMN}\n"
     "  sync:\n"
-    "    ref: dbt-sync\n"
+    f"    ref: {SYNC_NAME}\n"
 )
 
 SYNC_YAML = (
     "kind: Sync\n"
     "metadata:\n"
-    "  name: dbt-sync\n"
+    f"  name: {SYNC_NAME}\n"
     "spec:\n"
     "  run:\n"
     "    type: Command\n"

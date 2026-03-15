@@ -5,7 +5,7 @@ import pytest
 from click.testing import CliRunner
 
 from nagi_cli.commands.compile import compile
-from tests.helper import SYNC_YAML, write_valid_assets
+from tests.helper import ASSET_NAME, SYNC_YAML, write_valid_assets
 
 
 class TestCompileSuccess:
@@ -44,7 +44,7 @@ class TestCompileSuccess:
         "expected_path",
         [
             "graph.json",
-            "assets/daily-sales.yaml",
+            f"assets/{ASSET_NAME}.yaml",
         ],
     )
     def test_creates_target_files(self, tmp_path: Path, expected_path: str) -> None:
