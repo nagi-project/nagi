@@ -5,6 +5,7 @@ pub mod dbt_profile;
 pub mod duration;
 pub mod evaluate;
 pub mod kind;
+pub mod select;
 pub mod storage;
 
 #[cfg(feature = "python")]
