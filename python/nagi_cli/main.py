@@ -1,5 +1,6 @@
 import click
 
+from nagi_cli.commands.compile import compile
 from nagi_cli.commands.evaluate import evaluate
 from nagi_cli.commands.init import init
 
@@ -10,6 +11,7 @@ def cli() -> None:
 
 
 cli.add_command(init)
+cli.add_command(compile)
 cli.add_command(evaluate)
 
 
