@@ -136,6 +136,25 @@ pub fn read_cache(asset_name: &str, cache_dir: Option<&str>) -> PyResult<Option<
     }
 }
 
+/// Compiles assets from `assets_dir` into `target_dir`.
+/// Returns the dependency graph as a JSON string.
+#[pyfunction]
+pub fn compile_assets(assets_dir: &str, target_dir: &str) -> PyResult<String> {
+    let output = crate::compile::compile(std::path::Path::new(assets_dir)).map_err(to_py_err)?;
+    crate::compile::write_output(&output, std::path::Path::new(target_dir)).map_err(to_py_err)?;
+    serde_json::to_string(&output.graph).map_err(to_py_err)
+}
+
+/// Selects asset names from a dependency graph JSON using dbt-compatible selector expressions.
+/// Returns a JSON array of selected asset names.
+#[pyfunction]
+pub fn select_assets(graph_json: &str, selectors: Vec<&str>) -> PyResult<String> {
+    let graph: crate::compile::DependencyGraph =
+        serde_json::from_str(graph_json).map_err(to_py_err)?;
+    let selected = crate::select::select_assets(&graph, &selectors).map_err(to_py_err)?;
+    serde_json::to_string(&selected).map_err(to_py_err)
+}
+
 /// Lists all cached evaluation results.
 /// Returns JSON array.
 #[pyfunction]

@@ -309,7 +309,7 @@ fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
     Ok(())
 }
 
-fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), CompileError> {
+pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), CompileError> {
     let assets_dir = target_dir.join("assets");
     std::fs::create_dir_all(&assets_dir)?;
 
