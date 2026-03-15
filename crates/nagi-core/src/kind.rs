@@ -13,6 +13,8 @@ pub use desired_group::DesiredGroupSpec;
 pub use source::SourceSpec;
 pub use sync::SyncSpec;
 
+pub const API_VERSION: &str = "nagi.io/v1alpha1";
+
 #[derive(Debug, Error)]
 pub enum KindError {
     #[error("failed to parse YAML: {0}")]
@@ -20,6 +22,9 @@ pub enum KindError {
 
     #[error("invalid spec for kind {kind}: {message}")]
     InvalidSpec { kind: String, message: String },
+
+    #[error("unsupported apiVersion '{version}': expected '{expected}'")]
+    UnsupportedApiVersion { version: String, expected: String },
 }
 
 /// Common metadata shared by all resource kinds.
@@ -29,32 +34,53 @@ pub struct Metadata {
 }
 
 /// A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention.
+/// Includes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum NagiKind {
     Connection {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
         metadata: Metadata,
         spec: ConnectionSpec,
     },
     Source {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
         metadata: Metadata,
         spec: SourceSpec,
     },
     Asset {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
         metadata: Metadata,
         spec: AssetSpec,
     },
     DesiredGroup {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
         metadata: Metadata,
         spec: DesiredGroupSpec,
     },
     Sync {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
         metadata: Metadata,
         spec: SyncSpec,
     },
 }
 
 impl NagiKind {
+    pub fn api_version(&self) -> &str {
+        match self {
+            NagiKind::Connection { api_version, .. } => api_version,
+            NagiKind::Source { api_version, .. } => api_version,
+            NagiKind::Asset { api_version, .. } => api_version,
+            NagiKind::DesiredGroup { api_version, .. } => api_version,
+            NagiKind::Sync { api_version, .. } => api_version,
+        }
+    }
+
     pub fn metadata(&self) -> &Metadata {
         match self {
             NagiKind::Connection { metadata, .. } => metadata,
@@ -76,6 +102,13 @@ impl NagiKind {
     }
 
     pub fn validate(&self) -> Result<(), KindError> {
+        let version = self.api_version();
+        if version != API_VERSION {
+            return Err(KindError::UnsupportedApiVersion {
+                version: version.to_string(),
+                expected: API_VERSION.to_string(),
+            });
+        }
         let name = &self.metadata().name;
         if name.is_empty() {
             return Err(KindError::InvalidSpec {
@@ -123,6 +156,7 @@ mod tests {
     #[test]
     fn parse_connection_resource() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Connection
 metadata:
   name: my-bigquery
@@ -145,6 +179,7 @@ spec:
     #[test]
     fn parse_source_resource() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Source
 metadata:
   name: raw-sales
@@ -163,6 +198,7 @@ spec:
     #[test]
     fn parse_asset_resource() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -184,6 +220,7 @@ spec:
     #[test]
     fn parse_sync_resource() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: dbt-default
@@ -200,6 +237,7 @@ spec:
     #[test]
     fn parse_multiple_resources() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Connection
 metadata:
   name: my-bigquery
@@ -207,6 +245,7 @@ spec:
   dbtProfile:
     profile: my_project
 ---
+apiVersion: nagi.io/v1alpha1
 kind: Source
 metadata:
   name: raw-sales
@@ -222,6 +261,7 @@ spec:
     #[test]
     fn parse_kind_rejects_empty_name() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Source
 metadata:
   name: ""
@@ -242,6 +282,7 @@ spec:
         for (name, desc) in cases {
             let yaml = format!(
                 r#"
+apiVersion: nagi.io/v1alpha1
 kind: Source
 metadata:
   name: "{name}"
@@ -257,6 +298,7 @@ spec:
         }
         // Backslash tested via direct construction to avoid YAML escape issues.
         let resource = NagiKind::Source {
+            api_version: API_VERSION.to_string(),
             metadata: Metadata {
                 name: "foo\\bar".to_string(),
             },
@@ -271,6 +313,7 @@ spec:
     #[test]
     fn metadata_accessor_works_for_all_kinds() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: my-sync
@@ -281,5 +324,32 @@ spec:
 "#;
         let resource = parse_kind(yaml).unwrap();
         assert_eq!(resource.metadata().name, "my-sync");
+    }
+
+    #[test]
+    fn parse_kind_rejects_unsupported_api_version() {
+        let yaml = r#"
+apiVersion: nagi.io/v2
+kind: Source
+metadata:
+  name: raw-sales
+spec:
+  connection: my-bq
+"#;
+        let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::UnsupportedApiVersion { .. }));
+    }
+
+    #[test]
+    fn parse_kind_rejects_missing_api_version() {
+        let yaml = r#"
+kind: Source
+metadata:
+  name: raw-sales
+spec:
+  connection: my-bq
+"#;
+        let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::YamlParse(_)));
     }
 }

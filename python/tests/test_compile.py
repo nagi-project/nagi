@@ -82,6 +82,7 @@ class TestCompileFailure:
         assets_dir = tmp_path / "assets"
         assets_dir.mkdir()
         (assets_dir / "asset.yaml").write_text(
+            "apiVersion: nagi.io/v1alpha1\n"
             "kind: Asset\n"
             "metadata:\n"
             "  name: broken\n"

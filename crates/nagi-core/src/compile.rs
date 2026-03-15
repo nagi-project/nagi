@@ -386,6 +386,7 @@ fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CompiledAssetYaml<'a> {
+    api_version: &'static str,
     kind: &'static str,
     metadata: &'a Metadata,
     spec: CompiledAssetSpecYaml<'a>,
@@ -411,6 +412,7 @@ struct CompiledAssetSpecYaml<'a> {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompiledAsset {
+    pub api_version: String,
     pub metadata: Metadata,
     pub spec: CompiledAssetSpec,
 }
@@ -440,6 +442,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
 
     for asset in &output.assets {
         let compiled = CompiledAssetYaml {
+            api_version: kind::API_VERSION,
             kind: "Asset",
             metadata: &asset.metadata,
             spec: CompiledAssetSpecYaml {
@@ -473,6 +476,7 @@ mod tests {
     // ── YAML fragments ──────────────────────────────────────────────────
 
     const CONNECTION_MY_BQ: &str = "\
+apiVersion: nagi.io/v1alpha1
 kind: Connection
 metadata:
   name: my-bq
@@ -481,6 +485,7 @@ spec:
     profile: my_project";
 
     const SOURCE_RAW_SALES: &str = "\
+apiVersion: nagi.io/v1alpha1
 kind: Source
 metadata:
   name: raw-sales
@@ -488,6 +493,7 @@ spec:
   connection: my-bq";
 
     const SYNC_DBT_RUN: &str = "\
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: dbt-run
@@ -497,6 +503,7 @@ spec:
     args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
 
     const SYNC_DBT_FULL: &str = "\
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: dbt-full
@@ -506,6 +513,7 @@ spec:
     args: [\"dbt\", \"run\", \"--full-refresh\", \"--select\", \"{{ asset.name }}\"]";
 
     const DESIRED_GROUP_DAILY_SLA: &str = "\
+apiVersion: nagi.io/v1alpha1
 kind: DesiredGroup
 metadata:
   name: daily-sla
@@ -533,6 +541,7 @@ spec:
     fn resolve_minimal_asset() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -553,6 +562,7 @@ spec:
         let resources = parse(&yaml_docs(&[
             DESIRED_GROUP_DAILY_SLA,
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -578,6 +588,7 @@ spec:
     fn resolve_rejects_unresolved_source_ref() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -594,6 +605,7 @@ spec:
     fn resolve_rejects_unresolved_sync_ref() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -610,6 +622,7 @@ spec:
     fn resolve_rejects_unresolved_desired_group_ref() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -626,12 +639,14 @@ spec:
     fn resolve_rejects_duplicate_asset() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
   desiredSets: []
 ---
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -649,6 +664,7 @@ spec:
             CONNECTION_MY_BQ,
             SOURCE_RAW_SALES,
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -680,6 +696,7 @@ spec:
     fn resolve_rejects_duplicate_conditions_after_expansion() {
         let resources = parse(&yaml_docs(&[
             "\
+apiVersion: nagi.io/v1alpha1
 kind: DesiredGroup
 metadata:
   name: my-checks
@@ -687,6 +704,7 @@ spec:
   - type: SQL
     query: \"SELECT true\"",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -704,6 +722,7 @@ spec:
     fn resolve_validates_sync_and_resync_refs() {
         let resources = parse(&yaml_docs(&[
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: dbt-default
@@ -712,6 +731,7 @@ spec:
     type: Command
     args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -742,6 +762,7 @@ spec:
     fn resolve_rejects_unresolved_resync_ref() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -761,6 +782,7 @@ spec:
         let resources = parse(&yaml_docs(&[
             SYNC_DBT_RUN,
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -780,6 +802,7 @@ spec:
     fn resolve_expands_with_variables_in_sync() {
         let resources = parse(&yaml_docs(&[
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: dbt-run
@@ -788,6 +811,7 @@ spec:
     type: Command
     args: [\"dbt\", \"run\", \"--select\", \"{{ sync.selector }}\"]",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -809,6 +833,7 @@ spec:
     fn resolve_expands_templates_in_all_steps() {
         let resources = parse(&yaml_docs(&[
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: full-sync
@@ -823,6 +848,7 @@ spec:
     type: Command
     args: [\"echo\", \"post-{{ asset.name }}\"]",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -850,6 +876,7 @@ spec:
             SYNC_DBT_RUN,
             SYNC_DBT_FULL,
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -875,6 +902,7 @@ spec:
     fn resolve_no_sync_no_resolved_syncs() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -892,6 +920,7 @@ spec:
     fn resolve_combines_asset_name_and_with_variables() {
         let resources = parse(&yaml_docs(&[
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Sync
 metadata:
   name: dbt-run
@@ -900,6 +929,7 @@ spec:
     type: Command
     args: [\"dbt\", \"run\", \"--select\", \"{{ sync.selector }}\", \"--vars\", \"name={{ asset.name }}\"]",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -924,6 +954,7 @@ spec:
 
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -954,6 +985,7 @@ spec:
         let resources = parse(&yaml_docs(&[
             SOURCE_RAW_SALES,
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -980,6 +1012,7 @@ spec:
         let resources = parse(&yaml_docs(&[
             SYNC_DBT_RUN,
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
@@ -1012,6 +1045,7 @@ spec:
             &subdir,
             "asset.yaml",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: nested-asset
@@ -1045,6 +1079,7 @@ spec:
             &assets,
             "asset.yaml",
             "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-asset

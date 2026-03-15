@@ -12,6 +12,7 @@ FRESHNESS_INTERVAL = "6h"
 FRESHNESS_COLUMN = "updated_at"
 
 CONNECTION_YAML = (
+    "apiVersion: nagi.io/v1alpha1\n"
     "kind: Connection\n"
     "metadata:\n"
     f"  name: {CONNECTION_NAME}\n"
@@ -21,6 +22,7 @@ CONNECTION_YAML = (
 )
 
 SOURCE_YAML = (
+    "apiVersion: nagi.io/v1alpha1\n"
     "kind: Source\n"
     "metadata:\n"
     f"  name: {SOURCE_NAME}\n"
@@ -29,6 +31,7 @@ SOURCE_YAML = (
 )
 
 ASSET_YAML = (
+    "apiVersion: nagi.io/v1alpha1\n"
     "kind: Asset\n"
     "metadata:\n"
     f"  name: {ASSET_NAME}\n"
@@ -45,6 +48,7 @@ ASSET_YAML = (
 )
 
 SYNC_YAML = (
+    "apiVersion: nagi.io/v1alpha1\n"
     "kind: Sync\n"
     "metadata:\n"
     f"  name: {SYNC_NAME}\n"

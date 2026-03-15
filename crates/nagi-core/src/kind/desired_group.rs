@@ -32,6 +32,7 @@ mod tests {
     #[test]
     fn parse_desired_group_with_freshness() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: DesiredGroup
 metadata:
   name: daily-sla
@@ -48,6 +49,7 @@ spec:
     #[test]
     fn parse_desired_group_with_multiple_conditions() {
         let yaml = r#"
+apiVersion: nagi.io/v1alpha1
 kind: DesiredGroup
 metadata:
   name: sales-quality-checks
