@@ -4,12 +4,14 @@ use thiserror::Error;
 pub mod asset;
 pub mod connection;
 pub mod desired_group;
+pub mod origin;
 pub mod source;
 pub mod sync;
 
 pub use asset::AssetSpec;
 pub use connection::ConnectionSpec;
 pub use desired_group::DesiredGroupSpec;
+pub use origin::OriginSpec;
 pub use source::SourceSpec;
 pub use sync::SyncSpec;
 
@@ -68,6 +70,12 @@ pub enum NagiKind {
         metadata: Metadata,
         spec: SyncSpec,
     },
+    Origin {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: OriginSpec,
+    },
 }
 
 impl NagiKind {
@@ -78,6 +86,7 @@ impl NagiKind {
             NagiKind::Asset { api_version, .. } => api_version,
             NagiKind::DesiredGroup { api_version, .. } => api_version,
             NagiKind::Sync { api_version, .. } => api_version,
+            NagiKind::Origin { api_version, .. } => api_version,
         }
     }
 
@@ -88,6 +97,7 @@ impl NagiKind {
             NagiKind::Asset { metadata, .. } => metadata,
             NagiKind::DesiredGroup { metadata, .. } => metadata,
             NagiKind::Sync { metadata, .. } => metadata,
+            NagiKind::Origin { metadata, .. } => metadata,
         }
     }
 
@@ -98,6 +108,7 @@ impl NagiKind {
             NagiKind::Asset { .. } => asset::KIND,
             NagiKind::DesiredGroup { .. } => desired_group::KIND,
             NagiKind::Sync { .. } => sync::KIND,
+            NagiKind::Origin { .. } => origin::KIND,
         }
     }
 
@@ -128,6 +139,7 @@ impl NagiKind {
             NagiKind::Asset { spec, .. } => spec.validate(),
             NagiKind::DesiredGroup { spec, .. } => spec.validate(),
             NagiKind::Sync { spec, .. } => spec.validate(),
+            NagiKind::Origin { spec, .. } => spec.validate(),
         }
     }
 }
@@ -351,5 +363,23 @@ spec:
 "#;
         let err = parse_kind(yaml).unwrap_err();
         assert!(matches!(err, KindError::YamlParse(_)));
+    }
+
+    #[test]
+    fn parse_origin_resource() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: my-dbt-project
+spec:
+  type: DBT
+  connection: my-bigquery
+  defaultSync:
+    ref: dbt-default
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.kind(), origin::KIND);
+        assert_eq!(resource.metadata().name, "my-dbt-project");
     }
 }

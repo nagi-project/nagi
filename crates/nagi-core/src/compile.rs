@@ -146,6 +146,9 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
             NagiKind::Asset { metadata, spec, .. } => {
                 result.assets.push((metadata, spec));
             }
+            NagiKind::Origin { .. } => {
+                // Origin resources are processed before categorize; skip here.
+            }
         }
     }
 
