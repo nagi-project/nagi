@@ -76,10 +76,17 @@ impl NagiKind {
     }
 
     pub fn validate(&self) -> Result<(), KindError> {
-        if self.metadata().name.is_empty() {
+        let name = &self.metadata().name;
+        if name.is_empty() {
             return Err(KindError::InvalidSpec {
                 kind: self.kind().to_string(),
                 message: "metadata.name must not be empty".to_string(),
+            });
+        }
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            return Err(KindError::InvalidSpec {
+                kind: self.kind().to_string(),
+                message: "metadata.name must not contain path separators or '..'".to_string(),
             });
         }
         match self {
@@ -222,6 +229,42 @@ spec:
   connection: my-bigquery
 "#;
         let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { .. }));
+    }
+
+    #[test]
+    fn parse_kind_rejects_path_traversal_in_name() {
+        let cases = [
+            ("../../etc/cron", "path traversal with .."),
+            ("foo/bar", "forward slash"),
+            ("name..evil", "double dot"),
+        ];
+        for (name, desc) in cases {
+            let yaml = format!(
+                r#"
+kind: Source
+metadata:
+  name: "{name}"
+spec:
+  connection: my-bq
+"#
+            );
+            let err = parse_kind(&yaml).unwrap_err();
+            assert!(
+                matches!(err, KindError::InvalidSpec { .. }),
+                "expected InvalidSpec for {desc} (name '{name}'), got {err:?}"
+            );
+        }
+        // Backslash tested via direct construction to avoid YAML escape issues.
+        let resource = NagiKind::Source {
+            metadata: Metadata {
+                name: "foo\\bar".to_string(),
+            },
+            spec: source::SourceSpec {
+                connection: "my-bq".to_string(),
+            },
+        };
+        let err = resource.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { .. }));
     }
 
