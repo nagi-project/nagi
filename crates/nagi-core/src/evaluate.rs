@@ -106,6 +106,7 @@ mod tests {
 
     fn asset_spec_with(condition: DesiredCondition) -> AssetSpec {
         AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(condition)],
             auto_sync: true,
@@ -237,6 +238,7 @@ mod tests {
             }
         }
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![
                 DesiredSetEntry::Inline(DesiredCondition::SQL {

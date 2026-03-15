@@ -15,6 +15,8 @@ pub const KIND: &str = "Asset";
 #[serde(rename_all = "camelCase")]
 pub struct AssetSpec {
     #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
     pub sources: Vec<SourceRef>,
     /// All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.
     #[serde(default)]
@@ -325,6 +327,7 @@ autoSync: false
     #[test]
     fn validate_accepts_empty_desired_sets() {
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![],
             auto_sync: true,
@@ -340,6 +343,7 @@ autoSync: false
     #[test]
     fn validate_accepts_valid_spec() {
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
                 query: "SELECT true".to_string(),
@@ -354,6 +358,7 @@ autoSync: false
     #[test]
     fn validate_accepts_ref_entry() {
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Ref(DesiredGroupRef {
                 ref_name: "daily-sla".to_string(),
@@ -368,6 +373,7 @@ autoSync: false
     #[test]
     fn validate_rejects_empty_ref_name() {
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Ref(DesiredGroupRef {
                 ref_name: "".to_string(),
@@ -397,6 +403,7 @@ desiredSets:
     #[test]
     fn validate_rejects_empty_command_run() {
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
                 run: vec![],
@@ -412,6 +419,7 @@ desiredSets:
     #[test]
     fn validate_rejects_blank_command_program() {
         let spec = AssetSpec {
+            tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
                 run: vec!["".to_string()],
