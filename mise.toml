@@ -1,5 +1,7 @@
 [tools]
-uv = "latest"
+uv = "0.6"
+"cargo:cargo-audit" = "0.22"
+"cargo:cargo-llvm-cov" = "0.8"
 
 [tasks.build]
 description = "Build Python package with maturin (creates .venv, installs dependencies, builds nagi CLI)"
@@ -24,6 +26,10 @@ uv run ty check python/
 [tasks.check]
 description = "Run all checks (Rust then Python)"
 depends = ["check-rust", "check-python"]
+
+[tasks.coverage]
+description = "Generate test coverage report (requires cargo-llvm-cov)"
+run = "cargo llvm-cov --no-default-features"
 
 [tasks.audit]
 description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
