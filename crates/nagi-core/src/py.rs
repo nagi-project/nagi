@@ -140,18 +140,20 @@ pub fn read_cache(asset_name: &str, cache_dir: Option<&str>) -> PyResult<Option<
 /// Returns the dependency graph as a JSON string.
 #[pyfunction]
 pub fn compile_assets(assets_dir: &str, target_dir: &str) -> PyResult<String> {
-    let output = crate::compile::compile(std::path::Path::new(assets_dir)).map_err(to_py_err)?;
-    crate::compile::write_output(&output, std::path::Path::new(target_dir)).map_err(to_py_err)?;
+    let assets_path = std::path::Path::new(assets_dir);
+    let target_path = std::path::Path::new(target_dir);
+    let output = crate::compile::compile(assets_path, target_path).map_err(to_py_err)?;
     serde_json::to_string(&output.graph).map_err(to_py_err)
 }
 
 /// Selects asset names from a dependency graph JSON using dbt-compatible selector expressions.
 /// Returns a JSON array of selected asset names.
 #[pyfunction]
-pub fn select_assets(graph_json: &str, selectors: Vec<&str>) -> PyResult<String> {
+pub fn select_assets(graph_json: &str, selectors: Vec<String>) -> PyResult<String> {
     let graph: crate::compile::DependencyGraph =
         serde_json::from_str(graph_json).map_err(to_py_err)?;
-    let selected = crate::select::select_assets(&graph, &selectors).map_err(to_py_err)?;
+    let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let selected = crate::select::select_assets(&graph, &selector_refs).map_err(to_py_err)?;
     serde_json::to_string(&selected).map_err(to_py_err)
 }
 
