@@ -136,6 +136,23 @@ pub fn read_cache(asset_name: &str, cache_dir: Option<&str>) -> PyResult<Option<
     }
 }
 
+/// Returns a dry-run summary of what evaluate would execute, without running anything.
+/// `yaml` is the full YAML string for the asset resource.
+#[pyfunction]
+pub fn dry_run_asset(yaml: &str) -> PyResult<String> {
+    let kinds = kind::parse_kinds(yaml).map_err(to_py_err)?;
+    let (asset_name, asset_spec) = kinds
+        .iter()
+        .find_map(|k| match k {
+            NagiKind::Asset { metadata, spec } => Some((metadata.name.clone(), spec.clone())),
+            _ => None,
+        })
+        .ok_or_else(|| PyRuntimeError::new_err("no Asset resource found in YAML"))?;
+
+    let result = evaluate::dry_run_asset(&asset_name, &asset_spec);
+    serde_json::to_string(&result).map_err(to_py_err)
+}
+
 /// Compiles assets from `assets_dir` into `target_dir`.
 /// Returns the dependency graph as a JSON string.
 #[pyfunction]

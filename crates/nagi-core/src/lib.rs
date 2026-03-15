@@ -23,6 +23,7 @@ fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py::load_dbt_profiles_from, m)?)?;
     m.add_function(wrap_pyfunction!(py::test_connection, m)?)?;
     m.add_function(wrap_pyfunction!(py::evaluate_asset, m)?)?;
+    m.add_function(wrap_pyfunction!(py::dry_run_asset, m)?)?;
     m.add_function(wrap_pyfunction!(py::compile_assets, m)?)?;
     m.add_function(wrap_pyfunction!(py::select_assets, m)?)?;
     m.add_function(wrap_pyfunction!(py::read_cache, m)?)?;

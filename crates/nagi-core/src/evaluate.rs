@@ -6,7 +6,7 @@ mod freshness;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{Connection, ConnectionError};
-use crate::kind::asset::{AssetSpec, DesiredSetEntry};
+use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +68,42 @@ pub async fn evaluate_asset(
         ready,
         conditions: results,
     })
+}
+
+/// A single condition from an asset's desiredSets, with its index.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DryRunCondition {
+    pub index: usize,
+    #[serde(flatten)]
+    pub condition: DesiredCondition,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DryRunResult {
+    pub asset_name: String,
+    pub conditions: Vec<DryRunCondition>,
+}
+
+/// Produces a dry-run summary of what `evaluate_asset` would execute.
+/// No DB connection or command execution is performed.
+pub fn dry_run_asset(asset_name: &str, spec: &AssetSpec) -> DryRunResult {
+    let mut conditions = Vec::new();
+    for (i, entry) in spec.desired_sets.iter().enumerate() {
+        match entry {
+            DesiredSetEntry::Ref(_) => continue,
+            DesiredSetEntry::Inline(condition) => {
+                conditions.push(DryRunCondition {
+                    index: i,
+                    condition: condition.clone(),
+                });
+            }
+        }
+    }
+    DryRunResult {
+        asset_name: asset_name.to_string(),
+        conditions,
+    }
 }
 
 #[cfg(test)]
@@ -261,5 +297,80 @@ mod tests {
             result.conditions[1].status,
             ConditionStatus::NotReady { .. }
         ));
+    }
+
+    // ── dry_run ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn dry_run_freshness_with_column() {
+        let condition = freshness_condition(86400, Some("updated_at"));
+        let spec = asset_spec_with(condition.clone());
+        let result = dry_run_asset("my_table", &spec);
+        assert_eq!(result.conditions.len(), 1);
+        assert_eq!(result.conditions[0].condition, condition);
+    }
+
+    #[test]
+    fn dry_run_freshness_without_column() {
+        let condition = freshness_condition(86400, None);
+        let spec = asset_spec_with(condition.clone());
+        let result = dry_run_asset("my_table", &spec);
+        assert_eq!(result.conditions[0].condition, condition);
+    }
+
+    #[test]
+    fn dry_run_sql() {
+        let condition = DesiredCondition::SQL {
+            query: "SELECT COUNT(*) > 0 FROM orders".to_string(),
+        };
+        let spec = asset_spec_with(condition.clone());
+        let result = dry_run_asset("my_table", &spec);
+        assert_eq!(result.conditions[0].condition, condition);
+    }
+
+    #[test]
+    fn dry_run_command() {
+        let condition = DesiredCondition::Command {
+            run: vec!["dbt".to_string(), "test".to_string()],
+        };
+        let spec = asset_spec_with(condition.clone());
+        let result = dry_run_asset("my_table", &spec);
+        assert_eq!(result.conditions[0].condition, condition);
+    }
+
+    #[test]
+    fn dry_run_skips_refs() {
+        let spec = AssetSpec {
+            tags: vec![],
+            sources: vec![],
+            desired_sets: vec![
+                DesiredSetEntry::Ref(crate::kind::asset::DesiredGroupRef {
+                    ref_name: "group-a".to_string(),
+                }),
+                DesiredSetEntry::Inline(DesiredCondition::SQL {
+                    query: "SELECT 1".to_string(),
+                }),
+            ],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        let result = dry_run_asset("my_table", &spec);
+        assert_eq!(result.conditions.len(), 1);
+        assert_eq!(result.conditions[0].index, 1);
+    }
+
+    #[test]
+    fn dry_run_no_conditions() {
+        let spec = AssetSpec {
+            tags: vec![],
+            sources: vec![],
+            desired_sets: vec![],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        let result = dry_run_asset("my_table", &spec);
+        assert!(result.conditions.is_empty());
     }
 }
