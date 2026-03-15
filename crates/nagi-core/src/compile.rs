@@ -4,9 +4,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::dbt::manifest::{self, DbtManifest};
 use crate::kind::asset::{
     validate_no_duplicate_conditions, AssetSpec, DesiredCondition, DesiredSetEntry,
 };
+use crate::kind::origin::OriginSpec;
 use crate::kind::sync::SyncSpec;
 use crate::kind::{self, KindError, Metadata, NagiKind};
 
@@ -26,6 +28,12 @@ pub enum CompileError {
 
     #[error("dependency cycle detected involving '{name}'")]
     CycleDetected { name: String },
+
+    #[error("dbt compile failed: {0}")]
+    DbtCompileFailed(String),
+
+    #[error("manifest.json parse error: {0}")]
+    ManifestParse(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,14 +68,136 @@ pub struct ResolvedAsset {
     pub spec: AssetSpec,
     pub sync: Option<SyncSpec>,
     pub resync: Option<SyncSpec>,
+    pub connection: Option<ResolvedConnection>,
+}
+
+/// Connection info resolved from Asset → Source → Connection chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedConnection {
+    pub profile: String,
+    pub target: Option<String>,
 }
 
 /// Compiles all YAML resources from `assets_dir` and writes resolved output to `target_dir`.
 pub fn compile(assets_dir: &Path, target_dir: &Path) -> Result<CompileOutput, CompileError> {
     let resources = load_resources(assets_dir)?;
+
+    let manifests = load_dbt_manifests(&resources)?;
+
+    let resources = expand_origins(resources, &manifests)?;
     let output = resolve(resources)?;
     write_output(&output, target_dir)?;
     Ok(output)
+}
+
+/// Expands Origin resources by generating Assets, Sources, and Syncs from dbt manifests.
+pub fn expand_origins(
+    resources: Vec<NagiKind>,
+    manifests: &HashMap<String, String>,
+) -> Result<Vec<NagiKind>, CompileError> {
+    let origins: Vec<(String, OriginSpec)> = resources
+        .iter()
+        .filter_map(|r| match r {
+            NagiKind::Origin { metadata, spec, .. } => Some((metadata.name.clone(), spec.clone())),
+            _ => None,
+        })
+        .collect();
+
+    if origins.is_empty() {
+        return Ok(resources);
+    }
+
+    let mut expanded = resources;
+    for (name, spec) in &origins {
+        let manifest_str = manifests.get(name).ok_or_else(|| {
+            CompileError::ManifestParse(format!("no manifest found for Origin '{name}'"))
+        })?;
+        let manifest: DbtManifest = serde_json::from_str(manifest_str)
+            .map_err(|e| CompileError::ManifestParse(e.to_string()))?;
+        let generated = manifest::manifest_to_resources(&manifest, spec);
+        expanded.extend(generated);
+    }
+
+    Ok(expanded)
+}
+
+/// Per-Origin dbt configuration extracted from resources.
+struct DbtOriginConfig {
+    origin_name: String,
+    project_dir: String,
+    profile: String,
+    target: Option<String>,
+}
+
+/// Extracts dbt configuration for each Origin by resolving its Connection.
+fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOriginConfig> {
+    let connection_profiles: HashMap<&str, (&str, Option<&str>)> = resources
+        .iter()
+        .filter_map(|r| match r {
+            NagiKind::Connection { metadata, spec, .. } => Some((
+                metadata.name.as_str(),
+                (
+                    spec.dbt_profile.profile.as_str(),
+                    spec.dbt_profile.target.as_deref(),
+                ),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    resources
+        .iter()
+        .filter_map(|r| match r {
+            NagiKind::Origin {
+                metadata,
+                spec:
+                    OriginSpec::DBT {
+                        connection,
+                        project_dir,
+                        ..
+                    },
+                ..
+            } => {
+                let (profile, target) = connection_profiles
+                    .get(connection.as_str())
+                    .map(|(p, t)| (p.to_string(), t.map(|s| s.to_string())))
+                    .unwrap_or_default();
+                Some(DbtOriginConfig {
+                    origin_name: metadata.name.clone(),
+                    project_dir: project_dir.clone(),
+                    profile,
+                    target,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Returns the list of dbt Origin names and their project directories.
+pub fn list_dbt_origin_dirs(assets_dir: &Path) -> Result<Vec<(String, String)>, CompileError> {
+    let resources = load_resources(assets_dir)?;
+    Ok(collect_dbt_origin_configs(&resources)
+        .into_iter()
+        .map(|c| (c.origin_name, c.project_dir))
+        .collect())
+}
+
+/// Loads dbt manifests for all DBT Origins.
+///
+/// Returns a map of origin name → manifest JSON.
+fn load_dbt_manifests(resources: &[NagiKind]) -> Result<HashMap<String, String>, CompileError> {
+    let configs = collect_dbt_origin_configs(resources);
+    let mut manifests = HashMap::new();
+    for config in &configs {
+        let manifest_json = crate::dbt::load_manifest(
+            Path::new(&config.project_dir),
+            &config.profile,
+            config.target.as_deref(),
+        )?;
+        manifests.insert(config.origin_name.clone(), manifest_json);
+    }
+    Ok(manifests)
 }
 
 fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
@@ -110,8 +240,12 @@ fn load_resources_recursive(
     Ok(())
 }
 
+use crate::kind::connection::ConnectionSpec;
+
 struct CategorizedResources {
+    connections: HashMap<String, ConnectionSpec>,
     sources: HashSet<String>,
+    source_connections: HashMap<String, String>,
     desired_groups: HashMap<String, Vec<DesiredCondition>>,
     syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
@@ -120,7 +254,9 @@ struct CategorizedResources {
 fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileError> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut result = CategorizedResources {
+        connections: HashMap::new(),
         sources: HashSet::new(),
+        source_connections: HashMap::new(),
         desired_groups: HashMap::new(),
         syncs: HashMap::new(),
         assets: Vec::new(),
@@ -133,8 +269,13 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
             return Err(CompileError::DuplicateName { kind, name });
         }
         match resource {
-            NagiKind::Connection { .. } => {}
-            NagiKind::Source { .. } => {
+            NagiKind::Connection { spec, .. } => {
+                result.connections.insert(name, spec);
+            }
+            NagiKind::Source { spec, .. } => {
+                result
+                    .source_connections
+                    .insert(name.clone(), spec.connection);
                 result.sources.insert(name);
             }
             NagiKind::DesiredGroup { spec, .. } => {
@@ -210,7 +351,9 @@ fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, Stri
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let CategorizedResources {
+        connections,
         sources,
+        source_connections,
         desired_groups,
         syncs,
         assets,
@@ -279,11 +422,23 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             .collect();
         validate_no_duplicate_conditions(&all_conditions)?;
 
+        // Resolve connection from the first source's connection chain.
+        let connection = spec
+            .sources
+            .first()
+            .and_then(|s| source_connections.get(&s.ref_name))
+            .and_then(|conn_name| connections.get(conn_name))
+            .map(|conn_spec| ResolvedConnection {
+                profile: conn_spec.dbt_profile.profile.clone(),
+                target: conn_spec.dbt_profile.target.clone(),
+            });
+
         resolved_assets.push(ResolvedAsset {
             metadata,
             spec,
             sync: resolved_sync,
             resync: resolved_resync,
+            connection,
         });
     }
 
@@ -393,6 +548,8 @@ struct CompiledAssetYaml<'a> {
     kind: &'static str,
     metadata: &'a Metadata,
     spec: CompiledAssetSpecYaml<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection: &'a Option<ResolvedConnection>,
 }
 
 #[derive(Serialize)]
@@ -418,6 +575,8 @@ pub struct CompiledAsset {
     pub api_version: String,
     pub metadata: Metadata,
     pub spec: CompiledAssetSpec,
+    #[serde(default)]
+    pub connection: Option<ResolvedConnection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -456,6 +615,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
                 sync: &asset.sync,
                 resync: &asset.resync,
             },
+            connection: &asset.connection,
         };
         let yaml = serde_yaml::to_string(&compiled).map_err(KindError::YamlParse)?;
         std::fs::write(
@@ -1097,5 +1257,259 @@ spec:
             assert_eq!(resources.len(), 1);
             assert_eq!(resources[0].metadata().name, "my-asset");
         }
+    }
+
+    // ── expand_origins tests ────────────────────────────────────────────
+
+    const MANIFEST_JSON: &str = r#"{
+  "nodes": {
+    "model.shop.stg_customers": {
+      "unique_id": "model.shop.stg_customers",
+      "resource_type": "model",
+      "name": "stg_customers",
+      "package_name": "shop",
+      "tags": [],
+      "depends_on": { "nodes": ["source.shop.raw.customers"] }
+    },
+    "model.shop.customers": {
+      "unique_id": "model.shop.customers",
+      "resource_type": "model",
+      "name": "customers",
+      "package_name": "shop",
+      "tags": ["finance"],
+      "depends_on": { "nodes": ["model.shop.stg_customers"] }
+    },
+    "test.shop.not_null_customers_id.abc": {
+      "unique_id": "test.shop.not_null_customers_id.abc",
+      "resource_type": "test",
+      "name": "not_null_customers_id",
+      "package_name": "shop",
+      "tags": [],
+      "depends_on": { "nodes": ["model.shop.customers"] },
+      "test_metadata": { "name": "not_null", "kwargs": { "column_name": "id" } }
+    }
+  },
+  "sources": {
+    "source.shop.raw.customers": {
+      "unique_id": "source.shop.raw.customers",
+      "name": "customers",
+      "source_name": "raw"
+    }
+  }
+}"#;
+
+    const ORIGIN_YAML: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: my-dbt
+spec:
+  type: DBT
+  connection: my-bq
+  projectDir: ../dbt-project
+  defaultSync:
+    ref: dbt-run";
+
+    fn manifests_for(origin_name: &str) -> HashMap<String, String> {
+        HashMap::from([(origin_name.to_string(), MANIFEST_JSON.to_string())])
+    }
+
+    #[test]
+    fn expand_origins_generates_resources_from_manifest() {
+        let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
+        let manifests = manifests_for("my-dbt");
+        let expanded = expand_origins(resources, &manifests).unwrap();
+
+        let assets: Vec<_> = expanded.iter().filter(|r| r.kind() == "Asset").collect();
+        assert_eq!(assets.len(), 2);
+
+        let sources: Vec<_> = expanded.iter().filter(|r| r.kind() == "Source").collect();
+        assert_eq!(sources.len(), 1);
+
+        let syncs: Vec<_> = expanded.iter().filter(|r| r.kind() == "Sync").collect();
+        // dbt-run (user) + dbt-tag-finance (auto)
+        assert_eq!(syncs.len(), 2);
+    }
+
+    #[test]
+    fn expand_origins_noop_without_origin() {
+        let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SOURCE_RAW_SALES]));
+        let count = resources.len();
+        let expanded = expand_origins(resources, &HashMap::new()).unwrap();
+        assert_eq!(expanded.len(), count);
+    }
+
+    #[test]
+    fn expand_origins_error_when_no_manifest() {
+        let resources = parse(ORIGIN_YAML);
+        let err = expand_origins(resources, &HashMap::new()).unwrap_err();
+        assert!(matches!(err, CompileError::ManifestParse(_)));
+    }
+
+    #[test]
+    fn resolve_with_origin_expansion() {
+        let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
+        let manifests = manifests_for("my-dbt");
+        let expanded = expand_origins(resources, &manifests).unwrap();
+        let output = resolve(expanded).unwrap();
+
+        assert_eq!(output.assets.len(), 2);
+        let customer_asset = output
+            .assets
+            .iter()
+            .find(|a| a.metadata.name == "customers")
+            .unwrap();
+        assert!(customer_asset.sync.is_some());
+        assert!(!customer_asset.spec.desired_sets.is_empty());
+    }
+
+    #[test]
+    fn compile_with_origin_writes_target() {
+        let tmp = TempDir::new().unwrap();
+        let assets_dir = tmp.path().join("assets");
+        let target_dir = tmp.path().join("nagi_target");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+
+        write_yaml(
+            &assets_dir,
+            "infra.yaml",
+            &yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]),
+        );
+
+        let resources = load_resources(&assets_dir).unwrap();
+        let manifests = manifests_for("my-dbt");
+        let resources = expand_origins(resources, &manifests).unwrap();
+        let output = resolve(resources).unwrap();
+        write_output(&output, &target_dir).unwrap();
+
+        assert!(target_dir.join("graph.json").exists());
+        assert!(target_dir.join("assets/customers.yaml").exists());
+        assert!(target_dir.join("assets/stg_customers.yaml").exists());
+    }
+
+    #[test]
+    fn collect_configs_returns_target_from_connection() {
+        let yaml = "\
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bq
+spec:
+  dbtProfile:
+    profile: my_project
+    target: prod
+---
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: dbt-origin
+spec:
+  type: DBT
+  connection: my-bq
+  projectDir: ../dbt-project";
+        let resources = parse_kinds(yaml).unwrap();
+        let configs = collect_dbt_origin_configs(&resources);
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].origin_name, "dbt-origin");
+        assert_eq!(configs[0].project_dir, "../dbt-project");
+        assert_eq!(configs[0].profile, "my_project");
+        assert_eq!(configs[0].target.as_deref(), Some("prod"));
+    }
+
+    #[test]
+    fn collect_configs_returns_none_target_when_connection_has_no_target() {
+        let yaml = "\
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bq
+spec:
+  dbtProfile:
+    profile: my_project
+---
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: dbt-origin
+spec:
+  type: DBT
+  connection: my-bq
+  projectDir: ../dbt-project";
+        let resources = parse_kinds(yaml).unwrap();
+        let configs = collect_dbt_origin_configs(&resources);
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].profile, "my_project");
+        assert_eq!(configs[0].target, None);
+    }
+
+    #[test]
+    fn collect_configs_returns_empty_when_no_origin() {
+        let yaml = "\
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bq
+spec:
+  dbtProfile:
+    profile: my_project
+    target: dev";
+        let resources = parse_kinds(yaml).unwrap();
+        let configs = collect_dbt_origin_configs(&resources);
+        assert!(configs.is_empty());
+    }
+
+    #[test]
+    fn collect_configs_handles_multiple_origins() {
+        let yaml = "\
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: bq-prod
+spec:
+  dbtProfile:
+    profile: prod_profile
+    target: prod
+---
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: bq-dev
+spec:
+  dbtProfile:
+    profile: dev_profile
+---
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: dbt-main
+spec:
+  type: DBT
+  connection: bq-prod
+  projectDir: ../dbt-main
+---
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: dbt-sub
+spec:
+  type: DBT
+  connection: bq-dev
+  projectDir: ../dbt-sub";
+        let resources = parse_kinds(yaml).unwrap();
+        let configs = collect_dbt_origin_configs(&resources);
+        assert_eq!(configs.len(), 2);
+
+        let main = configs
+            .iter()
+            .find(|c| c.origin_name == "dbt-main")
+            .unwrap();
+        assert_eq!(main.project_dir, "../dbt-main");
+        assert_eq!(main.profile, "prod_profile");
+        assert_eq!(main.target.as_deref(), Some("prod"));
+
+        let sub = configs.iter().find(|c| c.origin_name == "dbt-sub").unwrap();
+        assert_eq!(sub.project_dir, "../dbt-sub");
+        assert_eq!(sub.profile, "dev_profile");
+        assert_eq!(sub.target, None);
     }
 }

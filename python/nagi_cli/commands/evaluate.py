@@ -7,12 +7,6 @@ from nagi_cli._nagi_core import dry_run_asset, evaluate_asset, select_assets
 
 
 @click.command()
-@click.option("--profile", required=True, help="dbt profile name")
-@click.option(
-    "--target",
-    default=None,
-    help="dbt target name (uses profile default if omitted)",
-)
 @click.option(
     "--select",
     "selectors",
@@ -37,8 +31,6 @@ from nagi_cli._nagi_core import dry_run_asset, evaluate_asset, select_assets
     help="Show which assets would be evaluated without executing.",
 )
 def evaluate(
-    profile: str,
-    target: str | None,
     selectors: tuple[str, ...],
     target_dir: str,
     cache_dir: str | None,
@@ -79,7 +71,7 @@ def evaluate(
             raise SystemExit(1)
         yaml_content = yaml_file.read_text()
         try:
-            result_json = evaluate_asset(yaml_content, profile, target, cache_dir)
+            result_json = evaluate_asset(yaml_content, cache_dir)
             result = json.loads(result_json)
             results.append(result)
             click.echo(json.dumps(result))

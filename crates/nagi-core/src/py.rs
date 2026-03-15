@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 
 use crate::db::bigquery::{BigQueryConfig, BigQueryConnection};
 use crate::db::Connection;
-use crate::dbt_profile::DbtProfilesFile;
+use crate::dbt::profile::DbtProfilesFile;
 use crate::evaluate;
 use crate::kind;
 use crate::storage::local::LocalCache;
@@ -77,17 +77,11 @@ pub fn test_connection(profile: &str, target: Option<&str>) -> PyResult<String> 
 
 /// Evaluates an asset's desired conditions and writes the result to cache.
 /// `yaml` is the compiled asset YAML string from `target/assets/`.
-/// `profile` and `target` identify the dbt profile for the DB connection.
 /// `cache_dir` is optional; defaults to `~/.nagi/cache/`.
 /// Returns the evaluation result as JSON.
 #[pyfunction]
-#[pyo3(signature = (yaml, profile, target=None, cache_dir=None))]
-pub fn evaluate_asset(
-    yaml: &str,
-    profile: &str,
-    target: Option<&str>,
-    cache_dir: Option<&str>,
-) -> PyResult<String> {
+#[pyo3(signature = (yaml, cache_dir=None))]
+pub fn evaluate_asset(yaml: &str, cache_dir: Option<&str>) -> PyResult<String> {
     let compiled: crate::compile::CompiledAsset = serde_yaml::from_str(yaml).map_err(to_py_err)?;
     let asset_name = compiled.metadata.name;
     let asset_spec = crate::kind::asset::AssetSpec {
@@ -99,10 +93,13 @@ pub fn evaluate_asset(
         resync: None,
     };
 
-    // Resolve connection from the first Connection resource in the YAML,
-    // or fall back to the provided profile/target.
+    let conn_info = compiled
+        .connection
+        .ok_or_else(|| PyRuntimeError::new_err("compiled asset has no connection info"))?;
     let f = DbtProfilesFile::load_default().map_err(to_py_err)?;
-    let output = f.resolve(profile, target).map_err(to_py_err)?;
+    let output = f
+        .resolve(&conn_info.profile, conn_info.target.as_deref())
+        .map_err(to_py_err)?;
     let config = BigQueryConfig::from_output(output).map_err(to_py_err)?;
 
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
@@ -163,6 +160,19 @@ pub fn compile_assets(assets_dir: &str, target_dir: &str) -> PyResult<String> {
     let target_path = std::path::Path::new(target_dir);
     let output = crate::compile::compile(assets_path, target_path).map_err(to_py_err)?;
     serde_json::to_string(&output.graph).map_err(to_py_err)
+}
+
+/// Lists dbt Origins found in `assets_dir`.
+/// Returns a JSON array of `{"name": "...", "projectDir": "..."}`.
+#[pyfunction]
+pub fn list_dbt_origins(assets_dir: &str) -> PyResult<String> {
+    let assets_path = std::path::Path::new(assets_dir);
+    let origins = crate::compile::list_dbt_origin_dirs(assets_path).map_err(to_py_err)?;
+    let result: Vec<serde_json::Value> = origins
+        .iter()
+        .map(|(name, dir)| serde_json::json!({"name": name, "projectDir": dir}))
+        .collect();
+    serde_json::to_string(&result).map_err(to_py_err)
 }
 
 /// Selects asset names from a dependency graph JSON using dbt-compatible selector expressions.

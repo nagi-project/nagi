@@ -375,6 +375,7 @@ metadata:
 spec:
   type: DBT
   connection: my-bigquery
+  projectDir: ../dbt-project
   defaultSync:
     ref: dbt-default
 "#;

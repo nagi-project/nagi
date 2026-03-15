@@ -45,8 +45,6 @@ class TestEvaluateSuccess:
             result = runner.invoke(
                 evaluate,
                 [
-                    "--profile",
-                    "my_project",
                     "--target-dir",
                     str(target_dir),
                 ],
@@ -64,8 +62,6 @@ class TestEvaluateSuccess:
             result = runner.invoke(
                 evaluate,
                 [
-                    "--profile",
-                    "my_project",
                     "--target-dir",
                     str(target_dir),
                 ],
@@ -87,8 +83,6 @@ class TestEvaluateSuccess:
             result = runner.invoke(
                 evaluate,
                 [
-                    "--profile",
-                    "my_project",
                     "--target-dir",
                     str(target_dir),
                     "--select",
@@ -97,32 +91,6 @@ class TestEvaluateSuccess:
             )
         assert result.exit_code == 0
         assert mock.call_count == 1
-
-    def test_passes_target_option(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
-
-        runner = CliRunner()
-        with patch(
-            "nagi_cli.commands.evaluate.evaluate_asset",
-            return_value=MOCK_RESULT,
-        ) as mock:
-            runner.invoke(
-                evaluate,
-                [
-                    "--profile",
-                    "my_project",
-                    "--target",
-                    "dev",
-                    "--target-dir",
-                    str(target_dir),
-                    "--select",
-                    ASSET_NAME,
-                ],
-            )
-        mock.assert_called_once()
-        call_args = mock.call_args
-        # target is the 3rd positional arg
-        assert call_args[0][2] == "dev"
 
 
 class TestEvaluateDryRun:
@@ -136,8 +104,6 @@ class TestEvaluateDryRun:
             result = runner.invoke(
                 evaluate,
                 [
-                    "--profile",
-                    "my_project",
                     "--target-dir",
                     str(target_dir),
                     "--dry-run",
@@ -153,8 +119,6 @@ class TestEvaluateDryRun:
         result = runner.invoke(
             evaluate,
             [
-                "--profile",
-                "my_project",
                 "--target-dir",
                 str(target_dir),
                 "--dry-run",
@@ -182,8 +146,6 @@ class TestEvaluateFailure:
         result = runner.invoke(
             evaluate,
             [
-                "--profile",
-                "my_project",
                 "--target-dir",
                 str(tmp_path / "nonexistent"),
             ],
@@ -203,8 +165,6 @@ class TestEvaluateFailure:
             result = runner.invoke(
                 evaluate,
                 [
-                    "--profile",
-                    "my_project",
                     "--target-dir",
                     str(target_dir),
                     "--select",

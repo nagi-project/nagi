@@ -383,7 +383,7 @@ mod tests {
         // Upstream: edge.to → edge.from
         assert_eq!(adj.get("daily-sales").unwrap(), &vec!["raw-sales"]);
         assert_eq!(adj.get("monthly-report").unwrap(), &vec!["daily-sales"]);
-        assert!(adj.get("raw-sales").is_none());
+        assert!(!adj.contains_key("raw-sales"));
     }
 
     #[test]
@@ -393,6 +393,6 @@ mod tests {
         // Downstream: edge.from → edge.to
         assert_eq!(adj.get("raw-sales").unwrap(), &vec!["daily-sales"]);
         assert_eq!(adj.get("daily-sales").unwrap(), &vec!["monthly-report"]);
-        assert!(adj.get("monthly-report").is_none());
+        assert!(!adj.contains_key("monthly-report"));
     }
 }

@@ -1,7 +1,7 @@
 pub mod compile;
 pub mod cron;
 pub mod db;
-pub mod dbt_profile;
+pub mod dbt;
 pub mod duration;
 pub mod evaluate;
 pub mod kind;
@@ -25,6 +25,7 @@ fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py::evaluate_asset, m)?)?;
     m.add_function(wrap_pyfunction!(py::dry_run_asset, m)?)?;
     m.add_function(wrap_pyfunction!(py::compile_assets, m)?)?;
+    m.add_function(wrap_pyfunction!(py::list_dbt_origins, m)?)?;
     m.add_function(wrap_pyfunction!(py::select_assets, m)?)?;
     m.add_function(wrap_pyfunction!(py::read_cache, m)?)?;
     m.add_function(wrap_pyfunction!(py::list_cache, m)?)?;
