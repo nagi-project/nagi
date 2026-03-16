@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 jsonwebtoken = "10"
+rusqlite = { version = "0.31", features = ["bundled"] }
 pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
 
 [features]

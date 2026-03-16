@@ -5,6 +5,7 @@ pub mod dbt;
 pub mod duration;
 pub mod evaluate;
 pub mod kind;
+pub mod log;
 pub mod select;
 pub mod storage;
 pub mod sync;

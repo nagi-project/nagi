@@ -511,7 +511,10 @@ mod tests {
                     if name == "dbt-test-unique_customers_customer_id"
                     && run == &["dbt", "test", "--select", "unique_customers_customer_id"])
             });
-            assert!(has_unique, "customers should have a unique Command condition");
+            assert!(
+                has_unique,
+                "customers should have a unique Command condition"
+            );
         } else {
             panic!("customers should be an Asset");
         }

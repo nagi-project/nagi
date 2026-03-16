@@ -132,10 +132,7 @@ fn resolve_stages(spec: &SyncSpec, requested: Option<&[Stage]>) -> Vec<Stage> {
     .collect();
 
     match requested {
-        Some(filter) => defined
-            .into_iter()
-            .filter(|s| filter.contains(s))
-            .collect(),
+        Some(filter) => defined.into_iter().filter(|s| filter.contains(s)).collect(),
         None => defined,
     }
 }
@@ -486,8 +483,12 @@ mod tests {
 
     #[test]
     fn dry_run_with_stage_filter() {
-        let result =
-            dry_run_sync("test-asset", &full_spec(), SyncType::Sync, Some(&[Stage::Run]));
+        let result = dry_run_sync(
+            "test-asset",
+            &full_spec(),
+            SyncType::Sync,
+            Some(&[Stage::Run]),
+        );
         assert_eq!(result.stages.len(), 1);
         assert_eq!(result.stages[0].stage, Stage::Run);
     }
