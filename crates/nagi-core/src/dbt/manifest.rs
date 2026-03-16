@@ -157,62 +157,21 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
 }
 
 /// Converts dbt tests into Nagi DesiredCondition entries.
+/// All tests are executed via `dbt test --select` to ensure behavior matches
+/// dbt's own test implementation exactly.
 fn tests_to_desired_sets(tests: &[&DbtNode]) -> Vec<DesiredSetEntry> {
     let mut entries = Vec::new();
     for test in tests {
-        if let Some(ref meta) = test.test_metadata {
-            match meta.name.as_str() {
-                "not_null" => {
-                    if let Some(col) = meta.kwargs.get("column_name").and_then(|v| v.as_str()) {
-                        let model_name = test
-                            .depends_on
-                            .nodes
-                            .first()
-                            .and_then(|id| id.strip_prefix("model."))
-                            .and_then(|rest| rest.split('.').nth(1))
-                            .unwrap_or("unknown");
-                        let query = format!(
-                            "SELECT COUNT(*) = 0 FROM {{{{ ref('{}') }}}} WHERE {} IS NULL",
-                            model_name, col
-                        );
-                        entries.push(DesiredSetEntry::Inline(DesiredCondition::SQL {
-                            name: format!("not-null-{col}"),
-                            query,
-                        }));
-                    }
-                }
-                "unique" => {
-                    if let Some(col) = meta.kwargs.get("column_name").and_then(|v| v.as_str()) {
-                        let model_name = test
-                            .depends_on
-                            .nodes
-                            .first()
-                            .and_then(|id| id.strip_prefix("model."))
-                            .and_then(|rest| rest.split('.').nth(1))
-                            .unwrap_or("unknown");
-                        let query = format!(
-                            "SELECT COUNT(*) = 0 FROM (SELECT {col} FROM {{{{ ref('{}') }}}} GROUP BY {col} HAVING COUNT(*) > 1)",
-                            model_name,
-                        );
-                        entries.push(DesiredSetEntry::Inline(DesiredCondition::SQL {
-                            name: format!("unique-{col}"),
-                            query,
-                        }));
-                    }
-                }
-                _ => {
-                    // Generic dbt test: run via dbt test command.
-                    entries.push(DesiredSetEntry::Inline(DesiredCondition::Command {
-                        name: format!("dbt-test-{}", test.name),
-                        run: vec![
-                            "dbt".to_string(),
-                            "test".to_string(),
-                            "--select".to_string(),
-                            test.name.clone(),
-                        ],
-                    }));
-                }
-            }
+        if test.test_metadata.is_some() {
+            entries.push(DesiredSetEntry::Inline(DesiredCondition::Command {
+                name: format!("dbt-test-{}", test.name),
+                run: vec![
+                    "dbt".to_string(),
+                    "test".to_string(),
+                    "--select".to_string(),
+                    test.name.clone(),
+                ],
+            }));
         }
     }
     entries
@@ -524,12 +483,13 @@ mod tests {
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
             let has_not_null = spec.desired_sets.iter().any(|e| {
-                matches!(e, DesiredSetEntry::Inline(DesiredCondition::SQL { query, .. })
-                    if query.contains("IS NULL"))
+                matches!(e, DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. })
+                    if name == "dbt-test-not_null_customers_customer_id"
+                    && run == &["dbt", "test", "--select", "not_null_customers_customer_id"])
             });
             assert!(
                 has_not_null,
-                "customers should have a not_null SQL condition"
+                "customers should have a not_null Command condition"
             );
         } else {
             panic!("customers should be an Asset");
@@ -547,10 +507,11 @@ mod tests {
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
             let has_unique = spec.desired_sets.iter().any(|e| {
-                matches!(e, DesiredSetEntry::Inline(DesiredCondition::SQL { query, .. })
-                    if query.contains("HAVING COUNT(*)"))
+                matches!(e, DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. })
+                    if name == "dbt-test-unique_customers_customer_id"
+                    && run == &["dbt", "test", "--select", "unique_customers_customer_id"])
             });
-            assert!(has_unique, "customers should have a unique SQL condition");
+            assert!(has_unique, "customers should have a unique Command condition");
         } else {
             panic!("customers should be an Asset");
         }
