@@ -63,11 +63,14 @@ pub struct DesiredGroupRef {
 }
 
 /// A single desired state condition. The Asset is Ready only when all conditions are satisfied.
+/// Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion)
+/// and used as a key in execution logs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum DesiredCondition {
     /// Can transition to Not Ready as time passes beyond `maxAge`.
     Freshness {
+        name: String,
         #[serde(rename = "maxAge")]
         max_age: Duration,
         interval: Duration,
@@ -78,10 +81,10 @@ pub enum DesiredCondition {
         column: Option<String>,
     },
     /// Query must return a scalar boolean. Ready when the result is true.
-    SQL { query: String },
+    SQL { name: String, query: String },
     /// Runs an external command. Ready when the process exits with code 0.
     /// `run` is argv: the first element is the program, the rest are arguments.
-    Command { run: Vec<String> },
+    Command { name: String, run: Vec<String> },
 }
 
 impl AssetSpec {
@@ -110,23 +113,35 @@ impl DesiredSetEntry {
     }
 }
 
-/// Checks that a resolved (flattened) list of conditions contains no duplicates.
+/// Checks that a resolved (flattened) list of conditions has unique names.
 /// Called after compile resolves all `Ref` entries into inline conditions.
-pub fn validate_no_duplicate_conditions(conditions: &[DesiredCondition]) -> Result<(), KindError> {
-    for (i, a) in conditions.iter().enumerate() {
-        for b in &conditions[i + 1..] {
-            if a == b {
-                return Err(KindError::InvalidSpec {
-                    kind: KIND.to_string(),
-                    message: "desiredSets contains duplicate condition".to_string(),
-                });
-            }
+pub fn validate_no_duplicate_condition_names(
+    conditions: &[DesiredCondition],
+) -> Result<(), KindError> {
+    let mut seen = std::collections::HashSet::new();
+    for condition in conditions {
+        if !seen.insert(condition.name()) {
+            return Err(KindError::InvalidSpec {
+                kind: KIND.to_string(),
+                message: format!(
+                    "desiredSets contains duplicate condition name '{}'",
+                    condition.name()
+                ),
+            });
         }
     }
     Ok(())
 }
 
 impl DesiredCondition {
+    pub fn name(&self) -> &str {
+        match self {
+            DesiredCondition::Freshness { name, .. } => name,
+            DesiredCondition::SQL { name, .. } => name,
+            DesiredCondition::Command { name, .. } => name,
+        }
+    }
+
     fn require_non_empty(value: &str, field: &str) -> Result<(), KindError> {
         if value.is_empty() {
             return Err(KindError::InvalidSpec {
@@ -138,10 +153,11 @@ impl DesiredCondition {
     }
 
     pub(crate) fn validate(&self) -> Result<(), KindError> {
+        Self::require_non_empty(self.name(), "condition name")?;
         match self {
             DesiredCondition::Freshness { .. } => {}
-            DesiredCondition::SQL { query } => Self::require_non_empty(query, "SQL.query")?,
-            DesiredCondition::Command { run } => {
+            DesiredCondition::SQL { query, .. } => Self::require_non_empty(query, "SQL.query")?,
+            DesiredCondition::Command { run, .. } => {
                 if run.is_empty() {
                     return Err(KindError::InvalidSpec {
                         kind: KIND.to_string(),
@@ -169,14 +185,17 @@ sources:
   - ref: customer-master
 desiredSets:
   - ref: daily-sla
-  - type: Freshness
+  - name: data-freshness
+    type: Freshness
     maxAge: 24h
     interval: 6h
     checkAt: "0 3 * * *"
     column: updated_at
-  - type: SQL
+  - name: no-negative-amount
+    type: SQL
     query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
-  - type: Command
+  - name: dbt-test-sales
+    type: Command
     run: [dbt, test, --select, daily_sales]
 autoSync: true
 sync:
@@ -200,22 +219,24 @@ resync:
         assert!(matches!(
             &spec.desired_sets[1],
             DesiredSetEntry::Inline(DesiredCondition::Freshness {
+                name,
                 max_age,
                 interval,
                 check_at: Some(check_at),
                 column: Some(column),
-            }) if max_age.as_std() == StdDuration::from_secs(24 * 3600)
+            }) if name == "data-freshness"
+                && max_age.as_std() == StdDuration::from_secs(24 * 3600)
                 && interval.as_std() == StdDuration::from_secs(6 * 3600)
                 && check_at.as_str() == "0 3 * * *"
                 && column == "updated_at"
         ));
         assert!(matches!(
             &spec.desired_sets[2],
-            DesiredSetEntry::Inline(DesiredCondition::SQL { query }) if query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
+            DesiredSetEntry::Inline(DesiredCondition::SQL { name, query }) if name == "no-negative-amount" && query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
         ));
         assert!(matches!(
             &spec.desired_sets[3],
-            DesiredSetEntry::Inline(DesiredCondition::Command { run }) if run == &["dbt", "test", "--select", "daily_sales"]
+            DesiredSetEntry::Inline(DesiredCondition::Command { name, run }) if name == "dbt-test-sales" && run == &["dbt", "test", "--select", "daily_sales"]
         ));
 
         assert!(spec.auto_sync);
@@ -231,7 +252,8 @@ resync:
     fn parse_minimal_asset_spec() {
         let yaml = r#"
 desiredSets:
-  - type: Freshness
+  - name: freshness
+    type: Freshness
     maxAge: 24h
     interval: 6h
 "#;
@@ -261,7 +283,8 @@ sources:
     fn parse_freshness_without_optional_fields() {
         let yaml = r#"
 desiredSets:
-  - type: Freshness
+  - name: freshness
+    type: Freshness
     maxAge: 24h
     interval: 6h
 "#;
@@ -280,7 +303,8 @@ desiredSets:
     fn rejects_invalid_cron_in_freshness() {
         let yaml = r#"
 desiredSets:
-  - type: Freshness
+  - name: freshness
+    type: Freshness
     maxAge: 24h
     interval: 6h
     checkAt: "not-a-cron"
@@ -293,7 +317,8 @@ desiredSets:
     fn rejects_invalid_duration_in_freshness() {
         let yaml = r#"
 desiredSets:
-  - type: Freshness
+  - name: freshness
+    type: Freshness
     maxAge: not-a-duration
     interval: 6h
 "#;
@@ -305,7 +330,8 @@ desiredSets:
     fn auto_sync_defaults_to_true() {
         let yaml = r#"
 desiredSets:
-  - type: SQL
+  - name: check
+    type: SQL
     query: "SELECT true"
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
@@ -316,7 +342,8 @@ desiredSets:
     fn auto_sync_can_be_set_to_false() {
         let yaml = r#"
 desiredSets:
-  - type: SQL
+  - name: check
+    type: SQL
     query: "SELECT true"
 autoSync: false
 "#;
@@ -346,6 +373,7 @@ autoSync: false
             tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
+                name: "check".to_string(),
                 query: "SELECT true".to_string(),
             })],
             auto_sync: true,
@@ -390,13 +418,14 @@ autoSync: false
     fn parse_command_condition() {
         let yaml = r#"
 desiredSets:
-  - type: Command
+  - name: dbt-test
+    type: Command
     run: [dbt, test, --select, my_model]
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(
             &spec.desired_sets[0],
-            DesiredSetEntry::Inline(DesiredCondition::Command { run }) if run == &["dbt", "test", "--select", "my_model"]
+            DesiredSetEntry::Inline(DesiredCondition::Command { name, run }) if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
         ));
     }
 
@@ -406,6 +435,7 @@ desiredSets:
             tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
+                name: "check".to_string(),
                 run: vec![],
             })],
             auto_sync: true,
@@ -422,6 +452,7 @@ desiredSets:
             tags: vec![],
             sources: vec![],
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
+                name: "check".to_string(),
                 run: vec!["".to_string()],
             })],
             auto_sync: true,
@@ -438,7 +469,8 @@ desiredSets:
 desiredSets:
   - ref: daily-sla
   - ref: sales-quality-checks
-  - type: SQL
+  - name: no-null-region
+    type: SQL
     query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE region IS NULL"
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
@@ -459,43 +491,63 @@ desiredSets:
     fn validate_no_duplicates_accepts_distinct_conditions() {
         let conditions = vec![
             DesiredCondition::SQL {
+                name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
             },
             DesiredCondition::SQL {
+                name: "check-b".to_string(),
                 query: "SELECT false".to_string(),
             },
         ];
-        assert!(validate_no_duplicate_conditions(&conditions).is_ok());
+        assert!(validate_no_duplicate_condition_names(&conditions).is_ok());
     }
 
     #[test]
     fn validate_no_duplicates_rejects_identical_conditions() {
         let conditions = vec![
             DesiredCondition::SQL {
+                name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
             },
             DesiredCondition::SQL {
-                query: "SELECT true".to_string(),
+                name: "check-a".to_string(),
+                query: "SELECT false".to_string(),
             },
         ];
-        let err = validate_no_duplicate_conditions(&conditions).unwrap_err();
+        let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, message }
             if kind == KIND && message.contains("duplicate")));
     }
 
     #[test]
     fn validate_no_duplicates_catches_group_and_inline_overlap() {
-        // Simulates compile having resolved a DesiredGroup ref into the same
-        // Freshness condition that was also declared inline.
         let condition = DesiredCondition::Freshness {
+            name: "freshness".to_string(),
             max_age: serde_yaml::from_str("24h").unwrap(),
             interval: serde_yaml::from_str("6h").unwrap(),
             check_at: None,
             column: None,
         };
         let conditions = vec![condition.clone(), condition];
-        let err = validate_no_duplicate_conditions(&conditions).unwrap_err();
+        let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, message }
             if kind == KIND && message.contains("duplicate")));
+    }
+
+    #[test]
+    fn validate_rejects_empty_condition_name() {
+        let spec = AssetSpec {
+            tags: vec![],
+            sources: vec![],
+            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
+                name: "".to_string(),
+                query: "SELECT true".to_string(),
+            })],
+            auto_sync: true,
+            sync: None,
+            resync: None,
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
     }
 }

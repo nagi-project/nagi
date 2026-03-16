@@ -218,7 +218,8 @@ spec:
   sources:
     - ref: raw-sales
   desiredSets:
-    - type: Freshness
+    - name: data-freshness
+      type: Freshness
       maxAge: 24h
       interval: 6h
   sync:

@@ -37,7 +37,8 @@ kind: DesiredGroup
 metadata:
   name: daily-sla
 spec:
-  - type: Freshness
+  - name: freshness-24h
+    type: Freshness
     maxAge: 24h
     interval: 6h
 "#;
@@ -54,9 +55,11 @@ kind: DesiredGroup
 metadata:
   name: sales-quality-checks
 spec:
-  - type: SQL
+  - name: no-negative-amount
+    type: SQL
     query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
-  - type: Command
+  - name: dbt-test-sales
+    type: Command
     run: [dbt, test, --select, "tag:sales"]
 "#;
         let resource = parse_kind(yaml).unwrap();

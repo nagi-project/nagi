@@ -77,7 +77,7 @@ mod tests {
             asset_name: name.to_string(),
             ready,
             conditions: vec![ConditionResult {
-                index: 0,
+                condition_name: "check".to_string(),
                 condition_type: "SQL".to_string(),
                 status: if ready {
                     ConditionStatus::Ready

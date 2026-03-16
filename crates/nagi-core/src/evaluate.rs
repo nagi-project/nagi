@@ -11,7 +11,7 @@ use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConditionResult {
-    pub index: usize,
+    pub condition_name: String,
     pub condition_type: String,
     pub status: ConditionStatus,
 }
@@ -57,7 +57,9 @@ pub async fn evaluate_asset(
                 continue;
             }
             DesiredSetEntry::Inline(condition) => {
-                let result = condition::evaluate_condition(i, asset_name, condition, conn).await?;
+                let result =
+                    condition::evaluate_condition(condition.name(), i, asset_name, condition, conn)
+                        .await?;
                 results.push(result);
             }
         }
@@ -70,10 +72,10 @@ pub async fn evaluate_asset(
     })
 }
 
-/// A single condition from an asset's desiredSets, with its index.
+/// A single condition from an asset's desiredSets, with its name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DryRunCondition {
-    pub index: usize,
+    pub name: String,
     #[serde(flatten)]
     pub condition: DesiredCondition,
 }
@@ -89,12 +91,12 @@ pub struct DryRunResult {
 /// No DB connection or command execution is performed.
 pub fn dry_run_asset(asset_name: &str, spec: &AssetSpec) -> DryRunResult {
     let mut conditions = Vec::new();
-    for (i, entry) in spec.desired_sets.iter().enumerate() {
+    for entry in spec.desired_sets.iter() {
         match entry {
             DesiredSetEntry::Ref(_) => continue,
             DesiredSetEntry::Inline(condition) => {
                 conditions.push(DryRunCondition {
-                    index: i,
+                    name: condition.name().to_string(),
                     condition: condition.clone(),
                 });
             }
@@ -157,6 +159,7 @@ mod tests {
 
     fn freshness_condition(max_age_secs: u64, column: Option<&str>) -> DesiredCondition {
         DesiredCondition::Freshness {
+            name: "freshness".to_string(),
             max_age: duration(max_age_secs),
             interval: duration(3600),
             check_at: None,
@@ -233,6 +236,7 @@ mod tests {
             response: Value::Bool(true),
         };
         let spec = asset_spec_with(DesiredCondition::SQL {
+            name: "check".to_string(),
             query: "SELECT true".to_string(),
         });
         let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
@@ -245,6 +249,7 @@ mod tests {
             response: Value::Bool(false),
         };
         let spec = asset_spec_with(DesiredCondition::SQL {
+            name: "check".to_string(),
             query: "SELECT false".to_string(),
         });
         let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
@@ -278,9 +283,11 @@ mod tests {
             sources: vec![],
             desired_sets: vec![
                 DesiredSetEntry::Inline(DesiredCondition::SQL {
+                    name: "check-a".to_string(),
                     query: "SELECT true".to_string(),
                 }),
                 DesiredSetEntry::Inline(DesiredCondition::SQL {
+                    name: "check-b".to_string(),
                     query: "SELECT false".to_string(),
                 }),
             ],
@@ -321,6 +328,7 @@ mod tests {
     #[test]
     fn dry_run_sql() {
         let condition = DesiredCondition::SQL {
+            name: "check".to_string(),
             query: "SELECT COUNT(*) > 0 FROM orders".to_string(),
         };
         let spec = asset_spec_with(condition.clone());
@@ -331,6 +339,7 @@ mod tests {
     #[test]
     fn dry_run_command() {
         let condition = DesiredCondition::Command {
+            name: "dbt-test".to_string(),
             run: vec!["dbt".to_string(), "test".to_string()],
         };
         let spec = asset_spec_with(condition.clone());
@@ -348,6 +357,7 @@ mod tests {
                     ref_name: "group-a".to_string(),
                 }),
                 DesiredSetEntry::Inline(DesiredCondition::SQL {
+                    name: "check".to_string(),
                     query: "SELECT 1".to_string(),
                 }),
             ],
@@ -357,7 +367,7 @@ mod tests {
         };
         let result = dry_run_asset("my_table", &spec);
         assert_eq!(result.conditions.len(), 1);
-        assert_eq!(result.conditions[0].index, 1);
+        assert_eq!(result.conditions[0].name, "check");
     }
 
     #[test]

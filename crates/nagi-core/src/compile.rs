@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::dbt::manifest::{self, DbtManifest};
 use crate::kind::asset::{
-    validate_no_duplicate_conditions, AssetSpec, DesiredCondition, DesiredSetEntry,
+    validate_no_duplicate_condition_names, AssetSpec, DesiredCondition, DesiredSetEntry,
 };
 use crate::kind::origin::OriginSpec;
 use crate::kind::sync::SyncSpec;
@@ -420,7 +420,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
                 DesiredSetEntry::Ref(_) => unreachable!("refs are expanded above"),
             })
             .collect();
-        validate_no_duplicate_conditions(&all_conditions)?;
+        validate_no_duplicate_condition_names(&all_conditions)?;
 
         // Resolve connection from the first source's connection chain.
         let connection = spec
@@ -681,7 +681,8 @@ kind: DesiredGroup
 metadata:
   name: daily-sla
 spec:
-  - type: Freshness
+  - name: freshness-24h
+    type: Freshness
     maxAge: 24h
     interval: 6h";
 
@@ -710,7 +711,8 @@ metadata:
   name: daily-sales
 spec:
   desiredSets:
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         );
         let output = resolve(resources).unwrap();
@@ -732,7 +734,8 @@ metadata:
 spec:
   desiredSets:
     - ref: daily-sla
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         ]));
         let output = resolve(resources).unwrap();
@@ -836,7 +839,8 @@ spec:
   sources:
     - ref: raw-sales
   desiredSets:
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         ]));
         let output = resolve(resources).unwrap();
@@ -864,7 +868,8 @@ kind: DesiredGroup
 metadata:
   name: my-checks
 spec:
-  - type: SQL
+  - name: check
+    type: SQL
     query: \"SELECT true\"",
             "\
 apiVersion: nagi.io/v1alpha1
@@ -874,7 +879,8 @@ metadata:
 spec:
   desiredSets:
     - ref: my-checks
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         ]));
         let err = resolve(resources).unwrap_err();
@@ -1071,7 +1077,8 @@ metadata:
   name: daily-sales
 spec:
   desiredSets:
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         );
         let output = resolve(resources).unwrap();
@@ -1123,7 +1130,8 @@ metadata:
   name: daily-sales
 spec:
   desiredSets:
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         );
         let output = resolve(resources).unwrap();
@@ -1214,7 +1222,8 @@ metadata:
   name: nested-asset
 spec:
   desiredSets:
-    - type: SQL
+    - name: check
+      type: SQL
       query: \"SELECT true\"",
         );
 
