@@ -73,9 +73,12 @@ pub struct ResolvedAsset {
 
 /// Connection info resolved from Asset → Source → Connection chain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedConnection {
     pub profile: String,
     pub target: Option<String>,
+    /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
+    pub dbt_cloud_credentials_file: Option<String>,
 }
 
 /// Compiles all YAML resources from `assets_dir` and writes resolved output to `target_dir`.
@@ -431,6 +434,11 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             .map(|conn_spec| ResolvedConnection {
                 profile: conn_spec.dbt_profile.profile.clone(),
                 target: conn_spec.dbt_profile.target.clone(),
+                dbt_cloud_credentials_file: conn_spec.dbt_cloud.as_ref().map(|c| {
+                    c.credentials_file
+                        .clone()
+                        .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
+                }),
             });
 
         resolved_assets.push(ResolvedAsset {

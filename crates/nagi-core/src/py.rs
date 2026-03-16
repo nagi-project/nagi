@@ -105,7 +105,7 @@ pub fn evaluate_asset(yaml: &str, cache_dir: Option<&str>) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let result = rt.block_on(async {
         let conn = BigQueryConnection::new(config);
-        evaluate::evaluate_asset(&asset_name, &asset_spec, &conn)
+        evaluate::evaluate_asset(&asset_name, &asset_spec, Some(&conn))
             .await
             .map_err(to_py_err)
     })?;

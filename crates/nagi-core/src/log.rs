@@ -168,7 +168,10 @@ mod tests {
 
     #[test]
     fn parse_date_valid_iso8601() {
-        assert_eq!(parse_date("2026-03-16T10:00:00+09:00").unwrap(), "2026-03-16");
+        assert_eq!(
+            parse_date("2026-03-16T10:00:00+09:00").unwrap(),
+            "2026-03-16"
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::compile::CompileError;
 
+pub mod cloud;
 pub mod manifest;
 pub mod profile;
 

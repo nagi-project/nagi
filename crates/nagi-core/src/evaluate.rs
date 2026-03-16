@@ -40,14 +40,19 @@ pub enum EvaluateError {
     UnexpectedResult(String),
     #[error("command error: {0}")]
     CommandFailed(String),
+    #[error("condition '{condition_name}' requires a DB connection, but none is configured")]
+    NoConnection { condition_name: String },
 }
 
-/// Evaluates all desired conditions of `spec` against the given connection.
-/// `asset_name` is used as the default table name for queries.
+/// Evaluates all desired conditions of `spec`.
+///
+/// `conn` is required only for SQL-based conditions (Freshness, SQL).
+/// Passing `None` for an Asset that only uses `Command` conditions is valid.
+/// Passing `None` when a SQL condition is present returns `EvaluateError::NoConnection`.
 pub async fn evaluate_asset(
     asset_name: &str,
     spec: &AssetSpec,
-    conn: &dyn Connection,
+    conn: Option<&dyn Connection>,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let mut results = Vec::new();
     for (i, entry) in spec.desired_sets.iter().enumerate() {
@@ -184,7 +189,7 @@ mod tests {
             response: epoch_secs_ago(3600.0),
         };
         let spec = asset_spec_with(freshness_condition(7200, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, &conn)
+        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn))
             .await
             .unwrap();
         assert!(result.ready);
@@ -198,7 +203,7 @@ mod tests {
             response: epoch_secs_ago(25.0 * 3600.0),
         };
         let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, &conn)
+        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn))
             .await
             .unwrap();
         assert!(!result.ready);
@@ -214,7 +219,9 @@ mod tests {
             response: Value::String("2099-01-01T00:00:00Z".to_string()),
         };
         let spec = asset_spec_with(freshness_condition(86400, Some("updated_at")));
-        let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
+        let result = evaluate_asset("my_table", &spec, Some(&conn))
+            .await
+            .unwrap();
         assert!(result.ready);
     }
 
@@ -224,7 +231,7 @@ mod tests {
             response: Value::Null,
         };
         let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_table", &spec, &conn).await;
+        let result = evaluate_asset("my_table", &spec, Some(&conn)).await;
         assert!(matches!(result, Err(EvaluateError::UnexpectedResult(_))));
     }
 
@@ -239,7 +246,9 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT true".to_string(),
         });
-        let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
+        let result = evaluate_asset("my_table", &spec, Some(&conn))
+            .await
+            .unwrap();
         assert!(result.ready);
     }
 
@@ -252,7 +261,9 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT false".to_string(),
         });
-        let result = evaluate_asset("my_table", &spec, &conn).await.unwrap();
+        let result = evaluate_asset("my_table", &spec, Some(&conn))
+            .await
+            .unwrap();
         assert!(!result.ready);
     }
 
@@ -295,7 +306,7 @@ mod tests {
             sync: None,
             resync: None,
         };
-        let result = evaluate_asset("my_table", &spec, &CountingConnection(&call_count))
+        let result = evaluate_asset("my_table", &spec, Some(&CountingConnection(&call_count)))
             .await
             .unwrap();
         assert!(!result.ready);
@@ -382,5 +393,41 @@ mod tests {
         };
         let result = dry_run_asset("my_table", &spec);
         assert!(result.conditions.is_empty());
+    }
+
+    // ── Command without connection ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn command_condition_does_not_need_connection() {
+        // Assets with only Command conditions can be evaluated without a DB connection.
+        let spec = asset_spec_with(DesiredCondition::Command {
+            name: "always-true".to_string(),
+            run: vec!["true".to_string()],
+        });
+        let result = evaluate_asset("my_table", &spec, None).await.unwrap();
+        assert!(result.ready);
+    }
+
+    #[tokio::test]
+    async fn sql_condition_without_connection_returns_error() {
+        let spec = asset_spec_with(DesiredCondition::SQL {
+            name: "check".to_string(),
+            query: "SELECT 1".to_string(),
+        });
+        let result = evaluate_asset("my_table", &spec, None).await;
+        assert!(matches!(
+            result,
+            Err(EvaluateError::NoConnection { condition_name }) if condition_name == "check"
+        ));
+    }
+
+    #[tokio::test]
+    async fn freshness_condition_without_connection_returns_error() {
+        let spec = asset_spec_with(freshness_condition(86400, None));
+        let result = evaluate_asset("my_table", &spec, None).await;
+        assert!(matches!(
+            result,
+            Err(EvaluateError::NoConnection { condition_name }) if condition_name == "freshness"
+        ));
     }
 }

@@ -19,20 +19,24 @@ pub enum DbtProfileError {
 }
 
 /// Parsed representation of `~/.dbt/profiles.yml`.
-#[derive(Debug, Clone, PartialEq)]
+// Not derived Debug — OutputConfig.fields may contain passwords from profiles.yml.
+#[derive(Clone, PartialEq)]
 pub struct DbtProfilesFile {
     profiles: HashMap<String, Profile>,
 }
 
 /// A single dbt profile entry with its outputs.
-#[derive(Debug, Clone, PartialEq)]
+// Not derived Debug — OutputConfig.fields may contain passwords from profiles.yml.
+#[derive(Clone, PartialEq)]
 pub struct Profile {
     pub default_target: String,
     pub outputs: HashMap<String, OutputConfig>,
 }
 
 /// Connection configuration for a single target output.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+// Not derived Debug — `fields` holds raw deserialized profiles.yml values which may include
+// passwords, private keys, or other credentials.
+#[derive(Clone, PartialEq, Deserialize)]
 pub struct OutputConfig {
     #[serde(rename = "type")]
     pub adapter_type: String,
@@ -192,7 +196,7 @@ other_project:
     #[test]
     fn rejects_unknown_profile() {
         let f = DbtProfilesFile::parse_str(PROFILES_YAML).unwrap();
-        let err = f.resolve("no_such_profile", None).unwrap_err();
+        let err = f.resolve("no_such_profile", None).err().unwrap();
         assert!(
             matches!(err, DbtProfileError::ProfileNotFound { profile } if profile == "no_such_profile")
         );
@@ -201,7 +205,10 @@ other_project:
     #[test]
     fn rejects_unknown_target() {
         let f = DbtProfilesFile::parse_str(PROFILES_YAML).unwrap();
-        let err = f.resolve("my_project", Some("no_such_target")).unwrap_err();
+        let err = f
+            .resolve("my_project", Some("no_such_target"))
+            .err()
+            .unwrap();
         assert!(matches!(
             err,
             DbtProfileError::TargetNotFound { profile, target }
