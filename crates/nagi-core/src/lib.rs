@@ -7,6 +7,7 @@ pub mod evaluate;
 pub mod kind;
 pub mod select;
 pub mod storage;
+pub mod sync;
 
 #[cfg(feature = "python")]
 mod py;
