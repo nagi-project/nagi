@@ -51,27 +51,29 @@ pub fn evaluate_all(
     .map_err(to_py_err)
 }
 
-/// Compiles assets from `assets_dir` into `target_dir`.
-/// Returns the dependency graph as a JSON string.
+/// Compiles assets and returns a summary JSON.
+/// Returns: `{"nodes": N, "edges": N, "target": "..."}`
 #[pyfunction]
 pub fn compile_assets(assets_dir: &str, target_dir: &str) -> PyResult<String> {
     let assets_path = std::path::Path::new(assets_dir);
     let target_path = std::path::Path::new(target_dir);
     let output = crate::compile::compile(assets_path, target_path).map_err(to_py_err)?;
-    serde_json::to_string(&output.graph).map_err(to_py_err)
+    let summary = serde_json::json!({
+        "nodes": output.graph.nodes.len(),
+        "edges": output.graph.edges.len(),
+        "target": target_dir,
+    });
+    serde_json::to_string(&summary).map_err(to_py_err)
 }
 
-/// Lists dbt Origins found in `assets_dir`.
-/// Returns a JSON array of `{"name": "...", "projectDir": "..."}`.
+/// Lists dbt Origin project directories found in `assets_dir`.
+/// Returns a comma-separated string of directories, or empty string if none.
 #[pyfunction]
-pub fn list_dbt_origins(assets_dir: &str) -> PyResult<String> {
+pub fn list_dbt_origin_dirs(assets_dir: &str) -> PyResult<String> {
     let assets_path = std::path::Path::new(assets_dir);
     let origins = crate::compile::list_dbt_origin_dirs(assets_path).map_err(to_py_err)?;
-    let result: Vec<serde_json::Value> = origins
-        .iter()
-        .map(|(name, dir)| serde_json::json!({"name": name, "projectDir": dir}))
-        .collect();
-    serde_json::to_string(&result).map_err(to_py_err)
+    let dirs: Vec<&str> = origins.iter().map(|(_, dir)| dir.as_str()).collect();
+    Ok(dirs.join(", "))
 }
 
 // ── Sync / Resync ────────────────────────────────────────────────────────────

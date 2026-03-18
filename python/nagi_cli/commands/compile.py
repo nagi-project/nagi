@@ -2,7 +2,7 @@ import json
 
 import click
 
-from nagi_cli._nagi_core import compile_assets, list_dbt_origins
+from nagi_cli._nagi_core import compile_assets, list_dbt_origin_dirs
 
 
 @click.command()
@@ -28,32 +28,15 @@ from nagi_cli._nagi_core import compile_assets, list_dbt_origins
 def compile(assets_dir: str, target_dir: str, yes: bool) -> None:
     """Compile asset definitions into resolved target output."""
     try:
-        if not yes and _should_skip_dbt_compile(assets_dir):
-            return
+        if not yes:
+            dirs = list_dbt_origin_dirs(assets_dir)
+            if dirs and not click.confirm(
+                f"This will run `dbt compile` for: {dirs}. Continue?",
+                default=True,
+            ):
+                return
 
-        graph_json = compile_assets(assets_dir, target_dir)
-        graph = json.loads(graph_json)
-        click.echo(
-            json.dumps(
-                {
-                    "nodes": len(graph["nodes"]),
-                    "edges": len(graph["edges"]),
-                    "target": target_dir,
-                }
-            )
-        )
+        click.echo(compile_assets(assets_dir, target_dir))
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
-
-
-def _should_skip_dbt_compile(assets_dir: str) -> bool:
-    origins_json = list_dbt_origins(assets_dir)
-    origins = json.loads(origins_json)
-    if not origins:
-        return False
-    dirs = ", ".join(o["projectDir"] for o in origins)
-    return not click.confirm(
-        f"This will run `dbt compile` for: {dirs}. Continue?",
-        default=True,
-    )

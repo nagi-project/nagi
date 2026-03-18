@@ -25,7 +25,7 @@ fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py::load_dbt_profiles, m)?)?;
     m.add_function(wrap_pyfunction!(py::evaluate_all, m)?)?;
     m.add_function(wrap_pyfunction!(py::compile_assets, m)?)?;
-    m.add_function(wrap_pyfunction!(py::list_dbt_origins, m)?)?;
+    m.add_function(wrap_pyfunction!(py::list_dbt_origin_dirs, m)?)?;
     m.add_function(wrap_pyfunction!(py::propose_sync, m)?)?;
     m.add_function(wrap_pyfunction!(py::execute_sync_proposal, m)?)?;
     m.add_function(wrap_pyfunction!(py::asset_status, m)?)?;
