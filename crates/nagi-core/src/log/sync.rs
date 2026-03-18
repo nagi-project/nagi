@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 use crate::sync::SyncExecutionResult;
 
 use super::{file, parse_date, sanitize_path_component, LogError, LogStore};
@@ -12,7 +14,8 @@ pub struct SyncLogFilePaths {
 }
 
 /// A sync log entry as read from SQLite.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncLogEntry {
     pub execution_id: String,
     pub stage: String,

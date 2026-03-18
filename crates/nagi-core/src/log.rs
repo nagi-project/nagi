@@ -144,6 +144,7 @@ mod tests {
                     condition_type: "SQL".to_string(),
                     status: ConditionStatus::Ready,
                 }],
+                evaluation_id: None,
             };
             store
                 .write_evaluate_log(

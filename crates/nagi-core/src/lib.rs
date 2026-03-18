@@ -4,9 +4,11 @@ pub mod db;
 pub mod dbt;
 pub mod duration;
 pub mod evaluate;
+pub mod init;
 pub mod kind;
 pub mod log;
 pub mod select;
+pub mod status;
 pub mod storage;
 pub mod sync;
 
@@ -20,16 +22,15 @@ use pyo3::prelude::*;
 #[pymodule]
 #[pyo3(name = "_nagi_core")]
 fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(py::parse_yaml, m)?)?;
     m.add_function(wrap_pyfunction!(py::load_dbt_profiles, m)?)?;
-    m.add_function(wrap_pyfunction!(py::load_dbt_profiles_from, m)?)?;
-    m.add_function(wrap_pyfunction!(py::test_connection, m)?)?;
-    m.add_function(wrap_pyfunction!(py::evaluate_asset, m)?)?;
-    m.add_function(wrap_pyfunction!(py::dry_run_asset, m)?)?;
+    m.add_function(wrap_pyfunction!(py::evaluate_all, m)?)?;
     m.add_function(wrap_pyfunction!(py::compile_assets, m)?)?;
     m.add_function(wrap_pyfunction!(py::list_dbt_origins, m)?)?;
-    m.add_function(wrap_pyfunction!(py::select_assets, m)?)?;
-    m.add_function(wrap_pyfunction!(py::read_cache, m)?)?;
-    m.add_function(wrap_pyfunction!(py::list_cache, m)?)?;
+    m.add_function(wrap_pyfunction!(py::propose_sync, m)?)?;
+    m.add_function(wrap_pyfunction!(py::execute_sync_proposal, m)?)?;
+    m.add_function(wrap_pyfunction!(py::asset_status, m)?)?;
+    m.add_function(wrap_pyfunction!(py::init_workspace, m)?)?;
+    m.add_function(wrap_pyfunction!(py::run_dbt_debug, m)?)?;
+    m.add_function(wrap_pyfunction!(py::write_init_dbt_files, m)?)?;
     Ok(())
 }

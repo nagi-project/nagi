@@ -1,9 +1,13 @@
 mod execute;
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::compile::CompiledAsset;
 use crate::kind::sync::SyncSpec;
+use crate::log::{LogError, LogStore};
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -18,6 +22,24 @@ pub enum SyncError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("log error: {0}")]
+    Log(#[from] LogError),
+
+    #[error("failed to parse compiled asset: {0}")]
+    Parse(String),
+
+    #[error("compile error: {0}")]
+    Compile(#[from] crate::compile::CompileError),
+
+    #[error("dbt Cloud error: {0}")]
+    DbtCloud(String),
+
+    #[error("serialization error: {0}")]
+    Serialize(String),
+
+    #[error("invalid sync_type: {0}")]
+    InvalidSyncType(String),
 }
 
 /// Which type of sync operation is being executed.
@@ -141,11 +163,13 @@ fn resolve_stages(spec: &SyncSpec, requested: Option<&[Stage]>) -> Vec<Stage> {
 ///
 /// Runs the stages in order (pre → run → post), short-circuiting on the first
 /// non-zero exit code. When `stages` is `None`, all defined stages are executed.
+/// When `log_store` is `Some`, automatically writes sync logs after execution.
 pub async fn execute_sync(
     asset_name: &str,
     sync_spec: &SyncSpec,
     sync_type: SyncType,
     stages: Option<&[Stage]>,
+    log_store: Option<&LogStore>,
 ) -> Result<SyncExecutionResult, SyncError> {
     let execution_id = generate_uuid();
     let stages_to_run = resolve_stages(sync_spec, stages);
@@ -168,13 +192,19 @@ pub async fn execute_sync(
         }
     }
 
-    Ok(SyncExecutionResult {
+    let result = SyncExecutionResult {
         execution_id,
         asset_name: asset_name.to_string(),
         sync_type,
         stages: results,
         success: overall_success,
-    })
+    };
+
+    if let Some(store) = log_store {
+        store.write_sync_log(&result)?;
+    }
+
+    Ok(result)
 }
 
 /// Returns a dry-run summary without executing anything.
@@ -204,7 +234,7 @@ pub fn dry_run_sync(
     }
 }
 
-fn generate_uuid() -> String {
+pub(crate) fn generate_uuid() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -229,6 +259,213 @@ fn generate_uuid() -> String {
         (0x8000 | (random >> 12) & 0x3FFF) as u16,
         random & 0x0000_FFFF_FFFF_FFFF,
     )
+}
+
+fn parse_sync_type(s: &str) -> Result<SyncType, SyncError> {
+    match s {
+        "sync" => Ok(SyncType::Sync),
+        "resync" => Ok(SyncType::Resync),
+        other => Err(SyncError::InvalidSyncType(other.to_string())),
+    }
+}
+
+fn resolve_sync_spec(compiled: &CompiledAsset, st: SyncType) -> Result<SyncSpec, SyncError> {
+    let spec = match st {
+        SyncType::Sync => compiled.spec.sync.clone(),
+        SyncType::Resync => compiled.spec.resync.clone().or(compiled.spec.sync.clone()),
+    };
+    spec.ok_or_else(|| SyncError::NoSyncSpec {
+        asset_name: compiled.metadata.name.clone(),
+    })
+}
+
+/// Builds sync proposals for all compiled assets matching the selectors.
+///
+/// Evaluation or dry-run failures are not fatal — each proposal will omit
+/// whichever part failed.
+pub async fn propose_sync_all(
+    target_dir: &Path,
+    selectors: &[&str],
+    sync_type: &str,
+    stages: Option<&str>,
+    cache_dir: Option<&Path>,
+    db_path: Option<&Path>,
+    logs_dir: Option<&Path>,
+) -> Result<Vec<SyncProposal>, SyncError> {
+    let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
+    let st = parse_sync_type(sync_type)?;
+    let mut proposals = Vec::with_capacity(assets.len());
+
+    for (name, yaml) in &assets {
+        let evaluation = match crate::evaluate::evaluate_from_compiled(yaml, cache_dir, db_path, logs_dir).await {
+            Ok(json) => serde_json::from_str(&json).ok(),
+            Err(_) => None,
+        };
+
+        let compiled: CompiledAsset =
+            serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
+        let dry_run_stages = match resolve_sync_spec(&compiled, st) {
+            Ok(sync_spec) => {
+                let parsed_stages = stages.map(Stage::parse_list).transpose()?;
+                let dr = dry_run_sync(name, &sync_spec, st, parsed_stages.as_deref());
+                Some(dr.stages)
+            }
+            Err(_) => None,
+        };
+
+        proposals.push(SyncProposal {
+            asset: name.clone(),
+            yaml_content: yaml.clone(),
+            sync_type: st,
+            evaluation,
+            stages: dry_run_stages,
+        });
+    }
+
+    Ok(proposals)
+}
+
+/// Result of `propose_sync`: evaluation + dry-run stages for user confirmation.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProposal {
+    pub asset: String,
+    #[serde(skip)]
+    pub yaml_content: String,
+    pub sync_type: SyncType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evaluation: Option<SyncProposalEvaluation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stages: Option<Vec<DryRunStage>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProposalEvaluation {
+    pub ready: bool,
+    pub conditions: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evaluation_id: Option<String>,
+}
+
+/// Checks dbt Cloud for running jobs. Returns an error if any are found.
+async fn check_dbt_cloud_preflight(compiled: &CompiledAsset) -> Result<(), SyncError> {
+    let cred_path = compiled
+        .connection
+        .as_ref()
+        .and_then(|c| c.dbt_cloud_credentials_file.as_ref());
+    let Some(cred_path) = cred_path else {
+        return Ok(());
+    };
+    let jobs = crate::dbt::cloud::check_running_jobs(Path::new(cred_path))
+        .await
+        .map_err(|e| SyncError::DbtCloud(e.to_string()))?;
+    if !jobs.is_empty() {
+        let details: Vec<String> = jobs
+            .iter()
+            .map(|j| format!("  {} ({})", j.job_name, j.status_humanized))
+            .collect();
+        return Err(SyncError::DbtCloud(format!(
+            "dbt Cloud has running jobs:\n{}\nUse --force to override.",
+            details.join("\n")
+        )));
+    }
+    Ok(())
+}
+
+fn open_log_store(
+    db_path: Option<&Path>,
+    logs_dir: Option<&Path>,
+) -> Result<Option<LogStore>, SyncError> {
+    match (db_path, logs_dir) {
+        (Some(db), Some(logs)) => Ok(Some(LogStore::open(db, logs)?)),
+        _ => Ok(None),
+    }
+}
+
+fn serialize<T: Serialize>(value: &T) -> Result<String, SyncError> {
+    serde_json::to_string(value).map_err(|e| SyncError::Serialize(e.to_string()))
+}
+
+/// Executes sync from compiled asset YAML.
+///
+/// Handles sync type/spec resolution, dry-run, dbt Cloud pre-flight check,
+/// logging, evaluation linking, and post-sync re-evaluation.
+pub async fn sync_from_compiled(
+    yaml: &str,
+    sync_type: &str,
+    stages: Option<&str>,
+    db_path: Option<&Path>,
+    logs_dir: Option<&Path>,
+    cache_dir: Option<&Path>,
+    dry_run: bool,
+    force: bool,
+    evaluation_id: Option<&str>,
+) -> Result<String, SyncError> {
+    let compiled: CompiledAsset =
+        serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
+    let st = parse_sync_type(sync_type)?;
+    let sync_spec = resolve_sync_spec(&compiled, st)?;
+    let parsed_stages = stages.map(Stage::parse_list).transpose()?;
+
+    if dry_run {
+        let result = dry_run_sync(
+            &compiled.metadata.name,
+            &sync_spec,
+            st,
+            parsed_stages.as_deref(),
+        );
+        return serialize(&result);
+    }
+
+    if !force {
+        check_dbt_cloud_preflight(&compiled).await?;
+    }
+
+    let log_store = open_log_store(db_path, logs_dir)?;
+    let result = execute_sync(
+        &compiled.metadata.name,
+        &sync_spec,
+        st,
+        parsed_stages.as_deref(),
+        log_store.as_ref(),
+    )
+    .await?;
+
+    // Link pre-sync evaluation to this execution.
+    if let (Some(store), Some(eval_id)) = (log_store.as_ref(), evaluation_id) {
+        let _ = store.write_sync_evaluation(&result.execution_id, eval_id);
+    }
+
+    // Re-evaluate after sync (only when no stage filter).
+    if stages.is_none() {
+        let _ = post_sync_re_evaluate(yaml, cache_dir, db_path, logs_dir, &result).await;
+    }
+
+    serialize(&result)
+}
+
+/// Re-evaluates the asset after sync and links the new evaluation to the execution.
+async fn post_sync_re_evaluate(
+    yaml: &str,
+    cache_dir: Option<&Path>,
+    db_path: Option<&Path>,
+    logs_dir: Option<&Path>,
+    sync_result: &SyncExecutionResult,
+) -> Result<(), SyncError> {
+    let eval_json = crate::evaluate::evaluate_from_compiled(yaml, cache_dir, db_path, logs_dir)
+        .await
+        .map_err(|e| SyncError::Parse(e.to_string()))?;
+
+    if let (Some(db), Some(logs)) = (db_path, logs_dir) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&eval_json) {
+            if let Some(eval_id) = val.get("evaluationId").and_then(|v| v.as_str()) {
+                let store = LogStore::open(db, logs)?;
+                let _ = store.write_sync_evaluation(&sync_result.execution_id, eval_id);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -328,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_run_only_success() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None)
+        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
             .await
             .unwrap();
         assert!(result.success);
@@ -342,7 +579,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_full_spec_success() {
-        let result = execute_sync("test-asset", &full_spec(), SyncType::Sync, None)
+        let result = execute_sync("test-asset", &full_spec(), SyncType::Sync, None, None)
             .await
             .unwrap();
         assert!(result.success);
@@ -362,7 +599,7 @@ mod tests {
             },
             post: None,
         };
-        let result = execute_sync("test-asset", &spec, SyncType::Sync, None)
+        let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap();
         assert_eq!(result.stages[0].stdout.trim(), "hello world");
@@ -382,7 +619,7 @@ mod tests {
             },
             post: None,
         };
-        let result = execute_sync("test-asset", &spec, SyncType::Sync, None)
+        let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap();
         assert_eq!(result.stages[0].stderr.trim(), "error");
@@ -401,7 +638,7 @@ mod tests {
             },
             post: None,
         };
-        let result = execute_sync("test-asset", &spec, SyncType::Sync, None)
+        let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap();
         assert!(!result.success);
@@ -417,6 +654,7 @@ mod tests {
             &full_spec(),
             SyncType::Sync,
             Some(&[Stage::Run]),
+            None,
         )
         .await
         .unwrap();
@@ -427,7 +665,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_resync_type() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Resync, None)
+        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Resync, None, None)
             .await
             .unwrap();
         assert_eq!(result.sync_type, SyncType::Resync);
@@ -435,7 +673,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_records_timestamps() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None)
+        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
             .await
             .unwrap();
         let stage = &result.stages[0];
@@ -447,7 +685,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_records_args() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None)
+        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
             .await
             .unwrap();
         assert_eq!(result.stages[0].args, vec!["echo", "hello"]);
@@ -463,7 +701,7 @@ mod tests {
             },
             post: None,
         };
-        let err = execute_sync("test-asset", &spec, SyncType::Sync, None)
+        let err = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap_err();
         assert!(matches!(err, SyncError::SpawnFailed(_)));

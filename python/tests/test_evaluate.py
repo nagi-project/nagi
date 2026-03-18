@@ -13,12 +13,14 @@ from tests.helper import (
     write_valid_assets,
 )
 
-MOCK_RESULT = json.dumps(
-    {
-        "asset": ASSET_NAME,
-        "ready": True,
-        "conditions": [],
-    }
+MOCK_RESULTS = json.dumps(
+    [
+        {
+            "asset": ASSET_NAME,
+            "ready": True,
+            "conditions": [],
+        }
+    ]
 )
 
 
@@ -39,8 +41,8 @@ class TestEvaluateSuccess:
 
         runner = CliRunner()
         with patch(
-            "nagi_cli.commands.evaluate.evaluate_asset",
-            return_value=MOCK_RESULT,
+            "nagi_cli.commands.evaluate.evaluate_all",
+            return_value=MOCK_RESULTS,
         ):
             result = runner.invoke(
                 evaluate,
@@ -56,8 +58,8 @@ class TestEvaluateSuccess:
 
         runner = CliRunner()
         with patch(
-            "nagi_cli.commands.evaluate.evaluate_asset",
-            return_value=MOCK_RESULT,
+            "nagi_cli.commands.evaluate.evaluate_all",
+            return_value=MOCK_RESULTS,
         ):
             result = runner.invoke(
                 evaluate,
@@ -66,19 +68,17 @@ class TestEvaluateSuccess:
                     str(target_dir),
                 ],
             )
-        # Output may contain multiple lines (one per asset); check first line.
-        first_line = result.output.strip().split("\n")[0]
-        output = json.loads(first_line)
-        assert output["asset"] == ASSET_NAME
-        assert output["ready"] is True
+        output = json.loads(result.output.strip())
+        assert output[0]["asset"] == ASSET_NAME
+        assert output[0]["ready"] is True
 
     def test_select_filters_assets(self, tmp_path: Path) -> None:
         target_dir = _compile_assets(tmp_path)
 
         runner = CliRunner()
         with patch(
-            "nagi_cli.commands.evaluate.evaluate_asset",
-            return_value=MOCK_RESULT,
+            "nagi_cli.commands.evaluate.evaluate_all",
+            return_value=MOCK_RESULTS,
         ) as mock:
             result = runner.invoke(
                 evaluate,
@@ -90,16 +90,19 @@ class TestEvaluateSuccess:
                 ],
             )
         assert result.exit_code == 0
-        assert mock.call_count == 1
+        mock.assert_called_once()
+        args = mock.call_args
+        assert list(args[0][1]) == [ASSET_NAME]
 
 
 class TestEvaluateDryRun:
-    def test_dry_run_does_not_evaluate(self, tmp_path: Path) -> None:
+    def test_dry_run_passes_flag(self, tmp_path: Path) -> None:
         target_dir = _compile_assets(tmp_path)
 
         runner = CliRunner()
         with patch(
-            "nagi_cli.commands.evaluate.evaluate_asset",
+            "nagi_cli.commands.evaluate.evaluate_all",
+            return_value="[]",
         ) as mock:
             result = runner.invoke(
                 evaluate,
@@ -110,7 +113,8 @@ class TestEvaluateDryRun:
                 ],
             )
         assert result.exit_code == 0
-        mock.assert_not_called()
+        args = mock.call_args
+        assert args[0][3] is True  # dry_run=True
 
     def test_dry_run_outputs_asset_list(self, tmp_path: Path) -> None:
         target_dir = _compile_assets(tmp_path)
@@ -127,13 +131,13 @@ class TestEvaluateDryRun:
             ],
         )
         output = json.loads(result.output)
-        assert output["dry_run"] is True
-        asset_names = [a["assetName"] for a in output["assets"]]
-        assert ASSET_NAME in asset_names
-        # Verify condition details match YAML fields
-        daily = next(a for a in output["assets"] if a["assetName"] == ASSET_NAME)
-        assert len(daily["conditions"]) == 1
-        cond = daily["conditions"][0]
+        assert isinstance(output, list)
+        assert len(output) == 1
+        asset = output[0]
+        assert asset["dry_run"] is True
+        assert asset["assetName"] == ASSET_NAME
+        assert len(asset["conditions"]) == 1
+        cond = asset["conditions"][0]
         assert cond["type"] == "Freshness"
         assert cond["maxAge"] == FRESHNESS_MAX_AGE
         assert cond["interval"] == FRESHNESS_INTERVAL
@@ -159,7 +163,7 @@ class TestEvaluateFailure:
 
         runner = CliRunner()
         with patch(
-            "nagi_cli.commands.evaluate.evaluate_asset",
+            "nagi_cli.commands.evaluate.evaluate_all",
             side_effect=RuntimeError("connection failed"),
         ):
             result = runner.invoke(

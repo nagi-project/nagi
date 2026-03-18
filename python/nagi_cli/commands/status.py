@@ -1,6 +1,6 @@
 import click
 
-from nagi_cli._nagi_core import evaluate_all
+from nagi_cli._nagi_core import asset_status
 
 
 @click.command()
@@ -21,21 +21,14 @@ from nagi_cli._nagi_core import evaluate_all
     default=None,
     help="Cache directory (defaults to ~/.nagi/cache/)",
 )
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    default=False,
-    help="Show which assets would be evaluated without executing.",
-)
-def evaluate(
+def status(
     selectors: tuple[str, ...],
     target_dir: str,
     cache_dir: str | None,
-    dry_run: bool,
 ) -> None:
-    """Evaluate desired conditions for assets from compiled target output."""
+    """Show current convergence status (reads cache and latest sync log)."""
     try:
-        result_json = evaluate_all(target_dir, list(selectors), cache_dir, dry_run)
+        result_json = asset_status(target_dir, list(selectors), cache_dir)
     except RuntimeError as e:
         import json
 

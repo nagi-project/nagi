@@ -87,6 +87,7 @@ mod tests {
                     }
                 },
             }],
+            evaluation_id: None,
         }
     }
 

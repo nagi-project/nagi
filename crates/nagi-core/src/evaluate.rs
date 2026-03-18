@@ -3,10 +3,19 @@ mod command;
 mod condition;
 mod freshness;
 
+use std::path::{Path, PathBuf};
+
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use crate::compile::CompiledAsset;
+use crate::db::bigquery::{BigQueryConfig, BigQueryConnection};
 use crate::db::{Connection, ConnectionError};
+use crate::dbt::profile::DbtProfilesFile;
 use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
+use crate::log::{LogError, LogStore};
+use crate::storage::local::LocalCache;
+use crate::storage::Cache;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +39,9 @@ pub struct AssetEvalResult {
     /// true when all conditions are Ready.
     pub ready: bool,
     pub conditions: Vec<ConditionResult>,
+    /// Set when the result was logged via `LogStore`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evaluation_id: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +54,18 @@ pub enum EvaluateError {
     CommandFailed(String),
     #[error("condition '{condition_name}' requires a DB connection, but none is configured")]
     NoConnection { condition_name: String },
+    #[error("log error: {0}")]
+    Log(#[from] LogError),
+    #[error("compile error: {0}")]
+    Compile(#[from] crate::compile::CompileError),
+    #[error("failed to parse compiled asset: {0}")]
+    Parse(String),
+    #[error("profile error: {0}")]
+    Profile(String),
+    #[error("cache error: {0}")]
+    Cache(String),
+    #[error("serialization error: {0}")]
+    Serialize(String),
 }
 
 /// Evaluates all desired conditions of `spec`.
@@ -49,11 +73,15 @@ pub enum EvaluateError {
 /// `conn` is required only for SQL-based conditions (Freshness, SQL).
 /// Passing `None` for an Asset that only uses `Command` conditions is valid.
 /// Passing `None` when a SQL condition is present returns `EvaluateError::NoConnection`.
+/// When `log_store` is `Some`, automatically writes evaluate logs after evaluation.
 pub async fn evaluate_asset(
     asset_name: &str,
     spec: &AssetSpec,
     conn: Option<&dyn Connection>,
+    log_store: Option<&LogStore>,
 ) -> Result<AssetEvalResult, EvaluateError> {
+    let started_at = Utc::now();
+
     let mut results = Vec::new();
     for (i, entry) in spec.desired_sets.iter().enumerate() {
         match entry {
@@ -70,10 +98,29 @@ pub async fn evaluate_asset(
         }
     }
     let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
+
+    let evaluation_id = if let Some(store) = log_store {
+        let id = crate::sync::generate_uuid();
+        let finished_at = Utc::now();
+        let started_str = started_at.to_rfc3339();
+        let finished_str = finished_at.to_rfc3339();
+        let result_for_log = AssetEvalResult {
+            asset_name: asset_name.to_string(),
+            ready,
+            conditions: results.clone(),
+            evaluation_id: None,
+        };
+        store.write_evaluate_log(&id, &result_for_log, &started_str, &finished_str)?;
+        Some(id)
+    } else {
+        None
+    };
+
     Ok(AssetEvalResult {
         asset_name: asset_name.to_string(),
         ready,
         conditions: results,
+        evaluation_id,
     })
 }
 
@@ -111,6 +158,102 @@ pub fn dry_run_asset(asset_name: &str, spec: &AssetSpec) -> DryRunResult {
         asset_name: asset_name.to_string(),
         conditions,
     }
+}
+
+fn compiled_to_asset_spec(compiled: &CompiledAsset) -> AssetSpec {
+    AssetSpec {
+        tags: compiled.spec.tags.clone(),
+        sources: compiled.spec.sources.clone(),
+        desired_sets: compiled.spec.desired_sets.clone(),
+        auto_sync: compiled.spec.auto_sync,
+        sync: None,
+        resync: None,
+    }
+}
+
+fn resolve_connection(
+    conn_info: &crate::compile::ResolvedConnection,
+) -> Result<BigQueryConnection, EvaluateError> {
+    let f = DbtProfilesFile::load_default().map_err(|e| EvaluateError::Profile(e.to_string()))?;
+    let output = f
+        .resolve(&conn_info.profile, conn_info.target.as_deref())
+        .map_err(|e| EvaluateError::Profile(e.to_string()))?;
+    let config = BigQueryConfig::from_output(output)?;
+    Ok(BigQueryConnection::new(config))
+}
+
+/// Evaluates an asset from its compiled YAML.
+///
+/// Handles connection resolution, logging, and cache — callers pass only paths.
+pub async fn evaluate_from_compiled(
+    yaml: &str,
+    cache_dir: Option<&Path>,
+    db_path: Option<&Path>,
+    logs_dir: Option<&Path>,
+) -> Result<String, EvaluateError> {
+    let compiled: CompiledAsset =
+        serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
+    let asset_name = &compiled.metadata.name;
+    let spec = compiled_to_asset_spec(&compiled);
+
+    let log_store = match (db_path, logs_dir) {
+        (Some(db), Some(logs)) => Some(LogStore::open(db, logs)?),
+        _ => None,
+    };
+
+    let conn = compiled
+        .connection
+        .as_ref()
+        .map(resolve_connection)
+        .transpose()?;
+
+    let result = match conn.as_ref() {
+        Some(c) => evaluate_asset(asset_name, &spec, Some(c), log_store.as_ref()).await?,
+        None => evaluate_asset(asset_name, &spec, None, log_store.as_ref()).await?,
+    };
+
+    let cache_path = cache_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(LocalCache::default_dir);
+    let cache = LocalCache::new(cache_path);
+    cache
+        .write(&result)
+        .map_err(|e| EvaluateError::Cache(e.to_string()))?;
+
+    serde_json::to_string(&result).map_err(|e| EvaluateError::Serialize(e.to_string()))
+}
+
+/// Evaluates all compiled assets matching the selectors.
+/// Returns a JSON array of evaluation results.
+pub async fn evaluate_all(
+    target_dir: &Path,
+    selectors: &[&str],
+    cache_dir: Option<&Path>,
+    dry_run: bool,
+) -> Result<String, EvaluateError> {
+    let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
+    let mut results: Vec<serde_json::Value> = Vec::with_capacity(assets.len());
+
+    for (_name, yaml) in &assets {
+        if dry_run {
+            let dr = dry_run_from_compiled(yaml)?;
+            results.push(serde_json::from_str(&dr).map_err(|e| EvaluateError::Serialize(e.to_string()))?);
+        } else {
+            let r = evaluate_from_compiled(yaml, cache_dir, None, None).await?;
+            results.push(serde_json::from_str(&r).map_err(|e| EvaluateError::Serialize(e.to_string()))?);
+        }
+    }
+
+    serde_json::to_string(&results).map_err(|e| EvaluateError::Serialize(e.to_string()))
+}
+
+/// Dry-run from compiled YAML.
+pub fn dry_run_from_compiled(yaml: &str) -> Result<String, EvaluateError> {
+    let compiled: CompiledAsset =
+        serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
+    let spec = compiled_to_asset_spec(&compiled);
+    let result = dry_run_asset(&compiled.metadata.name, &spec);
+    serde_json::to_string(&result).map_err(|e| EvaluateError::Serialize(e.to_string()))
 }
 
 #[cfg(test)]
@@ -189,7 +332,7 @@ mod tests {
             response: epoch_secs_ago(3600.0),
         };
         let spec = asset_spec_with(freshness_condition(7200, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn))
+        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn), None)
             .await
             .unwrap();
         assert!(result.ready);
@@ -203,7 +346,7 @@ mod tests {
             response: epoch_secs_ago(25.0 * 3600.0),
         };
         let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn))
+        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn), None)
             .await
             .unwrap();
         assert!(!result.ready);
@@ -219,7 +362,7 @@ mod tests {
             response: Value::String("2099-01-01T00:00:00Z".to_string()),
         };
         let spec = asset_spec_with(freshness_condition(86400, Some("updated_at")));
-        let result = evaluate_asset("my_table", &spec, Some(&conn))
+        let result = evaluate_asset("my_table", &spec, Some(&conn), None)
             .await
             .unwrap();
         assert!(result.ready);
@@ -231,7 +374,7 @@ mod tests {
             response: Value::Null,
         };
         let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_table", &spec, Some(&conn)).await;
+        let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
         assert!(matches!(result, Err(EvaluateError::UnexpectedResult(_))));
     }
 
@@ -246,7 +389,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT true".to_string(),
         });
-        let result = evaluate_asset("my_table", &spec, Some(&conn))
+        let result = evaluate_asset("my_table", &spec, Some(&conn), None)
             .await
             .unwrap();
         assert!(result.ready);
@@ -261,7 +404,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT false".to_string(),
         });
-        let result = evaluate_asset("my_table", &spec, Some(&conn))
+        let result = evaluate_asset("my_table", &spec, Some(&conn), None)
             .await
             .unwrap();
         assert!(!result.ready);
@@ -306,9 +449,14 @@ mod tests {
             sync: None,
             resync: None,
         };
-        let result = evaluate_asset("my_table", &spec, Some(&CountingConnection(&call_count)))
-            .await
-            .unwrap();
+        let result = evaluate_asset(
+            "my_table",
+            &spec,
+            Some(&CountingConnection(&call_count)),
+            None,
+        )
+        .await
+        .unwrap();
         assert!(!result.ready);
         assert_eq!(result.conditions[0].status, ConditionStatus::Ready);
         assert!(matches!(
@@ -404,7 +552,7 @@ mod tests {
             name: "always-true".to_string(),
             run: vec!["true".to_string()],
         });
-        let result = evaluate_asset("my_table", &spec, None).await.unwrap();
+        let result = evaluate_asset("my_table", &spec, None, None).await.unwrap();
         assert!(result.ready);
     }
 
@@ -414,7 +562,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT 1".to_string(),
         });
-        let result = evaluate_asset("my_table", &spec, None).await;
+        let result = evaluate_asset("my_table", &spec, None, None).await;
         assert!(matches!(
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "check"
@@ -424,7 +572,7 @@ mod tests {
     #[tokio::test]
     async fn freshness_condition_without_connection_returns_error() {
         let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_table", &spec, None).await;
+        let result = evaluate_asset("my_table", &spec, None, None).await;
         assert!(matches!(
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "freshness"

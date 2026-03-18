@@ -1,10 +1,42 @@
 use std::path::Path;
 
+use thiserror::Error;
+
 use crate::compile::CompileError;
 
 pub mod cloud;
 pub mod manifest;
 pub mod profile;
+
+#[derive(Debug, Error)]
+pub enum DbtError {
+    #[error("dbt command not found")]
+    NotFound,
+
+    #[error("dbt debug failed: {0}")]
+    DebugFailed(String),
+}
+
+/// Runs `dbt debug` to verify the connection.
+pub fn run_dbt_debug(
+    project_dir: &Path,
+    profile: &str,
+    target: Option<&str>,
+) -> Result<(), DbtError> {
+    let mut cmd = std::process::Command::new("dbt");
+    cmd.arg("debug");
+    cmd.args(["--project-dir", &project_dir.display().to_string()]);
+    cmd.args(["--profile", profile]);
+    if let Some(t) = target {
+        cmd.args(["--target", t]);
+    }
+    let output = cmd.output().map_err(|_| DbtError::NotFound)?;
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(DbtError::DebugFailed(stdout.trim().to_string()));
+    }
+    Ok(())
+}
 
 /// Runs `dbt compile` and returns the content of `target/manifest.json`.
 pub fn load_manifest(
