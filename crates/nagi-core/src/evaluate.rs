@@ -99,29 +99,23 @@ pub async fn evaluate_asset(
     }
     let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
 
-    let evaluation_id = if let Some(store) = log_store {
+    let mut result = AssetEvalResult {
+        asset_name: asset_name.to_string(),
+        ready,
+        conditions: results,
+        evaluation_id: None,
+    };
+
+    if let Some(store) = log_store {
         let id = crate::sync::generate_uuid();
         let finished_at = Utc::now();
         let started_str = started_at.to_rfc3339();
         let finished_str = finished_at.to_rfc3339();
-        let result_for_log = AssetEvalResult {
-            asset_name: asset_name.to_string(),
-            ready,
-            conditions: results.clone(),
-            evaluation_id: None,
-        };
-        store.write_evaluate_log(&id, &result_for_log, &started_str, &finished_str)?;
-        Some(id)
-    } else {
-        None
-    };
+        store.write_evaluate_log(&id, &result, &started_str, &finished_str)?;
+        result.evaluation_id = Some(id);
+    }
 
-    Ok(AssetEvalResult {
-        asset_name: asset_name.to_string(),
-        ready,
-        conditions: results,
-        evaluation_id,
-    })
+    Ok(result)
 }
 
 /// A single condition from an asset's desiredSets, with its name.

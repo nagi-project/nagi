@@ -127,10 +127,15 @@ impl NagiKind {
                 message: "metadata.name must not be empty".to_string(),
             });
         }
-        if name.contains('/') || name.contains('\\') || name.contains("..") {
+        if name.contains('/')
+            || name.contains('\\')
+            || name.contains("..")
+            || name.contains('\'')
+            || name.contains('`')
+        {
             return Err(KindError::InvalidSpec {
                 kind: self.kind().to_string(),
-                message: "metadata.name must not contain path separators or '..'".to_string(),
+                message: "metadata.name must not contain path separators, '..', or SQL metacharacters ('`)".to_string(),
             });
         }
         match self {
@@ -321,6 +326,30 @@ spec:
         };
         let err = resource.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { .. }));
+    }
+
+    #[test]
+    fn parse_kind_rejects_sql_metacharacters_in_name() {
+        let cases = [
+            ("tab'le", "single quote"),
+            ("tab`le", "backtick"),
+        ];
+        for (name, desc) in cases {
+            let resource = NagiKind::Source {
+                api_version: API_VERSION.to_string(),
+                metadata: Metadata {
+                    name: name.to_string(),
+                },
+                spec: source::SourceSpec {
+                    connection: "my-bq".to_string(),
+                },
+            };
+            let err = resource.validate().unwrap_err();
+            assert!(
+                matches!(err, KindError::InvalidSpec { .. }),
+                "expected InvalidSpec for {desc} (name '{name}'), got {err:?}"
+            );
+        }
     }
 
     #[test]

@@ -327,13 +327,28 @@ impl Connection for BigQueryConnection {
     }
 
     fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
+        /// Escapes backticks for BigQuery backtick-quoted identifiers.
+        fn escape_backtick(s: &str) -> String {
+            s.replace('`', "``")
+        }
+        /// Escapes single quotes for BigQuery string literals.
+        fn escape_single_quote(s: &str) -> String {
+            s.replace('\'', "''")
+        }
+
         match column {
-            Some(col) => format!("SELECT MAX(`{col}`) FROM `{asset_name}`"),
+            Some(col) => {
+                let col = escape_backtick(col);
+                let name = escape_backtick(asset_name);
+                format!("SELECT MAX(`{col}`) FROM `{name}`")
+            }
             None => {
                 let (dataset, table) = match asset_name.split_once('.') {
                     Some((d, t)) => (d, t),
                     None => ("", asset_name),
                 };
+                let dataset = escape_backtick(dataset);
+                let table = escape_single_quote(table);
                 format!(
                     "SELECT MAX(last_modified_time) \
                      FROM `{dataset}`.INFORMATION_SCHEMA.PARTITIONS \
@@ -504,5 +519,30 @@ my_project:
         assert!(sql.contains("INFORMATION_SCHEMA.PARTITIONS"));
         assert!(sql.contains("my_dataset"));
         assert!(sql.contains("my_table"));
+    }
+
+    #[test]
+    fn freshness_sql_escapes_single_quotes_in_table_name() {
+        let conn = dummy_conn();
+        let sql = conn.freshness_sql("ds.tab'le", None);
+        // Single quote must be escaped to prevent SQL injection
+        assert!(sql.contains("tab''le"));
+        assert!(!sql.contains("tab'le"));
+    }
+
+    #[test]
+    fn freshness_sql_escapes_backticks_in_column() {
+        let conn = dummy_conn();
+        let sql = conn.freshness_sql("my_table", Some("col`umn"));
+        // Backtick must be escaped inside backtick-quoted identifier
+        assert!(sql.contains("col``umn"));
+        assert!(!sql.contains("col`umn"));
+    }
+
+    #[test]
+    fn freshness_sql_escapes_backticks_in_asset_name() {
+        let conn = dummy_conn();
+        let sql = conn.freshness_sql("my`table", Some("col"));
+        assert!(sql.contains("my``table"));
     }
 }

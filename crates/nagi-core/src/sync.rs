@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::compile::CompiledAsset;
-use crate::kind::sync::SyncSpec;
+use crate::kind::sync::{SyncSpec, SyncStep};
 use crate::log::{LogError, LogStore};
 
 #[derive(Debug, Error)]
@@ -141,6 +141,16 @@ pub struct DryRunStage {
     pub args: Vec<String>,
 }
 
+/// Returns the step for a given stage. Panics are impossible when used after
+/// `resolve_stages`, which only yields stages whose steps exist.
+fn step_for_stage(spec: &SyncSpec, stage: Stage) -> &SyncStep {
+    match stage {
+        Stage::Pre => spec.pre.as_ref().expect("resolve_stages guarantees pre exists"),
+        Stage::Run => &spec.run,
+        Stage::Post => spec.post.as_ref().expect("resolve_stages guarantees post exists"),
+    }
+}
+
 /// Determines which stages are defined in the given SyncSpec and filters by the
 /// requested stages list. Returns the stages in execution order (pre → run → post).
 fn resolve_stages(spec: &SyncSpec, requested: Option<&[Stage]>) -> Vec<Stage> {
@@ -178,11 +188,7 @@ pub async fn execute_sync(
     let mut overall_success = true;
 
     for stage in stages_to_run {
-        let step = match stage {
-            Stage::Pre => sync_spec.pre.as_ref().unwrap(),
-            Stage::Run => &sync_spec.run,
-            Stage::Post => sync_spec.post.as_ref().unwrap(),
-        };
+        let step = step_for_stage(sync_spec, stage);
         let result = execute::execute_step(stage, step).await?;
         let succeeded = result.success();
         results.push(result);
@@ -217,11 +223,7 @@ pub fn dry_run_sync(
     let stages_to_run = resolve_stages(sync_spec, stages);
     let mut dry_stages = Vec::new();
     for stage in stages_to_run {
-        let step = match stage {
-            Stage::Pre => sync_spec.pre.as_ref().unwrap(),
-            Stage::Run => &sync_spec.run,
-            Stage::Post => sync_spec.post.as_ref().unwrap(),
-        };
+        let step = step_for_stage(sync_spec, stage);
         dry_stages.push(DryRunStage {
             stage,
             args: step.args.clone(),
@@ -389,26 +391,29 @@ fn serialize<T: Serialize>(value: &T) -> Result<String, SyncError> {
 
 /// Executes sync from compiled asset YAML.
 ///
+/// Parameters for `sync_from_compiled`.
+pub struct SyncFromCompiledParams<'a> {
+    pub yaml: &'a str,
+    pub sync_type: &'a str,
+    pub stages: Option<&'a str>,
+    pub db_path: Option<&'a Path>,
+    pub logs_dir: Option<&'a Path>,
+    pub cache_dir: Option<&'a Path>,
+    pub dry_run: bool,
+    pub force: bool,
+    pub evaluation_id: Option<&'a str>,
+}
+
 /// Handles sync type/spec resolution, dry-run, dbt Cloud pre-flight check,
 /// logging, evaluation linking, and post-sync re-evaluation.
-pub async fn sync_from_compiled(
-    yaml: &str,
-    sync_type: &str,
-    stages: Option<&str>,
-    db_path: Option<&Path>,
-    logs_dir: Option<&Path>,
-    cache_dir: Option<&Path>,
-    dry_run: bool,
-    force: bool,
-    evaluation_id: Option<&str>,
-) -> Result<String, SyncError> {
+pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<String, SyncError> {
     let compiled: CompiledAsset =
-        serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
-    let st = parse_sync_type(sync_type)?;
+        serde_yaml::from_str(params.yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
+    let st = parse_sync_type(params.sync_type)?;
     let sync_spec = resolve_sync_spec(&compiled, st)?;
-    let parsed_stages = stages.map(Stage::parse_list).transpose()?;
+    let parsed_stages = params.stages.map(Stage::parse_list).transpose()?;
 
-    if dry_run {
+    if params.dry_run {
         let result = dry_run_sync(
             &compiled.metadata.name,
             &sync_spec,
@@ -418,11 +423,11 @@ pub async fn sync_from_compiled(
         return serialize(&result);
     }
 
-    if !force {
+    if !params.force {
         check_dbt_cloud_preflight(&compiled).await?;
     }
 
-    let log_store = open_log_store(db_path, logs_dir)?;
+    let log_store = open_log_store(params.db_path, params.logs_dir)?;
     let result = execute_sync(
         &compiled.metadata.name,
         &sync_spec,
@@ -433,13 +438,15 @@ pub async fn sync_from_compiled(
     .await?;
 
     // Link pre-sync evaluation to this execution.
-    if let (Some(store), Some(eval_id)) = (log_store.as_ref(), evaluation_id) {
+    if let (Some(store), Some(eval_id)) = (log_store.as_ref(), params.evaluation_id) {
         let _ = store.write_sync_evaluation(&result.execution_id, eval_id);
     }
 
     // Re-evaluate after sync (only when no stage filter).
-    if stages.is_none() {
-        let _ = post_sync_re_evaluate(yaml, cache_dir, db_path, logs_dir, &result).await;
+    if params.stages.is_none() {
+        let _ =
+            post_sync_re_evaluate(params.yaml, params.cache_dir, params.db_path, params.logs_dir, &result)
+                .await;
     }
 
     serialize(&result)

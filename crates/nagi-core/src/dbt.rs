@@ -25,7 +25,7 @@ pub fn run_dbt_debug(
 ) -> Result<(), DbtError> {
     let mut cmd = std::process::Command::new("dbt");
     cmd.arg("debug");
-    cmd.args(["--project-dir", &project_dir.display().to_string()]);
+    cmd.arg("--project-dir").arg(project_dir);
     cmd.args(["--profile", profile]);
     if let Some(t) = target {
         cmd.args(["--target", t]);
@@ -55,7 +55,7 @@ fn run_dbt_compile(
 ) -> Result<(), CompileError> {
     let mut cmd = std::process::Command::new("dbt");
     cmd.arg("compile");
-    cmd.args(["--project-dir", &project_dir.display().to_string()]);
+    cmd.arg("--project-dir").arg(project_dir);
     cmd.args(["--profile", profile]);
     if let Some(t) = target {
         cmd.args(["--target", t]);

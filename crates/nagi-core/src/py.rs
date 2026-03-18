@@ -1,7 +1,13 @@
+use std::sync::LazyLock;
+
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::dbt::profile::DbtProfilesFile;
+
+static TOKIO_RT: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Runtime::new().expect("failed to create tokio runtime")
+});
 
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
@@ -109,11 +115,11 @@ pub fn propose_sync(
     let json: Vec<serde_json::Value> = proposals
         .iter()
         .map(|p| {
-            let mut v = serde_json::to_value(p).unwrap_or_default();
+            let mut v = serde_json::to_value(p).map_err(to_py_err)?;
             v["_yaml"] = serde_json::Value::String(p.yaml_content.clone());
-            v
+            Ok(v)
         })
-        .collect();
+        .collect::<PyResult<Vec<_>>>()?;
     serde_json::to_string(&json).map_err(to_py_err)
 }
 
@@ -136,17 +142,18 @@ pub fn execute_sync_proposal(
         .and_then(|e| e.get("evaluationId"))
         .and_then(|id| id.as_str());
 
-    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
-    rt.block_on(crate::sync::sync_from_compiled(
-        yaml,
-        sync_type,
-        stages,
-        None,
-        None,
-        cache_dir.map(std::path::Path::new),
-        false,
-        force,
-        evaluation_id,
+    TOKIO_RT.block_on(crate::sync::sync_from_compiled(
+        crate::sync::SyncFromCompiledParams {
+            yaml,
+            sync_type,
+            stages,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: cache_dir.map(std::path::Path::new),
+            dry_run: false,
+            force,
+            evaluation_id,
+        },
     ))
     .map_err(to_py_err)
 }
@@ -214,12 +221,23 @@ pub fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<Stri
         serde_json::from_str(entries_json).map_err(to_py_err)?;
     let entries: Vec<crate::init::DbtProjectEntry> = raw
         .iter()
-        .map(|v| crate::init::DbtProjectEntry {
-            project_dir: v["projectDir"].as_str().unwrap_or_default().to_string(),
-            profile: v["profile"].as_str().unwrap_or_default().to_string(),
-            target: v["target"].as_str().map(String::from),
+        .enumerate()
+        .map(|(i, v)| {
+            let project_dir = v["projectDir"]
+                .as_str()
+                .ok_or_else(|| to_py_err(format!("entries[{i}] missing projectDir")))?
+                .to_string();
+            let profile = v["profile"]
+                .as_str()
+                .ok_or_else(|| to_py_err(format!("entries[{i}] missing profile")))?
+                .to_string();
+            Ok(crate::init::DbtProjectEntry {
+                project_dir,
+                profile,
+                target: v["target"].as_str().map(String::from),
+            })
         })
-        .collect();
+        .collect::<PyResult<Vec<_>>>()?;
     let result =
         crate::init::write_init_dbt_files(std::path::Path::new(base_dir), &entries)
             .map_err(to_py_err)?;
