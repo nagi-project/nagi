@@ -9,7 +9,6 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::compile::CompiledAsset;
-use crate::db::bigquery::{BigQueryConfig, BigQueryConnection};
 use crate::db::{Connection, ConnectionError};
 use crate::dbt::profile::DbtProfilesFile;
 use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
@@ -167,13 +166,19 @@ fn compiled_to_asset_spec(compiled: &CompiledAsset) -> AssetSpec {
 
 fn resolve_connection(
     conn_info: &crate::compile::ResolvedConnection,
-) -> Result<BigQueryConnection, EvaluateError> {
-    let f = DbtProfilesFile::load_default().map_err(|e| EvaluateError::Profile(e.to_string()))?;
-    let output = f
-        .resolve(&conn_info.profile, conn_info.target.as_deref())
-        .map_err(|e| EvaluateError::Profile(e.to_string()))?;
-    let config = BigQueryConfig::from_output(output)?;
-    Ok(BigQueryConnection::new(config))
+) -> Result<Box<dyn Connection>, EvaluateError> {
+    match conn_info {
+        crate::compile::ResolvedConnection::DbtProfile {
+            profile, target, ..
+        } => {
+            let f = DbtProfilesFile::load_default()
+                .map_err(|e| EvaluateError::Profile(e.to_string()))?;
+            let output = f
+                .resolve(profile, target.as_deref())
+                .map_err(|e| EvaluateError::Profile(e.to_string()))?;
+            crate::db::create_connection(output).map_err(EvaluateError::Connection)
+        }
+    }
 }
 
 /// Evaluates an asset from its compiled YAML.
@@ -201,10 +206,8 @@ pub async fn evaluate_from_compiled(
         .map(resolve_connection)
         .transpose()?;
 
-    let result = match conn.as_ref() {
-        Some(c) => evaluate_asset(asset_name, &spec, Some(c), log_store.as_ref()).await?,
-        None => evaluate_asset(asset_name, &spec, None, log_store.as_ref()).await?,
-    };
+    let conn_ref = conn.as_deref();
+    let result = evaluate_asset(asset_name, &spec, conn_ref, log_store.as_ref()).await?;
 
     let cache_path = cache_dir
         .map(PathBuf::from)

@@ -19,25 +19,25 @@ pub enum DbtProfileError {
 }
 
 /// Parsed representation of `~/.dbt/profiles.yml`.
-// Not derived Debug — OutputConfig.fields may contain passwords from profiles.yml.
+// Not derived Debug — AdapterConfig.fields may contain passwords from profiles.yml.
 #[derive(Clone, PartialEq)]
 pub struct DbtProfilesFile {
     profiles: HashMap<String, Profile>,
 }
 
 /// A single dbt profile entry with its outputs.
-// Not derived Debug — OutputConfig.fields may contain passwords from profiles.yml.
+// Not derived Debug — AdapterConfig.fields may contain passwords from profiles.yml.
 #[derive(Clone, PartialEq)]
 pub struct Profile {
     pub default_target: String,
-    pub outputs: HashMap<String, OutputConfig>,
+    pub outputs: HashMap<String, AdapterConfig>,
 }
 
 /// Connection configuration for a single target output.
 // Not derived Debug — `fields` holds raw deserialized profiles.yml values which may include
 // passwords, private keys, or other credentials.
 #[derive(Clone, PartialEq, Deserialize)]
-pub struct OutputConfig {
+pub struct AdapterConfig {
     #[serde(rename = "type")]
     pub adapter_type: String,
     #[serde(flatten)]
@@ -48,7 +48,7 @@ pub struct OutputConfig {
 #[derive(Deserialize)]
 struct RawProfile {
     target: String,
-    outputs: HashMap<String, OutputConfig>,
+    outputs: HashMap<String, AdapterConfig>,
 }
 
 impl DbtProfilesFile {
@@ -114,7 +114,7 @@ impl DbtProfilesFile {
         &self,
         profile: &str,
         target: Option<&str>,
-    ) -> Result<&OutputConfig, DbtProfileError> {
+    ) -> Result<&AdapterConfig, DbtProfileError> {
         let p = self
             .profiles
             .get(profile)

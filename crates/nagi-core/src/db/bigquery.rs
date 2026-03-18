@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_yaml;
 
-use crate::dbt::profile::OutputConfig;
+use crate::dbt::profile::AdapterConfig;
 
 use super::{Connection, ConnectionError};
 
@@ -34,7 +34,7 @@ pub struct BigQueryConfig {
 }
 
 impl BigQueryConfig {
-    pub fn from_output(output: &OutputConfig) -> Result<Self, ConnectionError> {
+    pub fn from_output(output: &AdapterConfig) -> Result<Self, ConnectionError> {
         if output.adapter_type != "bigquery" {
             return Err(ConnectionError::UnsupportedAdapter(
                 output.adapter_type.clone(),
@@ -438,7 +438,7 @@ my_project:
 
     #[test]
     fn rejects_timeout_overflow() {
-        let output = OutputConfig {
+        let output = AdapterConfig {
             adapter_type: "bigquery".to_string(),
             fields: [
                 (
@@ -473,7 +473,7 @@ my_project:
 
     #[test]
     fn rejects_missing_project() {
-        let output = OutputConfig {
+        let output = AdapterConfig {
             adapter_type: "bigquery".to_string(),
             fields: [(
                 "dataset".to_string(),
@@ -488,7 +488,7 @@ my_project:
 
     #[test]
     fn rejects_unsupported_adapter() {
-        let output = OutputConfig {
+        let output = AdapterConfig {
             adapter_type: "snowflake".to_string(),
             fields: Default::default(),
         };

@@ -352,10 +352,12 @@ pub struct SyncProposalEvaluation {
 
 /// Checks dbt Cloud for running jobs. Returns an error if any are found.
 async fn check_dbt_cloud_preflight(compiled: &CompiledAsset) -> Result<(), SyncError> {
-    let cred_path = compiled
-        .connection
-        .as_ref()
-        .and_then(|c| c.dbt_cloud_credentials_file.as_ref());
+    let cred_path = compiled.connection.as_ref().and_then(|c| match c {
+        crate::compile::ResolvedConnection::DbtProfile {
+            dbt_cloud_credentials_file,
+            ..
+        } => dbt_cloud_credentials_file.as_ref(),
+    });
     let Some(cred_path) = cred_path else {
         return Ok(());
     };
