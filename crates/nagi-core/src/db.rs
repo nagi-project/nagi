@@ -30,6 +30,9 @@ pub trait Connection: Send + Sync {
     /// With `column`: `SELECT MAX(column) FROM table`
     /// Without `column`: queries system metadata for the physical last-modified time.
     fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String;
+
+    /// Returns the sqlparser dialect for this connection's adapter type.
+    fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect>;
 }
 
 /// Creates a `Connection` implementation based on the adapter type in the profile output.

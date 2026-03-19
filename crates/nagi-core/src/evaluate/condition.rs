@@ -1,7 +1,24 @@
+use sqlparser::dialect::Dialect;
+use sqlparser::parser::Parser;
+
 use crate::db::Connection;
 use crate::kind::asset::DesiredCondition;
 
 use super::{boolean, command, freshness, ConditionResult, EvaluateError};
+
+/// Parses the query with the connection's SQL dialect and rejects anything
+/// other than a single SELECT statement.
+fn require_select_only(query: &str, dialect: &dyn Dialect) -> Result<(), EvaluateError> {
+    let stmts = Parser::new(dialect)
+        .try_with_sql(query)
+        .and_then(|mut p| p.parse_statements())
+        .map_err(|e| EvaluateError::ReadOnlyViolation(e.to_string()))?;
+
+    match stmts.as_slice() {
+        [sqlparser::ast::Statement::Query(_)] => Ok(()),
+        _ => Err(EvaluateError::ReadOnlyViolation(query.to_string())),
+    }
+}
 
 pub(super) async fn evaluate_condition(
     name: &str,
@@ -31,6 +48,7 @@ pub(super) async fn evaluate_condition(
         }
         DesiredCondition::SQL { query, .. } => {
             let c = require_conn!();
+            require_select_only(query, &*c.sql_dialect())?;
             let value = c.query_scalar(query).await?;
             let status = boolean::evaluate_boolean(value)?;
             ("SQL".to_string(), status)

@@ -61,6 +61,8 @@ pub enum EvaluateError {
     Parse(String),
     #[error("profile error: {0}")]
     Profile(String),
+    #[error("SQL query must be a single SELECT statement (read-only direct access): {0}")]
+    ReadOnlyViolation(String),
     #[error("cache error: {0}")]
     Cache(String),
     #[error("serialization error: {0}")]
@@ -278,6 +280,10 @@ mod tests {
         fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
             stub_freshness_sql(asset_name, column)
         }
+
+        fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
+            Box::new(sqlparser::dialect::BigQueryDialect {})
+        }
     }
 
     fn stub_freshness_sql(asset_name: &str, column: Option<&str>) -> String {
@@ -428,6 +434,10 @@ mod tests {
             fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
                 stub_freshness_sql(asset_name, column)
             }
+
+            fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
+                Box::new(sqlparser::dialect::BigQueryDialect {})
+            }
         }
         let spec = AssetSpec {
             tags: vec![],
@@ -564,6 +574,58 @@ mod tests {
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "check"
         ));
+    }
+
+    #[tokio::test]
+    async fn sql_rejects_non_select_queries() {
+        let conn = MockConnection {
+            response: Value::Bool(true),
+        };
+        let forbidden_queries = [
+            "INSERT INTO t VALUES (1)",
+            "DELETE FROM t WHERE id = 1",
+            "UPDATE t SET x = 1",
+            "DROP TABLE t",
+            "CREATE TABLE t (id INT64)",
+            "TRUNCATE TABLE t",
+            "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET x = 1",
+            "SELECT 1; DROP TABLE t",
+        ];
+        for query in forbidden_queries {
+            let spec = asset_spec_with(DesiredCondition::SQL {
+                name: "bad".to_string(),
+                query: query.to_string(),
+            });
+            let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
+            assert!(
+                matches!(&result, Err(EvaluateError::ReadOnlyViolation(_))),
+                "expected ReadOnlyViolation for query: {query}, got: {result:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sql_accepts_valid_select_queries() {
+        let conn = MockConnection {
+            response: Value::Bool(true),
+        };
+        let valid_queries = [
+            "SELECT true",
+            "  \n  SELECT true",
+            "select count(*) = 0 from t",
+            "WITH cte AS (SELECT 1) SELECT * FROM cte",
+        ];
+        for query in valid_queries {
+            let spec = asset_spec_with(DesiredCondition::SQL {
+                name: "check".to_string(),
+                query: query.to_string(),
+            });
+            let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
+            assert!(
+                result.is_ok(),
+                "expected success for query: {query}, got: {result:?}"
+            );
+        }
     }
 
     #[tokio::test]

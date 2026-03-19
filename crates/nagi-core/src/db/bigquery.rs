@@ -357,6 +357,10 @@ impl Connection for BigQueryConnection {
             }
         }
     }
+
+    fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
+        Box::new(sqlparser::dialect::BigQueryDialect {})
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
