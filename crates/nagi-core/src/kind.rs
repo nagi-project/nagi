@@ -330,10 +330,7 @@ spec:
 
     #[test]
     fn parse_kind_rejects_sql_metacharacters_in_name() {
-        let cases = [
-            ("tab'le", "single quote"),
-            ("tab`le", "backtick"),
-        ];
+        let cases = [("tab'le", "single quote"), ("tab`le", "backtick")];
         for (name, desc) in cases {
             let resource = NagiKind::Source {
                 api_version: API_VERSION.to_string(),

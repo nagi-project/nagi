@@ -145,9 +145,15 @@ pub struct DryRunStage {
 /// `resolve_stages`, which only yields stages whose steps exist.
 fn step_for_stage(spec: &SyncSpec, stage: Stage) -> &SyncStep {
     match stage {
-        Stage::Pre => spec.pre.as_ref().expect("resolve_stages guarantees pre exists"),
+        Stage::Pre => spec
+            .pre
+            .as_ref()
+            .expect("resolve_stages guarantees pre exists"),
         Stage::Run => &spec.run,
-        Stage::Post => spec.post.as_ref().expect("resolve_stages guarantees post exists"),
+        Stage::Post => spec
+            .post
+            .as_ref()
+            .expect("resolve_stages guarantees post exists"),
     }
 }
 
@@ -299,10 +305,12 @@ pub async fn propose_sync_all(
     let mut proposals = Vec::with_capacity(assets.len());
 
     for (name, yaml) in &assets {
-        let evaluation = match crate::evaluate::evaluate_from_compiled(yaml, cache_dir, db_path, logs_dir).await {
-            Ok(json) => serde_json::from_str(&json).ok(),
-            Err(_) => None,
-        };
+        let evaluation =
+            match crate::evaluate::evaluate_from_compiled(yaml, cache_dir, db_path, logs_dir).await
+            {
+                Ok(json) => serde_json::from_str(&json).ok(),
+                Err(_) => None,
+            };
 
         let compiled: CompiledAsset =
             serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
@@ -446,9 +454,14 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
 
     // Re-evaluate after sync (only when no stage filter).
     if params.stages.is_none() {
-        let _ =
-            post_sync_re_evaluate(params.yaml, params.cache_dir, params.db_path, params.logs_dir, &result)
-                .await;
+        let _ = post_sync_re_evaluate(
+            params.yaml,
+            params.cache_dir,
+            params.db_path,
+            params.logs_dir,
+            &result,
+        )
+        .await;
     }
 
     serialize(&result)

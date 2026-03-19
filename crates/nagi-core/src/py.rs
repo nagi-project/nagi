@@ -5,9 +5,8 @@ use pyo3::prelude::*;
 
 use crate::dbt::profile::DbtProfilesFile;
 
-static TOKIO_RT: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
-    tokio::runtime::Runtime::new().expect("failed to create tokio runtime")
-});
+static TOKIO_RT: LazyLock<tokio::runtime::Runtime> =
+    LazyLock::new(|| tokio::runtime::Runtime::new().expect("failed to create tokio runtime"));
 
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
@@ -142,20 +141,21 @@ pub fn execute_sync_proposal(
         .and_then(|e| e.get("evaluationId"))
         .and_then(|id| id.as_str());
 
-    TOKIO_RT.block_on(crate::sync::sync_from_compiled(
-        crate::sync::SyncFromCompiledParams {
-            yaml,
-            sync_type,
-            stages,
-            db_path: None,
-            logs_dir: None,
-            cache_dir: cache_dir.map(std::path::Path::new),
-            dry_run: false,
-            force,
-            evaluation_id,
-        },
-    ))
-    .map_err(to_py_err)
+    TOKIO_RT
+        .block_on(crate::sync::sync_from_compiled(
+            crate::sync::SyncFromCompiledParams {
+                yaml,
+                sync_type,
+                stages,
+                db_path: None,
+                logs_dir: None,
+                cache_dir: cache_dir.map(std::path::Path::new),
+                dry_run: false,
+                force,
+                evaluation_id,
+            },
+        ))
+        .map_err(to_py_err)
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────
@@ -217,8 +217,7 @@ pub fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> 
 #[pyfunction]
 #[pyo3(signature = (base_dir, entries_json))]
 pub fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<String> {
-    let raw: Vec<serde_json::Value> =
-        serde_json::from_str(entries_json).map_err(to_py_err)?;
+    let raw: Vec<serde_json::Value> = serde_json::from_str(entries_json).map_err(to_py_err)?;
     let entries: Vec<crate::init::DbtProjectEntry> = raw
         .iter()
         .enumerate()
@@ -238,13 +237,11 @@ pub fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<Stri
             })
         })
         .collect::<PyResult<Vec<_>>>()?;
-    let result =
-        crate::init::write_init_dbt_files(std::path::Path::new(base_dir), &entries)
-            .map_err(to_py_err)?;
+    let result = crate::init::write_init_dbt_files(std::path::Path::new(base_dir), &entries)
+        .map_err(to_py_err)?;
     let json = serde_json::json!({
         "connectionPath": result.connection_path.map(|p| p.to_string_lossy().into_owned()),
         "originPath": result.origin_path.map(|p| p.to_string_lossy().into_owned()),
     });
     serde_json::to_string(&json).map_err(to_py_err)
 }
-

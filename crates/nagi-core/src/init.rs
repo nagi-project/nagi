@@ -168,10 +168,16 @@ pub fn write_init_dbt_files(
         let conn_name = connection_name(&entry.profile, target);
 
         if seen_connections.insert(conn_name.clone()) {
-            connections.push((conn_name.clone(), build_connection_yaml(&entry.profile, target)));
+            connections.push((
+                conn_name.clone(),
+                build_connection_yaml(&entry.profile, target),
+            ));
         }
 
-        origins.push(build_origin_yaml(Path::new(&entry.project_dir), &conn_name)?);
+        origins.push(build_origin_yaml(
+            Path::new(&entry.project_dir),
+            &conn_name,
+        )?);
     }
 
     let wrote_connection = if !connections.is_empty() && !connection_path.exists() {
@@ -267,11 +273,7 @@ mod tests {
         ensure_assets_dir(dir.path()).unwrap();
 
         let dbt_dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dbt_dir.path().join("dbt_project.yml"),
-            "name: my-project\n",
-        )
-        .unwrap();
+        std::fs::write(dbt_dir.path().join("dbt_project.yml"), "name: my-project\n").unwrap();
 
         let entries = vec![DbtProjectEntry {
             project_dir: dbt_dir.path().display().to_string(),

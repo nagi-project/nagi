@@ -236,10 +236,14 @@ pub async fn evaluate_all(
     for (_name, yaml) in &assets {
         if dry_run {
             let dr = dry_run_from_compiled(yaml)?;
-            results.push(serde_json::from_str(&dr).map_err(|e| EvaluateError::Serialize(e.to_string()))?);
+            results.push(
+                serde_json::from_str(&dr).map_err(|e| EvaluateError::Serialize(e.to_string()))?,
+            );
         } else {
             let r = evaluate_from_compiled(yaml, cache_dir, None, None).await?;
-            results.push(serde_json::from_str(&r).map_err(|e| EvaluateError::Serialize(e.to_string()))?);
+            results.push(
+                serde_json::from_str(&r).map_err(|e| EvaluateError::Serialize(e.to_string()))?,
+            );
         }
     }
 

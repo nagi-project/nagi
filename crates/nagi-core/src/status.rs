@@ -94,10 +94,7 @@ mod tests {
         // Minimal graph.json
         let mut nodes = std::collections::HashMap::new();
         for name in asset_names {
-            nodes.insert(
-                name.to_string(),
-                serde_json::json!({"dependencies": []}),
-            );
+            nodes.insert(name.to_string(), serde_json::json!({"dependencies": []}));
         }
         let graph = serde_json::json!(nodes);
         std::fs::write(dir.join("graph.json"), graph.to_string()).unwrap();
@@ -166,8 +163,7 @@ mod tests {
         let db_path = dir.path().join("nonexistent.db");
         let logs_dir = dir.path().join("logs");
 
-        let result =
-            asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir).unwrap();
+        let result = asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert_eq!(result.assets[0].asset, "asset-a");
         assert!(result.assets[0].evaluation.is_some());
@@ -182,7 +178,9 @@ mod tests {
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
         let store = LogStore::open(&db_path, &logs_dir).unwrap();
-        store.write_sync_log(&sample_sync_result("asset-b")).unwrap();
+        store
+            .write_sync_log(&sample_sync_result("asset-b"))
+            .unwrap();
         drop(store);
 
         let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir).unwrap();
@@ -204,11 +202,12 @@ mod tests {
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
         let store = LogStore::open(&db_path, &logs_dir).unwrap();
-        store.write_sync_log(&sample_sync_result("asset-c")).unwrap();
+        store
+            .write_sync_log(&sample_sync_result("asset-c"))
+            .unwrap();
         drop(store);
 
-        let result =
-            asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir).unwrap();
+        let result = asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].evaluation.is_some());
         assert!(result.assets[0].last_sync.is_some());

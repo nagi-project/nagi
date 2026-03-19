@@ -67,8 +67,14 @@ mod tests {
         let output = AdapterConfig {
             adapter_type: "bigquery".to_string(),
             fields: [
-                ("project".to_string(), serde_yaml::Value::String("p".to_string())),
-                ("dataset".to_string(), serde_yaml::Value::String("d".to_string())),
+                (
+                    "project".to_string(),
+                    serde_yaml::Value::String("p".to_string()),
+                ),
+                (
+                    "dataset".to_string(),
+                    serde_yaml::Value::String("d".to_string()),
+                ),
             ]
             .into_iter()
             .collect(),
