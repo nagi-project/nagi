@@ -1,0 +1,66 @@
+{
+  "outputStyle": "default",
+  "spinnerTipsEnabled": false,
+  "prefersReducedMotion": true,
+  "permissions": {
+    "allow": [
+      "Bash(mise run:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(git push *)",
+      "Bash(chmod 777 *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./config/credentials.json)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "allowRead": [
+        "~/.cache/uv"
+      ],
+      "allowWrite": [
+        "~/.cache/uv"
+      ],
+      "denyRead": [
+        "~/.aws/credentials",
+        "~/.config/gcloud",
+        "~/.ssh"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "*.githubusercontent.com",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "crates.io",
+        "static.crates.io",
+        "index.crates.io"
+      ]
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -q '^git commit'; then mise run check || { echo '{\"decision\":\"block\",\"reason\":\"mise run check failed\"}'; exit 0; }; fi; }",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
