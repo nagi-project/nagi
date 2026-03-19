@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -q '^git commit'; then mise run check || { echo '{\"decision\":\"block\",\"reason\":\"mise run check failed\"}'; exit 0; }; fi; }",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-commit-check.sh",
             "timeout": 180
           }
         ]
