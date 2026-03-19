@@ -62,11 +62,13 @@ def _collect_dbt_entries(profiles: list[dict]) -> list[dict]:
             click.echo(json.dumps({"connection": "ok"}))
             tested.add((profile_name, target))
 
-        entries.append({
-            "projectDir": dbt_dir,
-            "profile": profile_name,
-            "target": target,
-        })
+        entries.append(
+            {
+                "projectDir": dbt_dir,
+                "profile": profile_name,
+                "target": target,
+            }
+        )
 
         if not click.confirm("Do you have another dbt project?", default=False):
             break

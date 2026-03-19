@@ -69,11 +69,15 @@ def _make_sync_command(sync_type: str) -> click.Command:
 
         for proposal in proposals:
             if dry_run:
-                click.echo(json.dumps({
-                    "asset": proposal["asset"],
-                    "syncType": proposal["syncType"],
-                    "stages": proposal.get("stages", []),
-                }))
+                click.echo(
+                    json.dumps(
+                        {
+                            "asset": proposal["asset"],
+                            "syncType": proposal["syncType"],
+                            "stages": proposal.get("stages", []),
+                        }
+                    )
+                )
                 continue
 
             click.echo(json.dumps({"proposal": proposal}))

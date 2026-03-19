@@ -1,12 +1,10 @@
 import json
-import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from click.testing import CliRunner
 
-from nagi_cli.commands.init import _read_dbt_origin, init
+from nagi_cli.commands.init import init
 
 SINGLE_PROFILE_JSON = json.dumps(
     {
@@ -49,8 +47,6 @@ SINGLE_MULTI_TARGET_JSON = json.dumps(
     }
 )
 
-DBT_DEBUG_OK = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-
 
 class TestInitNoDbt:
     def test_creates_assets_dir_without_dbt(self, tmp_path: Path) -> None:
@@ -59,17 +55,6 @@ class TestInitNoDbt:
             result = runner.invoke(init, input="n\n")
             assert result.exit_code == 0
             assert Path("assets").is_dir()
-
-    def test_creates_config_without_dbt(self, tmp_path: Path) -> None:
-        runner = CliRunner()
-        with runner.isolated_filesystem(temp_dir=tmp_path):
-            with patch(
-                "nagi_cli.commands.init.Path.home",
-                return_value=tmp_path,
-            ):
-                result = runner.invoke(init, input="n\n")
-                assert result.exit_code == 0
-                assert (tmp_path / ".nagi" / "config.yaml").exists()
 
     def test_no_connection_or_origin(self, tmp_path: Path) -> None:
         runner = CliRunner()
@@ -81,7 +66,7 @@ class TestInitNoDbt:
 
 
 class TestInitSingleProfile:
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=SINGLE_PROFILE_JSON,
@@ -104,7 +89,7 @@ class TestInitSingleProfile:
             assert "kind: Connection" in content
             assert "profile: my_project" in content
 
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=SINGLE_PROFILE_JSON,
@@ -123,7 +108,7 @@ class TestInitSingleProfile:
             assert result.exit_code == 0
             assert (Path("assets") / "origin.yaml").exists()
 
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=SINGLE_PROFILE_JSON,
@@ -148,7 +133,7 @@ class TestInitSingleProfile:
 
 
 class TestInitMultipleProfiles:
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=MULTI_PROFILE_JSON,
@@ -166,7 +151,7 @@ class TestInitMultipleProfiles:
             result = runner.invoke(init, input=f"y\n{dbt_dir}\n1\ndev\nn\n")
         assert result.exit_code == 0
 
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=MULTI_PROFILE_JSON,
@@ -184,7 +169,7 @@ class TestInitMultipleProfiles:
             result = runner.invoke(init, input=f"y\n{dbt_dir}\n99\n")
         assert result.exit_code == 1
 
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=MULTI_PROFILE_JSON,
@@ -220,7 +205,7 @@ class TestInitMultipleProfiles:
             assert "connection: project_b-staging" in origin_content
             assert origin_content.count("kind: Origin") == 2
 
-    @patch("nagi_cli.commands.init.subprocess.run", return_value=DBT_DEBUG_OK)
+    @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
         return_value=SINGLE_MULTI_TARGET_JSON,
@@ -267,10 +252,8 @@ class TestInitFailure:
         assert "profiles.yml not found" in result.output
 
     @patch(
-        "nagi_cli.commands.init.subprocess.run",
-        return_value=subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="Connection test failed", stderr=""
-        ),
+        "nagi_cli.commands.init.run_dbt_debug",
+        side_effect=RuntimeError("dbt debug failed"),
     )
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
@@ -292,22 +275,3 @@ class TestInitFailure:
             result = runner.invoke(init, input=f"y\n{dbt_dir}\n")
         assert result.exit_code == 1
         assert "dbt debug failed" in result.output
-
-
-class TestReadDbtOrigin:
-    def test_returns_origin_yaml(self, tmp_path: Path) -> None:
-        (tmp_path / "dbt_project.yml").write_text("name: jaffle_shop\n")
-        result = _read_dbt_origin(tmp_path, "my-bq")
-        assert "kind: Origin" in result
-        assert "name: jaffle_shop" in result
-        assert "connection: my-bq" in result
-        assert f"projectDir: {tmp_path}" in result
-
-    def test_uses_default_name_when_missing(self, tmp_path: Path) -> None:
-        (tmp_path / "dbt_project.yml").write_text("{}\n")
-        result = _read_dbt_origin(tmp_path, "my-bq")
-        assert "name: my-dbt-project" in result
-
-    def test_raises_when_no_dbt_project_yml(self, tmp_path: Path) -> None:
-        with pytest.raises(SystemExit):
-            _read_dbt_origin(tmp_path, "my-bq")

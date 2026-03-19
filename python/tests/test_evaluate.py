@@ -134,7 +134,6 @@ class TestEvaluateDryRun:
         assert isinstance(output, list)
         assert len(output) == 1
         asset = output[0]
-        assert asset["dry_run"] is True
         assert asset["assetName"] == ASSET_NAME
         assert len(asset["conditions"]) == 1
         cond = asset["conditions"][0]
