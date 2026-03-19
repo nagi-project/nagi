@@ -175,41 +175,59 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_date_rejects_short_input() {
-        assert!(parse_date("2026-03").is_err());
-        assert!(parse_date("").is_err());
+    macro_rules! parse_date_reject {
+        ($($name:ident: $input:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert!(parse_date($input).is_err());
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn parse_date_rejects_malformed_date() {
-        assert!(parse_date("20260316T10").is_err()); // no dashes
-        assert!(parse_date("26-003-16T1").is_err()); // wrong part lengths
+    parse_date_reject! {
+        parse_date_rejects_short_input_partial: "2026-03";
+        parse_date_rejects_empty: "";
+        parse_date_rejects_no_dashes: "20260316T10";
+        parse_date_rejects_wrong_lengths: "26-003-16T1";
     }
 
-    #[test]
-    fn sanitize_rejects_path_traversal() {
-        assert!(sanitize_path_component("../etc").is_err());
-        assert!(sanitize_path_component("foo/../../etc").is_err());
-        assert!(sanitize_path_component("..").is_err());
-        assert!(sanitize_path_component(".").is_err());
+    macro_rules! sanitize_reject {
+        ($($name:ident: $input:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert!(sanitize_path_component($input).is_err());
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn sanitize_rejects_slashes() {
-        assert!(sanitize_path_component("a/b").is_err());
-        assert!(sanitize_path_component("a\\b").is_err());
+    sanitize_reject! {
+        sanitize_rejects_dotdot: "..";
+        sanitize_rejects_dot: ".";
+        sanitize_rejects_traversal: "../etc";
+        sanitize_rejects_nested_traversal: "foo/../../etc";
+        sanitize_rejects_forward_slash: "a/b";
+        sanitize_rejects_backslash: "a\\b";
+        sanitize_rejects_empty: "";
     }
 
-    #[test]
-    fn sanitize_rejects_empty() {
-        assert!(sanitize_path_component("").is_err());
+    macro_rules! sanitize_accept {
+        ($($name:ident: $input:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(sanitize_path_component($input).unwrap(), $input);
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn sanitize_accepts_valid_names() {
-        assert_eq!(sanitize_path_component("my-asset").unwrap(), "my-asset");
-        assert_eq!(sanitize_path_component("asset_123").unwrap(), "asset_123");
+    sanitize_accept! {
+        sanitize_accepts_hyphenated: "my-asset";
+        sanitize_accepts_underscored: "asset_123";
     }
 
     #[test]

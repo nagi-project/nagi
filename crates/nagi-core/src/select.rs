@@ -212,166 +212,96 @@ mod tests {
         }
     }
 
-    #[test]
-    fn exact_name() {
-        let result = select_assets(&test_graph(), &["daily-sales"]).unwrap();
-        assert_eq!(result, vec!["daily-sales"]);
+    macro_rules! select_ok {
+        ($($name:ident: $selectors:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let result = select_assets(&test_graph(), &$selectors).unwrap();
+                    assert_eq!(result, $expected);
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn upstream() {
-        let result = select_assets(&test_graph(), &["+daily-sales"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "raw-sales"]);
+    select_ok! {
+        exact_name: ["daily-sales"] => vec!["daily-sales"];
+        upstream: ["+daily-sales"] => vec!["daily-sales", "raw-sales"];
+        downstream: ["daily-sales+"] => vec!["daily-sales", "monthly-report"];
+        upstream_and_downstream: ["+daily-sales+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        tag_selector: ["tag:finance"] => vec!["daily-sales", "monthly-report"];
+        tag_with_upstream: ["+tag:finance"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        tag_with_downstream: ["tag:finance+"] => vec!["daily-sales", "monthly-report"];
+        tag_with_upstream_and_downstream: ["+tag:finance+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        multiple_selectors_union: ["daily-sales", "access-stats"] => vec!["access-stats", "daily-sales"];
+        source_with_downstream: ["raw-sales+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        upstream_on_leaf_node: ["+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        downstream_on_root_node: ["monthly-report+"] => vec!["monthly-report"];
+        multiple_selectors_dedup: ["daily-sales", "+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
     }
 
-    #[test]
-    fn downstream() {
-        let result = select_assets(&test_graph(), &["daily-sales+"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report"]);
+    macro_rules! select_not_found {
+        ($($name:ident: $selectors:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert!(matches!(
+                        select_assets(&test_graph(), &$selectors).unwrap_err(),
+                        SelectError::NotFound { .. }
+                    ));
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn upstream_and_downstream() {
-        let result = select_assets(&test_graph(), &["+daily-sales+"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report", "raw-sales"]);
+    select_not_found! {
+        not_found: ["nonexistent"];
+        tag_not_found: ["tag:nonexistent"];
     }
 
-    #[test]
-    fn tag_selector() {
-        let result = select_assets(&test_graph(), &["tag:finance"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report"]);
+    macro_rules! select_invalid {
+        ($($name:ident: $selectors:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert!(matches!(
+                        select_assets(&test_graph(), &$selectors).unwrap_err(),
+                        SelectError::InvalidSelector { .. }
+                    ));
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn tag_with_upstream() {
-        let result = select_assets(&test_graph(), &["+tag:finance"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report", "raw-sales"]);
-    }
-
-    #[test]
-    fn tag_with_downstream() {
-        let result = select_assets(&test_graph(), &["tag:finance+"]).unwrap();
-        // daily-sales and monthly-report match tag:finance.
-        // daily-sales+ adds monthly-report (already included).
-        // monthly-report+ adds nothing.
-        assert_eq!(result, vec!["daily-sales", "monthly-report"]);
-    }
-
-    #[test]
-    fn tag_with_upstream_and_downstream() {
-        let result = select_assets(&test_graph(), &["+tag:finance+"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report", "raw-sales"]);
-    }
-
-    #[test]
-    fn multiple_selectors_union() {
-        let result = select_assets(&test_graph(), &["daily-sales", "access-stats"]).unwrap();
-        assert_eq!(result, vec!["access-stats", "daily-sales"]);
-    }
-
-    #[test]
-    fn source_with_downstream() {
-        let result = select_assets(&test_graph(), &["raw-sales+"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report", "raw-sales"]);
-    }
-
-    #[test]
-    fn not_found() {
-        let err = select_assets(&test_graph(), &["nonexistent"]).unwrap_err();
-        assert!(matches!(err, SelectError::NotFound { name } if name == "nonexistent"));
-    }
-
-    #[test]
-    fn tag_not_found() {
-        let err = select_assets(&test_graph(), &["tag:nonexistent"]).unwrap_err();
-        assert!(matches!(err, SelectError::NotFound { name } if name == "tag:nonexistent"));
-    }
-
-    #[test]
-    fn empty_selector() {
-        let err = select_assets(&test_graph(), &[""]).unwrap_err();
-        assert!(matches!(err, SelectError::InvalidSelector { .. }));
-    }
-
-    #[test]
-    fn plus_only() {
-        let err = select_assets(&test_graph(), &["+"]).unwrap_err();
-        assert!(matches!(err, SelectError::InvalidSelector { .. }));
-    }
-
-    #[test]
-    fn empty_tag_value() {
-        let err = select_assets(&test_graph(), &["tag:"]).unwrap_err();
-        assert!(matches!(err, SelectError::InvalidSelector { .. }));
-    }
-
-    #[test]
-    fn double_plus() {
-        let err = select_assets(&test_graph(), &["++"]).unwrap_err();
-        assert!(matches!(err, SelectError::InvalidSelector { .. }));
-    }
-
-    #[test]
-    fn upstream_on_leaf_node() {
-        // monthly-report has no downstream; +monthly-report traverses upstream only.
-        let result = select_assets(&test_graph(), &["+monthly-report"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report", "raw-sales"]);
-    }
-
-    #[test]
-    fn downstream_on_root_node() {
-        // monthly-report has no downstream edges.
-        let result = select_assets(&test_graph(), &["monthly-report+"]).unwrap();
-        assert_eq!(result, vec!["monthly-report"]);
-    }
-
-    #[test]
-    fn multiple_selectors_dedup() {
-        // daily-sales appears in both selectors' results; should appear once.
-        let result = select_assets(&test_graph(), &["daily-sales", "+monthly-report"]).unwrap();
-        assert_eq!(result, vec!["daily-sales", "monthly-report", "raw-sales"]);
+    select_invalid! {
+        empty_selector: [""];
+        plus_only: ["+"];
+        empty_tag_value: ["tag:"];
+        double_plus: ["++"];
     }
 
     // --- parse_selector unit tests ---
 
-    #[test]
-    fn parse_selector_exact() {
-        let (up, down, pattern) = parse_selector("daily-sales").unwrap();
-        assert!(!up);
-        assert!(!down);
-        assert_eq!(pattern, "daily-sales");
+    macro_rules! parse_selector_test {
+        ($($name:ident: $input:expr => ($up:expr, $down:expr, $pattern:expr);)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let (up, down, pattern) = parse_selector($input).unwrap();
+                    assert_eq!(up, $up);
+                    assert_eq!(down, $down);
+                    assert_eq!(pattern, $pattern);
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn parse_selector_upstream() {
-        let (up, down, pattern) = parse_selector("+daily-sales").unwrap();
-        assert!(up);
-        assert!(!down);
-        assert_eq!(pattern, "daily-sales");
-    }
-
-    #[test]
-    fn parse_selector_downstream() {
-        let (up, down, pattern) = parse_selector("daily-sales+").unwrap();
-        assert!(!up);
-        assert!(down);
-        assert_eq!(pattern, "daily-sales");
-    }
-
-    #[test]
-    fn parse_selector_both() {
-        let (up, down, pattern) = parse_selector("+daily-sales+").unwrap();
-        assert!(up);
-        assert!(down);
-        assert_eq!(pattern, "daily-sales");
-    }
-
-    #[test]
-    fn parse_selector_tag() {
-        let (up, down, pattern) = parse_selector("+tag:finance+").unwrap();
-        assert!(up);
-        assert!(down);
-        assert_eq!(pattern, "tag:finance");
+    parse_selector_test! {
+        parse_selector_exact: "daily-sales" => (false, false, "daily-sales");
+        parse_selector_upstream: "+daily-sales" => (true, false, "daily-sales");
+        parse_selector_downstream: "daily-sales+" => (false, true, "daily-sales");
+        parse_selector_both: "+daily-sales+" => (true, true, "daily-sales");
+        parse_selector_tag: "+tag:finance+" => (true, true, "tag:finance");
     }
 
     // --- build_adjacency unit tests ---

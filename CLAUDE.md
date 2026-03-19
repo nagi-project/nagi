@@ -55,6 +55,34 @@ mise run check
 - Never store credentials (access tokens, JWTs, private keys, client secrets) in struct fields, static variables, or any heap location that outlives the operation that requires them. Acquire credentials immediately before use and let them drop at the end of the enclosing scope.
 - Never log, print, or include credentials in error messages, debug output, or serialized data.
 
+### Testing
+
+- When multiple test cases share the same structure (same setup, same assertion, different inputs/expected values), consolidate them so that each case runs independently and failures identify the exact case.
+- Tests with distinct setup or assertion logic should remain as individual functions — do not force them into a parameterized form.
+- **Rust:** Use a `macro_rules!` macro to generate individual `#[test]` functions per case. Do not add external parameterized testing crates (`rstest`, `test-case`, etc.).
+- **Python:** Use `pytest.mark.parametrize`. Each case should have an `id` for readable test output (`pytest.param(..., id="name")`).
+
+Rust macro example:
+
+```rust
+macro_rules! parse_duration_test {
+    ($($name:ident: $input:expr => $secs:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                let w: Wrapper = serde_yaml::from_str($input).unwrap();
+                assert_eq!(w.d.as_std(), StdDuration::from_secs($secs));
+            }
+        )*
+    };
+}
+
+parse_duration_test! {
+    parse_hours: "d: 24h" => 24 * 3600;
+    parse_minutes: "d: 30m" => 30 * 60;
+}
+```
+
 ### General
 
 - When using external tools, libraries, or SDKs, always refer to the official documentation to verify correct usage.

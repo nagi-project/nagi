@@ -525,56 +525,48 @@ mod tests {
 
     // ── resolve_stages ───────────────────────────────────────────────────
 
-    #[test]
-    fn resolve_stages_all_defined_no_filter() {
-        let stages = resolve_stages(&full_spec(), None);
-        assert_eq!(stages, vec![Stage::Pre, Stage::Run, Stage::Post]);
+    macro_rules! resolve_stages_test {
+        ($($name:ident: $spec:expr, $filter:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let filter: Option<Vec<Stage>> = $filter;
+                    assert_eq!(resolve_stages(&$spec, filter.as_deref()), $expected);
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn resolve_stages_run_only_no_filter() {
-        let stages = resolve_stages(&run_only_spec(), None);
-        assert_eq!(stages, vec![Stage::Run]);
-    }
-
-    #[test]
-    fn resolve_stages_filter_pre_run() {
-        let stages = resolve_stages(&full_spec(), Some(&[Stage::Pre, Stage::Run]));
-        assert_eq!(stages, vec![Stage::Pre, Stage::Run]);
-    }
-
-    #[test]
-    fn resolve_stages_filter_undefined_stage_ignored() {
-        // Requesting pre on a spec without pre → empty.
-        let stages = resolve_stages(&run_only_spec(), Some(&[Stage::Pre]));
-        assert!(stages.is_empty());
-    }
-
-    #[test]
-    fn resolve_stages_preserves_order() {
-        // Even if requested out of order, result follows pre → run → post.
-        let stages = resolve_stages(&full_spec(), Some(&[Stage::Post, Stage::Pre]));
-        assert_eq!(stages, vec![Stage::Pre, Stage::Post]);
+    resolve_stages_test! {
+        resolve_stages_all_defined_no_filter:
+            full_spec(), None => vec![Stage::Pre, Stage::Run, Stage::Post];
+        resolve_stages_run_only_no_filter:
+            run_only_spec(), None => vec![Stage::Run];
+        resolve_stages_filter_pre_run:
+            full_spec(), Some(vec![Stage::Pre, Stage::Run]) => vec![Stage::Pre, Stage::Run];
+        resolve_stages_filter_undefined_stage_ignored:
+            run_only_spec(), Some(vec![Stage::Pre]) => vec![];
+        resolve_stages_preserves_order:
+            full_spec(), Some(vec![Stage::Post, Stage::Pre]) => vec![Stage::Pre, Stage::Post];
     }
 
     // ── Stage::parse_list ────────────────────────────────────────────────
 
-    #[test]
-    fn parse_stage_list_single() {
-        let stages = Stage::parse_list("run").unwrap();
-        assert_eq!(stages, vec![Stage::Run]);
+    macro_rules! parse_stage_list_test {
+        ($($name:ident: $input:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(Stage::parse_list($input).unwrap(), $expected);
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn parse_stage_list_multiple() {
-        let stages = Stage::parse_list("pre,run").unwrap();
-        assert_eq!(stages, vec![Stage::Pre, Stage::Run]);
-    }
-
-    #[test]
-    fn parse_stage_list_with_spaces() {
-        let stages = Stage::parse_list("pre , post").unwrap();
-        assert_eq!(stages, vec![Stage::Pre, Stage::Post]);
+    parse_stage_list_test! {
+        parse_stage_list_single: "run" => vec![Stage::Run];
+        parse_stage_list_multiple: "pre,run" => vec![Stage::Pre, Stage::Run];
+        parse_stage_list_with_spaces: "pre , post" => vec![Stage::Pre, Stage::Post];
     }
 
     #[test]

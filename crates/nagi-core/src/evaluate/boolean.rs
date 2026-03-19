@@ -23,36 +23,39 @@ pub(super) fn evaluate_boolean(value: Value) -> Result<ConditionStatus, Evaluate
 mod tests {
     use super::*;
 
-    #[test]
-    fn bool_true_is_ready() {
-        assert_eq!(
-            evaluate_boolean(Value::Bool(true)).unwrap(),
-            ConditionStatus::Ready
-        );
+    macro_rules! boolean_ready {
+        ($($name:ident: $input:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(evaluate_boolean($input).unwrap(), ConditionStatus::Ready);
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn bool_false_is_not_ready() {
-        assert!(matches!(
-            evaluate_boolean(Value::Bool(false)).unwrap(),
-            ConditionStatus::NotReady { .. }
-        ));
+    boolean_ready! {
+        bool_true_is_ready: Value::Bool(true);
+        string_true_is_ready: Value::String("true".to_string());
     }
 
-    #[test]
-    fn string_true_is_ready() {
-        assert_eq!(
-            evaluate_boolean(Value::String("true".to_string())).unwrap(),
-            ConditionStatus::Ready
-        );
+    macro_rules! boolean_not_ready {
+        ($($name:ident: $input:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert!(matches!(
+                        evaluate_boolean($input).unwrap(),
+                        ConditionStatus::NotReady { .. }
+                    ));
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn string_false_is_not_ready() {
-        assert!(matches!(
-            evaluate_boolean(Value::String("false".to_string())).unwrap(),
-            ConditionStatus::NotReady { .. }
-        ));
+    boolean_not_ready! {
+        bool_false_is_not_ready: Value::Bool(false);
+        string_false_is_not_ready: Value::String("false".to_string());
     }
 
     #[test]

@@ -49,22 +49,22 @@ mod tests {
         d: Duration,
     }
 
-    #[test]
-    fn parse_hours() {
-        let w: Wrapper = serde_yaml::from_str("d: 24h").unwrap();
-        assert_eq!(w.d.as_std(), StdDuration::from_secs(24 * 3600));
+    macro_rules! parse_duration_test {
+        ($($name:ident: $input:expr => $secs:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let w: Wrapper = serde_yaml::from_str($input).unwrap();
+                    assert_eq!(w.d.as_std(), StdDuration::from_secs($secs));
+                }
+            )*
+        };
     }
 
-    #[test]
-    fn parse_minutes() {
-        let w: Wrapper = serde_yaml::from_str("d: 30m").unwrap();
-        assert_eq!(w.d.as_std(), StdDuration::from_secs(30 * 60));
-    }
-
-    #[test]
-    fn parse_compound() {
-        let w: Wrapper = serde_yaml::from_str("d: 1h 30m").unwrap();
-        assert_eq!(w.d.as_std(), StdDuration::from_secs(90 * 60));
+    parse_duration_test! {
+        parse_hours: "d: 24h" => 24 * 3600;
+        parse_minutes: "d: 30m" => 30 * 60;
+        parse_compound: "d: 1h 30m" => 90 * 60;
     }
 
     #[test]
