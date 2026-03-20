@@ -247,6 +247,14 @@ pub fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
     serde_json::to_string(&result).map_err(to_py_err)
 }
 
+#[pyfunction]
+#[pyo3(signature = (target_dir, reason=None))]
+pub fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
+    let r = reason.unwrap_or("manual halt");
+    let result = crate::serve::halt(std::path::Path::new(target_dir), r).map_err(to_py_err)?;
+    serde_json::to_string(&result).map_err(to_py_err)
+}
+
 /// Generates and writes connection.yaml and origin.yaml from dbt project entries.
 /// `entries` is a JSON array of `[{"projectDir": "...", "profile": "...", "target": "..."}]`.
 /// Returns JSON with paths of written files.

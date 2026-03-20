@@ -53,6 +53,8 @@ pub enum ServeError {
     Sync(#[from] SyncError),
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("storage error: {0}")]
+    Storage(crate::storage::StorageError),
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -362,6 +364,36 @@ pub fn resume(selectors: &[&str]) -> Result<Vec<String>, std::io::Error> {
         }
     }
     Ok(resumed)
+}
+
+/// Halts all compiled assets by writing suspended flags for each.
+///
+/// Returns the list of asset names that were halted (newly suspended).
+/// Assets already suspended are skipped.
+pub fn halt(target_dir: &Path, reason: &str) -> Result<Vec<String>, ServeError> {
+    use crate::storage::local::LocalSuspendedStore;
+    use crate::storage::SuspendedStore;
+
+    let asset_names = crate::compile::resolve_compiled_asset_names(target_dir, &[])?;
+    let store = LocalSuspendedStore::new(suspended_dir()?);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut halted = Vec::new();
+    for name in asset_names {
+        if store.exists(&name).map_err(ServeError::Storage)? {
+            continue;
+        }
+        store
+            .write(&SuspendedInfo {
+                asset_name: name.clone(),
+                reason: reason.to_string(),
+                suspended_at: now.clone(),
+                execution_id: None,
+            })
+            .map_err(ServeError::Storage)?;
+        halted.push(name);
+    }
+    Ok(halted)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

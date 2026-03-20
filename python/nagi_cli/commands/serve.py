@@ -3,6 +3,7 @@ import json
 import click
 
 from nagi_cli._nagi_core import serve as _serve
+from nagi_cli._nagi_core import serve_halt as _serve_halt
 from nagi_cli._nagi_core import serve_resume as _serve_resume
 
 
@@ -113,6 +114,34 @@ def resume(selectors: tuple[str, ...]) -> None:
         resumed = json.loads(result_json)
         for name in resumed:
             click.echo(f"Resumed: {name}")
+    except (RuntimeError, json.JSONDecodeError) as e:
+        click.echo(json.dumps({"error": str(e)}))
+        raise SystemExit(1)
+
+
+@serve.command()
+@click.option(
+    "--target-dir",
+    default="target",
+    show_default=True,
+    help="Directory containing compiled output.",
+)
+@click.option(
+    "--reason",
+    default=None,
+    help="Reason for halting (defaults to 'manual halt').",
+)
+def halt(target_dir: str, reason: str | None) -> None:
+    """Halt all assets by suspending them."""
+    try:
+        result_json = _serve_halt(target_dir, reason)
+        names: list[str] = json.loads(result_json)
+        if names:
+            for name in names:
+                click.echo(f"Halted: {name}")
+            click.echo(f"{len(names)} asset(s) halted.")
+        else:
+            click.echo("All assets are already suspended.")
     except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)

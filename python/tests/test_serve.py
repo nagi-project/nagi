@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from nagi_cli.commands.serve import resume
+from nagi_cli.commands.serve import halt, resume
 
 
 @pytest.fixture()
@@ -102,3 +102,41 @@ class TestResumeWithSelectors:
         result = runner.invoke(resume, ["--select", "nonexistent"])
         assert result.exit_code == 0
         assert "No matching suspended assets found." in result.output
+
+
+class TestHalt:
+    """Tests for `nagi serve halt`."""
+
+    @patch("nagi_cli.commands.serve._serve_halt")
+    def test_halt_suspends_assets(
+        self, mock_halt: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_halt.return_value = json.dumps(["asset-a", "asset-b"])
+        result = runner.invoke(halt, [])
+        assert result.exit_code == 0
+        assert "Halted: asset-a" in result.output
+        assert "Halted: asset-b" in result.output
+        assert "2 asset(s) halted." in result.output
+        mock_halt.assert_called_once_with("target", None)
+
+    @patch("nagi_cli.commands.serve._serve_halt")
+    def test_halt_with_reason(self, mock_halt: MagicMock, runner: CliRunner) -> None:
+        mock_halt.return_value = json.dumps(["asset-a"])
+        result = runner.invoke(halt, ["--reason", "deploy in progress"])
+        assert result.exit_code == 0
+        mock_halt.assert_called_once_with("target", "deploy in progress")
+
+    @patch("nagi_cli.commands.serve._serve_halt")
+    def test_halt_all_already_suspended(
+        self, mock_halt: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_halt.return_value = json.dumps([])
+        result = runner.invoke(halt, [])
+        assert result.exit_code == 0
+        assert "All assets are already suspended." in result.output
+
+    @patch("nagi_cli.commands.serve._serve_halt")
+    def test_halt_error(self, mock_halt: MagicMock, runner: CliRunner) -> None:
+        mock_halt.side_effect = RuntimeError("compile error")
+        result = runner.invoke(halt, [])
+        assert result.exit_code == 1
