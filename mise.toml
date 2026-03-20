@@ -21,6 +21,7 @@ cargo test
 
 [tasks.check-python]
 description = "Run ruff and ty on Python code"
+depends = ["build"]
 run = """
 uv run ruff check python/
 uv run ruff format --check python/
