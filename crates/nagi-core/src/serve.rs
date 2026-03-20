@@ -27,6 +27,7 @@ use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::kind::asset::DesiredSetEntry;
 use crate::storage::local::LocalCache;
 use crate::storage::Cache;
+use crate::sync::SyncError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -36,6 +37,8 @@ pub enum ServeError {
     Evaluate(#[from] EvaluateError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("sync error: {0}")]
+    Sync(#[from] SyncError),
     #[error("parse error: {0}")]
     Parse(String),
 }
@@ -96,13 +99,18 @@ pub fn connected_components(graph: &DependencyGraph) -> Vec<Vec<String>> {
 
 // ── AssetEntry ───────────────────────────────────────────────────────────────
 
-/// A compiled asset prepared for the Controller: name, raw YAML, and
-/// the shortest evaluation interval derived from its conditions.
+/// A compiled asset prepared for the Controller: name, raw YAML, evaluation
+/// interval, and sync configuration.
 #[derive(Debug, Clone)]
 struct AssetEntry {
     name: String,
     yaml: String,
     min_interval: Option<StdDuration>,
+    /// When true and sync spec exists, the Controller will automatically
+    /// trigger sync after a Not Ready evaluation.
+    auto_sync: bool,
+    /// Whether this asset has a sync spec defined.
+    has_sync: bool,
 }
 
 // ── WorkQueue ────────────────────────────────────────────────────────────────
@@ -217,6 +225,13 @@ impl ReadinessState {
 ///
 /// Sub-states are intentionally kept as flat fields rather than nested behind
 /// traits so that each method can be unit-tested with plain assertions.
+/// Per-asset sync configuration derived from the compiled asset.
+#[derive(Debug, Clone)]
+struct AssetSyncConfig {
+    auto_sync: bool,
+    has_sync: bool,
+}
+
 #[derive(Debug)]
 struct ServeState {
     scheduler: SchedulerState,
@@ -226,6 +241,13 @@ struct ServeState {
     in_flight: HashSet<String>,
     /// asset name → list of downstream asset names.
     downstream_map: HashMap<String, Vec<String>>,
+    /// Per-asset sync configuration.
+    sync_configs: HashMap<String, AssetSyncConfig>,
+    /// FIFO queue of assets waiting for sync execution.
+    sync_queue: WorkQueue,
+    /// The asset currently being synced. At most one sync runs at a time
+    /// within a Controller to prevent concurrent writes to external systems.
+    syncing: Option<String>,
 }
 
 impl ServeState {
@@ -236,16 +258,27 @@ impl ServeState {
             readiness: ReadinessState::new(),
             in_flight: HashSet::new(),
             downstream_map: build_downstream_map(edges),
+            sync_configs: HashMap::new(),
+            sync_queue: WorkQueue::new(),
+            syncing: None,
         }
     }
 
-    /// Registers all assets: enqueue for initial evaluation + register intervals.
+    /// Registers all assets: enqueue for initial evaluation + register intervals
+    /// + store sync configuration.
     fn init(&mut self, assets: &[AssetEntry]) {
         for asset in assets {
             self.work_queue.enqueue(asset.name.clone());
             if let Some(dur) = asset.min_interval {
                 self.scheduler.register(asset.name.clone(), dur);
             }
+            self.sync_configs.insert(
+                asset.name.clone(),
+                AssetSyncConfig {
+                    auto_sync: asset.auto_sync,
+                    has_sync: asset.has_sync,
+                },
+            );
         }
     }
 
@@ -270,6 +303,38 @@ impl ServeState {
         None
     }
 
+    /// Requests a sync for an asset. Only enqueues if `auto_sync` is true,
+    /// a sync spec exists, and the asset is not already queued or syncing.
+    fn request_sync(&mut self, asset_name: &str) -> bool {
+        if let Some(config) = self.sync_configs.get(asset_name) {
+            if config.auto_sync && config.has_sync && self.syncing.as_deref() != Some(asset_name) {
+                return self.sync_queue.enqueue(asset_name.to_string());
+            }
+        }
+        false
+    }
+
+    /// Returns the next asset to sync, or None if a sync is already running
+    /// or the queue is empty.
+    fn next_syncable(&mut self) -> Option<String> {
+        if self.syncing.is_some() {
+            return None;
+        }
+        let name = self.sync_queue.dequeue()?;
+        self.syncing = Some(name.clone());
+        Some(name)
+    }
+
+    /// Processes a sync completion: clears the syncing slot and enqueues
+    /// the asset for re-evaluation to verify convergence.
+    fn handle_sync_result(&mut self, asset_name: &str) {
+        if self.syncing.as_deref() == Some(asset_name) {
+            self.syncing = None;
+        }
+        // Re-evaluate after sync to check if the asset is now Ready.
+        self.work_queue.enqueue(asset_name.to_string());
+    }
+
     /// Processes an evaluation result: updates scheduler, readiness, and
     /// in-flight tracking.  Returns names of downstream assets that were
     /// enqueued due to a Not Ready → Ready transition.
@@ -285,6 +350,11 @@ impl ServeState {
             Ok(r) => r.ready,
             Err(_) => false,
         };
+
+        // Not Ready → request sync (if auto_sync enabled)
+        if !ready {
+            self.request_sync(asset_name);
+        }
 
         let mut propagated = Vec::new();
         if self.readiness.record(asset_name, ready) {
@@ -345,6 +415,39 @@ async fn spawn_evaluate(
     (asset_name, result)
 }
 
+/// Executes sync for a compiled asset. Called via `JoinSet::spawn` so all
+/// inputs are owned to produce a `Send` future.
+///
+/// Uses `execute_sync` directly (not `sync_from_compiled`) to avoid
+/// `LogStore` (!Send) and `post_sync_re_evaluate` — the Controller handles
+/// re-evaluation itself via `handle_sync_result`.
+async fn spawn_sync(
+    asset_name: String,
+    yaml: String,
+) -> (String, Result<crate::sync::SyncExecutionResult, SyncError>) {
+    let result = resolve_and_sync(&yaml).await;
+    (asset_name, result)
+}
+
+async fn resolve_and_sync(yaml: &str) -> Result<crate::sync::SyncExecutionResult, SyncError> {
+    let compiled: CompiledAsset =
+        serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
+    let sync_spec = compiled
+        .spec
+        .sync
+        .as_ref()
+        .ok_or_else(|| SyncError::NoSyncSpec {
+            asset_name: compiled.metadata.name.clone(),
+        })?;
+    crate::sync::execute_sync_core(
+        &compiled.metadata.name,
+        sync_spec,
+        crate::sync::SyncType::Sync,
+        None,
+    )
+    .await
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn build_downstream_map(edges: &[GraphEdge]) -> HashMap<String, Vec<String>> {
@@ -374,11 +477,14 @@ fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
 
 /// Runs the reconciliation loop for one connected component.
 ///
-/// The loop reacts to three events via `tokio::select!`:
+/// The loop reacts to four events via `tokio::select!`:
 /// 1. **Timer** — a scheduled asset becomes due → enqueue it.
-/// 2. **Task completion** — a spawned evaluation finishes → update state,
-///    propagate to downstream assets if newly Ready.
-/// 3. **Shutdown** — break and return.
+/// 2. **Eval completion** — a spawned evaluation finishes → update state,
+///    propagate to downstream assets if newly Ready, request sync if Not Ready.
+/// 3. **Sync completion** — a sync finishes → enqueue re-evaluation.
+/// 4. **Shutdown** — break and return.
+///
+/// Sync is serialized: at most one sync runs at a time per Controller.
 async fn run_controller(
     assets: Vec<AssetEntry>,
     edges: Vec<GraphEdge>,
@@ -386,7 +492,9 @@ async fn run_controller(
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
     let mut state = ServeState::new(&edges);
-    let mut tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
+    let mut eval_tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
+    let mut sync_task: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
+        JoinSet::new();
 
     state.init(&assets);
 
@@ -395,16 +503,43 @@ async fn run_controller(
         .map(|a| (a.name.as_str(), a.yaml.as_str()))
         .collect();
 
+    // ── Main reconciliation loop ──────────────────────────────────────
+    //
+    // Each iteration:
+    //   1. Spawn: drain work_queue into eval JoinSet (concurrent).
+    //   2. Spawn: start at most one sync from sync_queue (serialized).
+    //   3. Wait:  select! on the first event that fires:
+    //      a) Timer        — interval elapsed → enqueue the due asset.
+    //      b) Eval done    — update readiness; if Ready, propagate to
+    //                        downstreams; if Not Ready, request sync.
+    //      c) Sync done    — enqueue re-evaluation to verify convergence.
+    //      d) Shutdown      — break out of the loop.
+    //
+    // Evaluations run concurrently (read-only).
+    // Syncs run one at a time per Controller to prevent concurrent writes
+    // to external systems within the same connected component.
+
     loop {
+        // (1) Spawn pending evaluations — multiple may run concurrently.
         while let Some(name) = state.next_spawnable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
-                tasks.spawn(spawn_evaluate(name, yaml.to_string(), cache_dir.clone()));
+                eval_tasks.spawn(spawn_evaluate(name, yaml.to_string(), cache_dir.clone()));
             }
         }
 
+        // (2) Spawn next sync if no sync is currently running.
+        if let Some(name) = state.next_syncable() {
+            if let Some(&yaml) = yaml_map.get(name.as_str()) {
+                eprintln!("[serve] starting sync for {name}");
+                sync_task.spawn(spawn_sync(name, yaml.to_string()));
+            }
+        }
+
+        // (3) Wait for the next event.
         let sleep_until = state.scheduler.next_due().map(|(_, instant)| instant);
 
         tokio::select! {
+            // (a) Timer: a scheduled asset's interval has elapsed.
             _ = async {
                 match sleep_until {
                     Some(t) => tokio::time::sleep_until(t).await,
@@ -414,7 +549,8 @@ async fn run_controller(
                 state.enqueue_due();
             }
 
-            result = tasks.join_next(), if !tasks.is_empty() => {
+            // (b) Eval complete: update state, propagate or request sync.
+            result = eval_tasks.join_next(), if !eval_tasks.is_empty() => {
                 if let Some(Ok((asset_name, eval_result))) = result {
                     match &eval_result {
                         Ok(r) => eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready),
@@ -427,6 +563,18 @@ async fn run_controller(
                 }
             }
 
+            // (c) Sync complete: enqueue re-evaluation to verify convergence.
+            result = sync_task.join_next(), if !sync_task.is_empty() => {
+                if let Some(Ok((asset_name, sync_result))) = result {
+                    match &sync_result {
+                        Ok(r) => eprintln!("[serve] sync completed for {asset_name}: success={}", r.success),
+                        Err(e) => eprintln!("[serve] sync failed for {asset_name}: {e}"),
+                    }
+                    state.handle_sync_result(&asset_name);
+                }
+            }
+
+            // (d) Shutdown signal received.
             _ = shutdown.changed() => {
                 eprintln!("[serve] shutting down controller");
                 break;
@@ -454,8 +602,11 @@ fn build_controller_inputs(
     let mut inputs = Vec::new();
 
     for component in components {
+        // Set of asset names in this component, used to filter edges below.
         let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
 
+        // Parse each compiled YAML to extract interval and sync config.
+        // Assets that fail to parse or aren't in asset_map are silently skipped.
         let assets: Vec<_> = component
             .iter()
             .filter_map(|name| {
@@ -468,6 +619,8 @@ fn build_controller_inputs(
                     name: name.clone(),
                     yaml: yaml.clone(),
                     min_interval,
+                    auto_sync: compiled.spec.auto_sync,
+                    has_sync: compiled.spec.sync.is_some(),
                 })
             })
             .collect();
@@ -476,6 +629,8 @@ fn build_controller_inputs(
             continue;
         }
 
+        // Collect edges where either endpoint belongs to this component.
+        // Includes Source → Asset edges so downstream_map covers them.
         let edges: Vec<GraphEdge> = graph
             .edges
             .iter()
@@ -746,6 +901,18 @@ mod tests {
             name: name.to_string(),
             yaml: String::new(),
             min_interval: interval,
+            auto_sync: false,
+            has_sync: false,
+        }
+    }
+
+    fn asset_entry_with_sync(name: &str) -> AssetEntry {
+        AssetEntry {
+            name: name.to_string(),
+            yaml: String::new(),
+            min_interval: None,
+            auto_sync: true,
+            has_sync: true,
         }
     }
 
@@ -845,6 +1012,119 @@ mod tests {
         let propagated = state.handle_eval_result("a", &result);
 
         assert!(propagated.is_empty());
+    }
+
+    // ── Sync management tests ─────────────────────────────────────────
+
+    #[test]
+    fn request_sync_enqueues_when_auto_sync_enabled() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a")]);
+        // drain the initial work_queue
+        state.work_queue.dequeue();
+
+        assert!(state.request_sync("a"));
+        assert_eq!(state.sync_queue.dequeue(), Some("a".to_string()));
+    }
+
+    #[test]
+    fn request_sync_skips_when_auto_sync_false() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry("a", None)]);
+        state.work_queue.dequeue();
+
+        assert!(!state.request_sync("a"));
+        assert!(state.sync_queue.is_empty());
+    }
+
+    #[test]
+    fn request_sync_skips_when_already_syncing() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a")]);
+        state.work_queue.dequeue();
+
+        state.syncing = Some("a".to_string());
+        assert!(!state.request_sync("a"));
+    }
+
+    #[test]
+    fn request_sync_dedup() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a")]);
+        state.work_queue.dequeue();
+
+        assert!(state.request_sync("a"));
+        assert!(!state.request_sync("a")); // duplicate rejected
+    }
+
+    #[test]
+    fn next_syncable_returns_none_while_syncing() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
+        state.request_sync("a");
+        state.request_sync("b");
+
+        assert_eq!(state.next_syncable(), Some("a".to_string()));
+        assert!(state.syncing.is_some());
+        // While "a" is syncing, next_syncable returns None
+        assert_eq!(state.next_syncable(), None);
+    }
+
+    #[test]
+    fn handle_sync_result_clears_syncing_and_enqueues_re_eval() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a")]);
+        // drain initial work_queue
+        state.work_queue.dequeue();
+
+        state.syncing = Some("a".to_string());
+        state.handle_sync_result("a");
+
+        assert!(state.syncing.is_none());
+        // Re-evaluate enqueued
+        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
+    }
+
+    #[test]
+    fn handle_sync_result_allows_next_sync() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
+        state.request_sync("a");
+        state.request_sync("b");
+
+        // Start "a" sync
+        assert_eq!(state.next_syncable(), Some("a".to_string()));
+        // "b" blocked while "a" syncing
+        assert_eq!(state.next_syncable(), None);
+
+        // Complete "a" sync
+        state.handle_sync_result("a");
+        // Now "b" can sync
+        assert_eq!(state.next_syncable(), Some("b".to_string()));
+    }
+
+    #[test]
+    fn handle_eval_not_ready_with_auto_sync_requests_sync() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a")]);
+        state.in_flight.insert("a".to_string());
+
+        let result = eval_ok("a", false);
+        state.handle_eval_result("a", &result);
+
+        assert_eq!(state.sync_queue.dequeue(), Some("a".to_string()));
+    }
+
+    #[test]
+    fn handle_eval_ready_does_not_request_sync() {
+        let mut state = ServeState::new(&[]);
+        state.init(&[asset_entry_with_sync("a")]);
+        state.in_flight.insert("a".to_string());
+
+        let result = eval_ok("a", true);
+        state.handle_eval_result("a", &result);
+
+        assert!(state.sync_queue.is_empty());
     }
 
     // ── build_controller_inputs tests ───────────────────────────────────

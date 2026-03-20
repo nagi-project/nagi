@@ -187,6 +187,24 @@ pub async fn execute_sync(
     stages: Option<&[Stage]>,
     log_store: Option<&LogStore>,
 ) -> Result<SyncExecutionResult, SyncError> {
+    let result = execute_sync_core(asset_name, sync_spec, sync_type, stages).await?;
+
+    if let Some(store) = log_store {
+        store.write_sync_log(&result)?;
+    }
+
+    Ok(result)
+}
+
+/// Executes sync stages without logging. The returned future is `Send`,
+/// making it safe to spawn on a `JoinSet` (unlike `execute_sync` which
+/// accepts `&LogStore` that is `!Send`).
+pub async fn execute_sync_core(
+    asset_name: &str,
+    sync_spec: &SyncSpec,
+    sync_type: SyncType,
+    stages: Option<&[Stage]>,
+) -> Result<SyncExecutionResult, SyncError> {
     let execution_id = generate_uuid();
     let stages_to_run = resolve_stages(sync_spec, stages);
 
@@ -204,19 +222,13 @@ pub async fn execute_sync(
         }
     }
 
-    let result = SyncExecutionResult {
+    Ok(SyncExecutionResult {
         execution_id,
         asset_name: asset_name.to_string(),
         sync_type,
         stages: results,
         success: overall_success,
-    };
-
-    if let Some(store) = log_store {
-        store.write_sync_log(&result)?;
-    }
-
-    Ok(result)
+    })
 }
 
 /// Returns a dry-run summary without executing anything.
