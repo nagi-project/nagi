@@ -68,6 +68,25 @@ fn build_notifier(project_dir: Option<&Path>) -> Option<Arc<dyn Notifier>> {
     Some(Arc::new(crate::notify::slack::SlackNotifier::new(slack.channel)) as Arc<dyn Notifier>)
 }
 
+/// Waits for all in-flight sync tasks to complete before returning.
+/// Sync tasks have side effects and must not be aborted mid-execution.
+async fn drain_sync_tasks(
+    tasks: &mut JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)>,
+) {
+    if tasks.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[serve] waiting for {} in-flight sync task(s) to finish",
+        tasks.len()
+    );
+    while let Some(result) = tasks.join_next().await {
+        if let Ok((name, Err(e))) = result {
+            eprintln!("[serve] sync for {name} failed during shutdown: {e}");
+        }
+    }
+}
+
 /// Sends a notification asynchronously without blocking the serve loop.
 fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
     let Some(n) = notifier.clone() else {
@@ -209,20 +228,9 @@ async fn run_controller(
         }
     }
 
-    // Drain in-flight sync tasks (side-effects) before exiting.
-    // Eval tasks are read-only and safe to abort, so we drop them.
+    // Eval tasks are read-only and safe to abort.
     drop(eval_tasks);
-    if !sync_tasks.is_empty() {
-        eprintln!(
-            "[serve] waiting for {} in-flight sync task(s) to finish",
-            sync_tasks.len()
-        );
-        while let Some(result) = sync_tasks.join_next().await {
-            if let Ok((name, Err(e))) = result {
-                eprintln!("[serve] sync for {name} failed during shutdown: {e}");
-            }
-        }
-    }
+    drain_sync_tasks(&mut sync_tasks).await;
 
     Ok(())
 }
@@ -547,5 +555,53 @@ mod tests {
         assert_eq!(inputs.len(), 2);
         assert_eq!(inputs[0].assets.len(), 1);
         assert_eq!(inputs[1].assets.len(), 1);
+    }
+
+    // ── drain_sync_tasks tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn drain_sync_tasks_empty_returns_immediately() {
+        let mut tasks = JoinSet::new();
+        drain_sync_tasks(&mut tasks).await;
+        assert!(tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn drain_sync_tasks_waits_for_completion() {
+        use crate::sync::{SyncExecutionResult, SyncType};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_clone = completed.clone();
+
+        let mut tasks = JoinSet::new();
+        tasks.spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            completed_clone.store(true, Ordering::SeqCst);
+            let result = SyncExecutionResult {
+                execution_id: "test".to_string(),
+                asset_name: "a".to_string(),
+                sync_type: SyncType::Sync,
+                stages: vec![],
+                success: true,
+            };
+            ("a".to_string(), Ok(result))
+        });
+
+        drain_sync_tasks(&mut tasks).await;
+        assert!(completed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn drain_sync_tasks_handles_errors() {
+        let mut tasks = JoinSet::new();
+        tasks.spawn(async {
+            let err = SyncError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test error"));
+            ("a".to_string(), Err(err))
+        });
+
+        // Should not panic.
+        drain_sync_tasks(&mut tasks).await;
+        assert!(tasks.is_empty());
     }
 }
