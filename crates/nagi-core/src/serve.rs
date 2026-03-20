@@ -302,16 +302,26 @@ fn build_controller_inputs(
 
 /// Entry point for `nagi serve`.
 ///
-/// 1. Loads compiled assets and the dependency graph from `target_dir`.
-/// 2. Partitions assets into connected components.
-/// 3. Spawns one [`run_controller`] per component.
-/// 4. Waits for Ctrl-C, then signals all Controllers to shut down.
+/// 1. Compiles assets from `assets_dir` into `target_dir`.
+/// 2. Loads compiled assets and the dependency graph from `target_dir`.
+/// 3. Partitions assets into connected components.
+/// 4. Spawns one [`run_controller`] per component.
+/// 5. Waits for Ctrl-C, then signals all Controllers to shut down.
 pub async fn serve(
+    assets_dir: &Path,
     target_dir: &Path,
     selectors: &[&str],
     cache_dir: Option<&Path>,
     project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
+    eprintln!("[serve] compiling assets...");
+    let output = crate::compile::compile(assets_dir, target_dir)?;
+    eprintln!(
+        "[serve] compiled {} node(s), {} edge(s)",
+        output.graph.nodes.len(),
+        output.graph.edges.len()
+    );
+
     let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
 
     let graph_path = target_dir.join("graph.json");

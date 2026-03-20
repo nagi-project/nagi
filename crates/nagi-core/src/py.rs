@@ -218,11 +218,12 @@ pub fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> 
 
 // ── Serve ───────────────────────────────────────────────────────────────────
 
-/// Starts the reconciliation loop for continuous evaluation.
+/// Compiles assets and starts the reconciliation loop.
 /// Blocks until Ctrl-C is received.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None, project_dir=None))]
+#[pyo3(signature = (assets_dir, target_dir, selectors, cache_dir=None, project_dir=None))]
 pub fn serve(
+    assets_dir: &str,
     target_dir: &str,
     selectors: Vec<String>,
     cache_dir: Option<&str>,
@@ -231,6 +232,7 @@ pub fn serve(
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::serve::serve(
+        std::path::Path::new(assets_dir),
         std::path::Path::new(target_dir),
         &selector_refs,
         cache_dir.map(std::path::Path::new),
