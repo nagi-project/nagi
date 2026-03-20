@@ -211,6 +211,23 @@ pub fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> 
     crate::dbt::run_dbt_debug(std::path::Path::new(project_dir), profile, target).map_err(to_py_err)
 }
 
+// ── Serve ───────────────────────────────────────────────────────────────────
+
+/// Starts the reconciliation loop for continuous evaluation.
+/// Blocks until Ctrl-C is received.
+#[pyfunction]
+#[pyo3(signature = (target_dir, selectors, cache_dir=None))]
+pub fn serve(target_dir: &str, selectors: Vec<String>, cache_dir: Option<&str>) -> PyResult<()> {
+    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
+    let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    rt.block_on(crate::serve::serve(
+        std::path::Path::new(target_dir),
+        &selector_refs,
+        cache_dir.map(std::path::Path::new),
+    ))
+    .map_err(to_py_err)
+}
+
 /// Generates and writes connection.yaml and origin.yaml from dbt project entries.
 /// `entries` is a JSON array of `[{"projectDir": "...", "profile": "...", "target": "..."}]`.
 /// Returns JSON with paths of written files.
