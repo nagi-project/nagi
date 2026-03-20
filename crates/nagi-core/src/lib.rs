@@ -34,5 +34,6 @@ fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py::run_dbt_debug, m)?)?;
     m.add_function(wrap_pyfunction!(py::write_init_dbt_files, m)?)?;
     m.add_function(wrap_pyfunction!(py::serve, m)?)?;
+    m.add_function(wrap_pyfunction!(py::serve_resume, m)?)?;
     Ok(())
 }

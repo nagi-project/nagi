@@ -5,29 +5,39 @@
 //! - **Controller** ([`run_controller`]) — one per connected component of the
 //!   dependency graph.  Runs a `tokio::select!` loop that reacts to three
 //!   events: timer fire, task completion, and shutdown signal.
-//! - **ServeState** — all mutable in-memory state lives here.  Sub-states:
-//!   [`WorkQueue`], [`SchedulerState`], [`ReadinessState`], plus `in_flight`
-//!   tracking and the downstream propagation map.
-//! - **Reconciler** ([`evaluate_and_cache`]) — stateless async function that
-//!   evaluates a single asset and writes the result to the local cache.
+//! - **ServeState** ([`state::ServeState`]) — all mutable in-memory state
+//!   lives here.  Sub-states: [`state::WorkQueue`], [`state::SchedulerState`],
+//!   [`state::ReadinessState`], plus `in_flight` tracking and the downstream
+//!   propagation map.
+//! - **Reconciler** ([`reconciler::evaluate_and_cache`]) — stateless async
+//!   function that evaluates a single asset and writes the result to the
+//!   local cache.
 //!
 //! The top-level [`serve`] function loads compiled assets, partitions them into
 //! connected components, and spawns one Controller per component.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+mod graph;
+mod reconciler;
+pub mod state;
+pub mod suspended;
+
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration as StdDuration;
 
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tokio::time::Instant;
 
 use crate::compile::{CompiledAsset, DependencyGraph, GraphEdge};
 use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::kind::asset::DesiredSetEntry;
-use crate::storage::local::LocalCache;
-use crate::storage::Cache;
 use crate::sync::SyncError;
+
+pub use graph::connected_components;
+pub use suspended::SuspendedInfo;
+
+use state::{AssetEntry, ServeState};
+use suspended::{list_suspended, remove_suspended, suspended_dir, suspended_path};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -43,422 +53,7 @@ pub enum ServeError {
     Parse(String),
 }
 
-// ── Connected Components ─────────────────────────────────────────────────────
-
-/// Detects connected components in the dependency graph using Union-Find.
-/// Returns groups of Asset names (Source nodes are excluded from output).
-pub fn connected_components(graph: &DependencyGraph) -> Vec<Vec<String>> {
-    let mut name_to_id: HashMap<&str, usize> = HashMap::new();
-    for (i, node) in graph.nodes.iter().enumerate() {
-        name_to_id.insert(&node.name, i);
-    }
-
-    let n = graph.nodes.len();
-    let mut parent: Vec<usize> = (0..n).collect();
-
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        x
-    }
-
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let ra = find(parent, a);
-        let rb = find(parent, b);
-        if ra != rb {
-            parent[rb] = ra;
-        }
-    }
-
-    for edge in &graph.edges {
-        if let (Some(&a), Some(&b)) = (
-            name_to_id.get(edge.from.as_str()),
-            name_to_id.get(edge.to.as_str()),
-        ) {
-            union(&mut parent, a, b);
-        }
-    }
-
-    let mut groups: HashMap<usize, Vec<String>> = HashMap::new();
-    for (i, node) in graph.nodes.iter().enumerate() {
-        if node.kind == "Asset" {
-            let root = find(&mut parent, i);
-            groups.entry(root).or_default().push(node.name.clone());
-        }
-    }
-
-    let mut result: Vec<Vec<String>> = groups.into_values().collect();
-    result.sort_by(|a, b| a[0].cmp(&b[0]));
-    for group in &mut result {
-        group.sort();
-    }
-    result
-}
-
-// ── AssetEntry ───────────────────────────────────────────────────────────────
-
-/// A compiled asset prepared for the Controller: name, raw YAML, evaluation
-/// interval, and sync configuration.
-#[derive(Debug, Clone)]
-struct AssetEntry {
-    name: String,
-    yaml: String,
-    min_interval: Option<StdDuration>,
-    /// When true and sync spec exists, the Controller will automatically
-    /// trigger sync after a Not Ready evaluation.
-    auto_sync: bool,
-    /// Whether this asset has a sync spec defined.
-    has_sync: bool,
-}
-
-// ── WorkQueue ────────────────────────────────────────────────────────────────
-
-/// FIFO queue with deduplication. An asset that is already queued will not be
-/// added again until it is dequeued.
-#[derive(Debug)]
-struct WorkQueue {
-    queue: VecDeque<String>,
-    pending: HashSet<String>,
-}
-
-impl WorkQueue {
-    fn new() -> Self {
-        Self {
-            queue: VecDeque::new(),
-            pending: HashSet::new(),
-        }
-    }
-
-    /// Enqueues an asset. Returns false if already queued.
-    fn enqueue(&mut self, name: String) -> bool {
-        if self.pending.contains(&name) {
-            return false;
-        }
-        self.pending.insert(name.clone());
-        self.queue.push_back(name);
-        true
-    }
-
-    fn dequeue(&mut self) -> Option<String> {
-        let name = self.queue.pop_front()?;
-        self.pending.remove(&name);
-        Some(name)
-    }
-
-    #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
-        self.queue.is_empty()
-    }
-}
-
-// ── SchedulerState ───────────────────────────────────────────────────────────
-
-/// Tracks per-asset evaluation intervals and computes the next due time.
-#[derive(Debug)]
-struct SchedulerState {
-    intervals: HashMap<String, StdDuration>,
-    next_eval_at: HashMap<String, Instant>,
-}
-
-impl SchedulerState {
-    fn new() -> Self {
-        Self {
-            intervals: HashMap::new(),
-            next_eval_at: HashMap::new(),
-        }
-    }
-
-    fn register(&mut self, asset_name: String, interval: StdDuration) {
-        self.next_eval_at
-            .insert(asset_name.clone(), Instant::now() + interval);
-        self.intervals.insert(asset_name, interval);
-    }
-
-    /// Returns the asset due soonest and its scheduled time, or None.
-    fn next_due(&self) -> Option<(&str, Instant)> {
-        self.next_eval_at
-            .iter()
-            .min_by_key(|(_, instant)| *instant)
-            .map(|(name, instant)| (name.as_str(), *instant))
-    }
-
-    /// Resets the timer for an asset to `now + interval`.
-    fn reschedule(&mut self, asset_name: &str) {
-        if let Some(interval) = self.intervals.get(asset_name) {
-            self.next_eval_at
-                .insert(asset_name.to_string(), Instant::now() + *interval);
-        }
-    }
-}
-
-// ── ReadinessState ────────────────────────────────────────────────────────────
-
-/// Tracks the Ready / Not Ready state of each asset.
-/// Detects the Not Ready → Ready transition, which triggers downstream
-/// propagation.
-#[derive(Debug)]
-struct ReadinessState {
-    ready: HashMap<String, bool>,
-}
-
-impl ReadinessState {
-    fn new() -> Self {
-        Self {
-            ready: HashMap::new(),
-        }
-    }
-
-    /// Records the latest readiness. Returns `true` only when the asset
-    /// transitions from Not Ready to Ready (i.e. became_ready).
-    fn record(&mut self, asset_name: &str, ready: bool) -> bool {
-        let was_ready = self.ready.get(asset_name).copied().unwrap_or(false);
-        self.ready.insert(asset_name.to_string(), ready);
-        !was_ready && ready
-    }
-}
-
-// ── ServeState ───────────────────────────────────────────────────────────────
-
-/// All mutable in-memory state for one Controller.
-///
-/// Sub-states are intentionally kept as flat fields rather than nested behind
-/// traits so that each method can be unit-tested with plain assertions.
-/// Per-asset sync configuration derived from the compiled asset.
-#[derive(Debug, Clone)]
-struct AssetSyncConfig {
-    auto_sync: bool,
-    has_sync: bool,
-}
-
-#[derive(Debug)]
-struct ServeState {
-    scheduler: SchedulerState,
-    work_queue: WorkQueue,
-    readiness: ReadinessState,
-    /// Assets currently being evaluated in the JoinSet.
-    in_flight: HashSet<String>,
-    /// asset name → list of downstream asset names.
-    downstream_map: HashMap<String, Vec<String>>,
-    /// Per-asset sync configuration.
-    sync_configs: HashMap<String, AssetSyncConfig>,
-    /// FIFO queue of assets waiting for sync execution.
-    sync_queue: WorkQueue,
-    /// The asset currently being synced. At most one sync runs at a time
-    /// within a Controller to prevent concurrent writes to external systems.
-    syncing: Option<String>,
-}
-
-impl ServeState {
-    fn new(edges: &[GraphEdge]) -> Self {
-        Self {
-            scheduler: SchedulerState::new(),
-            work_queue: WorkQueue::new(),
-            readiness: ReadinessState::new(),
-            in_flight: HashSet::new(),
-            downstream_map: build_downstream_map(edges),
-            sync_configs: HashMap::new(),
-            sync_queue: WorkQueue::new(),
-            syncing: None,
-        }
-    }
-
-    /// Registers all assets: enqueue for initial evaluation + register intervals
-    /// + store sync configuration.
-    fn init(&mut self, assets: &[AssetEntry]) {
-        for asset in assets {
-            self.work_queue.enqueue(asset.name.clone());
-            if let Some(dur) = asset.min_interval {
-                self.scheduler.register(asset.name.clone(), dur);
-            }
-            self.sync_configs.insert(
-                asset.name.clone(),
-                AssetSyncConfig {
-                    auto_sync: asset.auto_sync,
-                    has_sync: asset.has_sync,
-                },
-            );
-        }
-    }
-
-    /// Enqueues the next due asset (if any) when its timer fires.
-    fn enqueue_due(&mut self) {
-        if let Some((name, _)) = self.scheduler.next_due() {
-            let name = name.to_string();
-            if !self.in_flight.contains(&name) {
-                self.work_queue.enqueue(name);
-            }
-        }
-    }
-
-    /// Dequeues the next asset to spawn, skipping those already in flight.
-    fn next_spawnable(&mut self) -> Option<String> {
-        while let Some(name) = self.work_queue.dequeue() {
-            if !self.in_flight.contains(&name) {
-                self.in_flight.insert(name.clone());
-                return Some(name);
-            }
-        }
-        None
-    }
-
-    /// Requests a sync for an asset. Only enqueues if `auto_sync` is true,
-    /// a sync spec exists, and the asset is not already queued or syncing.
-    fn request_sync(&mut self, asset_name: &str) -> bool {
-        if let Some(config) = self.sync_configs.get(asset_name) {
-            if config.auto_sync && config.has_sync && self.syncing.as_deref() != Some(asset_name) {
-                return self.sync_queue.enqueue(asset_name.to_string());
-            }
-        }
-        false
-    }
-
-    /// Returns the next asset to sync, or None if a sync is already running
-    /// or the queue is empty.
-    fn next_syncable(&mut self) -> Option<String> {
-        if self.syncing.is_some() {
-            return None;
-        }
-        let name = self.sync_queue.dequeue()?;
-        self.syncing = Some(name.clone());
-        Some(name)
-    }
-
-    /// Processes a sync completion: clears the syncing slot and enqueues
-    /// the asset for re-evaluation to verify convergence.
-    fn handle_sync_result(&mut self, asset_name: &str) {
-        if self.syncing.as_deref() == Some(asset_name) {
-            self.syncing = None;
-        }
-        // Re-evaluate after sync to check if the asset is now Ready.
-        self.work_queue.enqueue(asset_name.to_string());
-    }
-
-    /// Processes an evaluation result: updates scheduler, readiness, and
-    /// in-flight tracking.  Returns names of downstream assets that were
-    /// enqueued due to a Not Ready → Ready transition.
-    fn handle_eval_result(
-        &mut self,
-        asset_name: &str,
-        result: &Result<AssetEvalResult, EvaluateError>,
-    ) -> Vec<String> {
-        self.in_flight.remove(asset_name);
-        self.scheduler.reschedule(asset_name);
-
-        let ready = match result {
-            Ok(r) => r.ready,
-            Err(_) => false,
-        };
-
-        // Not Ready → request sync (if auto_sync enabled)
-        if !ready {
-            self.request_sync(asset_name);
-        }
-
-        let mut propagated = Vec::new();
-        if self.readiness.record(asset_name, ready) {
-            if let Some(downstreams) = self.downstream_map.get(asset_name) {
-                for ds in downstreams {
-                    if !self.in_flight.contains(ds) && self.work_queue.enqueue(ds.clone()) {
-                        propagated.push(ds.clone());
-                    }
-                }
-            }
-        }
-        propagated
-    }
-}
-
-// ── Reconciler ───────────────────────────────────────────────────────────────
-
-/// Evaluates a single compiled asset and writes the result to the local cache.
-///
-/// This is the "stateless reconciler": it takes all inputs by value so the
-/// returned future is `Send` and can be spawned on a `JoinSet`.
-/// (`evaluate_from_compiled` cannot be used here because `LogStore` is `!Send`.)
-async fn evaluate_and_cache(
-    yaml: &str,
-    cache_dir: Option<&Path>,
-) -> Result<AssetEvalResult, EvaluateError> {
-    let compiled: CompiledAsset =
-        serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
-    let spec = crate::evaluate::compiled_to_asset_spec(&compiled);
-    let conn = compiled
-        .connection
-        .as_ref()
-        .map(crate::evaluate::resolve_connection)
-        .transpose()?;
-    let result =
-        crate::evaluate::evaluate_asset_no_log(&compiled.metadata.name, &spec, conn.as_deref())
-            .await?;
-
-    let cache_path = cache_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(LocalCache::default_dir);
-    let cache = LocalCache::new(cache_path);
-    cache
-        .write(&result)
-        .map_err(|e| EvaluateError::Cache(e.to_string()))?;
-
-    Ok(result)
-}
-
-/// Spawn wrapper: pairs the asset name with the evaluation result so the
-/// Controller can identify which asset completed.
-async fn spawn_evaluate(
-    asset_name: String,
-    yaml: String,
-    cache_dir: Option<PathBuf>,
-) -> (String, Result<AssetEvalResult, EvaluateError>) {
-    let result = evaluate_and_cache(&yaml, cache_dir.as_deref()).await;
-    (asset_name, result)
-}
-
-/// Executes sync for a compiled asset. Called via `JoinSet::spawn` so all
-/// inputs are owned to produce a `Send` future.
-///
-/// Uses `execute_sync` directly (not `sync_from_compiled`) to avoid
-/// `LogStore` (!Send) and `post_sync_re_evaluate` — the Controller handles
-/// re-evaluation itself via `handle_sync_result`.
-async fn spawn_sync(
-    asset_name: String,
-    yaml: String,
-) -> (String, Result<crate::sync::SyncExecutionResult, SyncError>) {
-    let result = resolve_and_sync(&yaml).await;
-    (asset_name, result)
-}
-
-async fn resolve_and_sync(yaml: &str) -> Result<crate::sync::SyncExecutionResult, SyncError> {
-    let compiled: CompiledAsset =
-        serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
-    let sync_spec = compiled
-        .spec
-        .sync
-        .as_ref()
-        .ok_or_else(|| SyncError::NoSyncSpec {
-            asset_name: compiled.metadata.name.clone(),
-        })?;
-    crate::sync::execute_sync_core(
-        &compiled.metadata.name,
-        sync_spec,
-        crate::sync::SyncType::Sync,
-        None,
-    )
-    .await
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-fn build_downstream_map(edges: &[GraphEdge]) -> HashMap<String, Vec<String>> {
-    let mut map: HashMap<String, Vec<String>> = HashMap::new();
-    for edge in edges {
-        map.entry(edge.from.clone())
-            .or_default()
-            .push(edge.to.clone());
-    }
-    map
-}
 
 /// Computes the minimum interval across all inline conditions of a compiled asset.
 fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
@@ -491,7 +86,7 @@ async fn run_controller(
     cache_dir: Option<PathBuf>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
-    let mut state = ServeState::new(&edges);
+    let mut state = ServeState::new(&edges, suspended_dir());
     let mut eval_tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
     let mut sync_task: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
@@ -523,7 +118,11 @@ async fn run_controller(
         // (1) Spawn pending evaluations — multiple may run concurrently.
         while let Some(name) = state.next_spawnable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
-                eval_tasks.spawn(spawn_evaluate(name, yaml.to_string(), cache_dir.clone()));
+                eval_tasks.spawn(reconciler::spawn_evaluate(
+                    name,
+                    yaml.to_string(),
+                    cache_dir.clone(),
+                ));
             }
         }
 
@@ -531,7 +130,7 @@ async fn run_controller(
         if let Some(name) = state.next_syncable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
                 eprintln!("[serve] starting sync for {name}");
-                sync_task.spawn(spawn_sync(name, yaml.to_string()));
+                sync_task.spawn(reconciler::spawn_sync(name, yaml.to_string()));
             }
         }
 
@@ -551,27 +150,12 @@ async fn run_controller(
 
             // (b) Eval complete: update state, propagate or request sync.
             result = eval_tasks.join_next(), if !eval_tasks.is_empty() => {
-                if let Some(Ok((asset_name, eval_result))) = result {
-                    match &eval_result {
-                        Ok(r) => eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready),
-                        Err(e) => eprintln!("[serve] evaluation failed for {asset_name}: {e}"),
-                    }
-                    let propagated = state.handle_eval_result(&asset_name, &eval_result);
-                    for ds in &propagated {
-                        eprintln!("[serve] propagating to downstream: {ds}");
-                    }
-                }
+                state.on_eval_complete(result);
             }
 
             // (c) Sync complete: enqueue re-evaluation to verify convergence.
             result = sync_task.join_next(), if !sync_task.is_empty() => {
-                if let Some(Ok((asset_name, sync_result))) = result {
-                    match &sync_result {
-                        Ok(r) => eprintln!("[serve] sync completed for {asset_name}: success={}", r.success),
-                        Err(e) => eprintln!("[serve] sync failed for {asset_name}: {e}"),
-                    }
-                    state.handle_sync_result(&asset_name);
-                }
+                state.on_sync_complete(result);
             }
 
             // (d) Shutdown signal received.
@@ -699,14 +283,37 @@ pub async fn serve(
     Ok(())
 }
 
+/// Lists all currently suspended assets.
+pub fn list_suspended_assets() -> Result<Vec<SuspendedInfo>, std::io::Error> {
+    list_suspended(&suspended_dir())
+}
+
+/// Resumes suspended assets by removing their flag files.
+///
+/// If `selectors` is empty, lists suspended assets without removing.
+/// If `selectors` is non-empty, removes the suspended flag for each matching asset.
+pub fn resume(selectors: &[&str]) -> Result<Vec<String>, std::io::Error> {
+    let dir = suspended_dir();
+    if selectors.is_empty() {
+        let items = list_suspended(&dir)?;
+        return Ok(items.into_iter().map(|i| i.asset_name).collect());
+    }
+    let mut resumed = Vec::new();
+    for &sel in selectors {
+        if suspended_path(&dir, sel).exists() {
+            remove_suspended(&dir, sel)?;
+            resumed.push(sel.to_string());
+        }
+    }
+    Ok(resumed)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::compile::{GraphEdge, GraphNode};
-
-    // ── connected_components tests ───────────────────────────────────────
 
     fn asset_node(name: &str) -> GraphNode {
         GraphNode {
@@ -730,404 +337,6 @@ mod tests {
             to: to.to_string(),
         }
     }
-
-    macro_rules! connected_components_test {
-        ($($name:ident: $graph:expr => $expected:expr;)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let result = connected_components(&$graph);
-                    assert_eq!(result, $expected);
-                }
-            )*
-        };
-    }
-
-    connected_components_test! {
-        single_asset_no_edges: DependencyGraph {
-            nodes: vec![asset_node("a")],
-            edges: vec![],
-        } => vec![vec!["a".to_string()]];
-
-        two_independent_assets: DependencyGraph {
-            nodes: vec![asset_node("a"), asset_node("b")],
-            edges: vec![],
-        } => vec![vec!["a".to_string()], vec!["b".to_string()]];
-
-        chain_via_source: DependencyGraph {
-            nodes: vec![source_node("s"), asset_node("a"), asset_node("b")],
-            edges: vec![edge("s", "a"), edge("s", "b")],
-        } => vec![vec!["a".to_string(), "b".to_string()]];
-
-        two_separate_chains: DependencyGraph {
-            nodes: vec![
-                source_node("s1"), asset_node("a1"),
-                source_node("s2"), asset_node("a2"),
-            ],
-            edges: vec![edge("s1", "a1"), edge("s2", "a2")],
-        } => vec![vec!["a1".to_string()], vec!["a2".to_string()]];
-
-        three_assets_one_component: DependencyGraph {
-            nodes: vec![
-                source_node("raw"), asset_node("daily"), asset_node("monthly"), asset_node("raw-asset"),
-            ],
-            edges: vec![edge("raw", "daily"), edge("raw", "monthly"), edge("raw", "raw-asset")],
-        } => vec![vec!["daily".to_string(), "monthly".to_string(), "raw-asset".to_string()]];
-
-        empty_graph: DependencyGraph {
-            nodes: vec![],
-            edges: vec![],
-        } => Vec::<Vec<String>>::new();
-    }
-
-    // ── WorkQueue tests ─────────────────────────────────────────────────
-
-    #[test]
-    fn work_queue_enqueue_dequeue() {
-        let mut q = WorkQueue::new();
-        assert!(q.is_empty());
-
-        assert!(q.enqueue("a".to_string()));
-        assert!(q.enqueue("b".to_string()));
-        assert!(!q.is_empty());
-
-        assert_eq!(q.dequeue(), Some("a".to_string()));
-        assert_eq!(q.dequeue(), Some("b".to_string()));
-        assert_eq!(q.dequeue(), None);
-        assert!(q.is_empty());
-    }
-
-    #[test]
-    fn work_queue_dedup() {
-        let mut q = WorkQueue::new();
-        assert!(q.enqueue("a".to_string()));
-        assert!(!q.enqueue("a".to_string())); // duplicate rejected
-        assert_eq!(q.dequeue(), Some("a".to_string()));
-
-        // After dequeue, can enqueue again
-        assert!(q.enqueue("a".to_string()));
-        assert_eq!(q.dequeue(), Some("a".to_string()));
-    }
-
-    // ── SchedulerState tests ─────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn scheduler_register_and_next_due() {
-        tokio::time::pause();
-
-        let mut s = SchedulerState::new();
-        assert!(s.next_due().is_none());
-
-        s.register("a".to_string(), StdDuration::from_secs(60));
-        s.register("b".to_string(), StdDuration::from_secs(30));
-
-        // "b" is due sooner (30s vs 60s)
-        let (name, _) = s.next_due().unwrap();
-        assert_eq!(name, "b");
-    }
-
-    #[tokio::test]
-    async fn scheduler_reschedule_resets_timer() {
-        tokio::time::pause();
-
-        let mut s = SchedulerState::new();
-        s.register("a".to_string(), StdDuration::from_secs(60));
-
-        let (_, first_due) = s.next_due().unwrap();
-
-        // Advance time by 60s so "a" is due
-        tokio::time::advance(StdDuration::from_secs(60)).await;
-
-        s.reschedule("a");
-        let (_, second_due) = s.next_due().unwrap();
-
-        // After reschedule, next_due should be ~60s from now (later than first)
-        assert!(second_due > first_due);
-    }
-
-    // ── ReadinessState tests ────────────────────────────────────────────
-
-    #[test]
-    fn readiness_initial_not_ready_to_ready() {
-        let mut r = ReadinessState::new();
-        assert!(r.record("a", true));
-    }
-
-    #[test]
-    fn readiness_stays_ready_no_transition() {
-        let mut r = ReadinessState::new();
-        r.record("a", true);
-        assert!(!r.record("a", true));
-    }
-
-    #[test]
-    fn readiness_not_ready_no_transition() {
-        let mut r = ReadinessState::new();
-        assert!(!r.record("a", false));
-    }
-
-    #[test]
-    fn readiness_ready_to_not_ready_to_ready() {
-        let mut r = ReadinessState::new();
-        assert!(r.record("a", true));
-        assert!(!r.record("a", false));
-        assert!(r.record("a", true));
-    }
-
-    // ── build_downstream_map tests ──────────────────────────────────────
-
-    #[test]
-    fn downstream_map_basic() {
-        let edges = vec![edge("a", "b"), edge("a", "c"), edge("b", "c")];
-        let map = build_downstream_map(&edges);
-        assert_eq!(
-            map.get("a").unwrap(),
-            &vec!["b".to_string(), "c".to_string()]
-        );
-        assert_eq!(map.get("b").unwrap(), &vec!["c".to_string()]);
-        assert!(map.get("c").is_none());
-    }
-
-    #[test]
-    fn downstream_map_empty() {
-        let map = build_downstream_map(&[]);
-        assert!(map.is_empty());
-    }
-
-    // ── ServeState tests ────────────────────────────────────────────────
-
-    fn asset_entry(name: &str, interval: Option<StdDuration>) -> AssetEntry {
-        AssetEntry {
-            name: name.to_string(),
-            yaml: String::new(),
-            min_interval: interval,
-            auto_sync: false,
-            has_sync: false,
-        }
-    }
-
-    fn asset_entry_with_sync(name: &str) -> AssetEntry {
-        AssetEntry {
-            name: name.to_string(),
-            yaml: String::new(),
-            min_interval: None,
-            auto_sync: true,
-            has_sync: true,
-        }
-    }
-
-    fn eval_ok(name: &str, ready: bool) -> Result<AssetEvalResult, EvaluateError> {
-        Ok(AssetEvalResult {
-            asset_name: name.to_string(),
-            ready,
-            conditions: vec![],
-            evaluation_id: None,
-        })
-    }
-
-    #[test]
-    fn serve_state_init_enqueues_and_registers() {
-        let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges);
-        let assets = vec![
-            asset_entry("a", Some(StdDuration::from_secs(60))),
-            asset_entry("b", None),
-        ];
-        state.init(&assets);
-
-        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
-        assert_eq!(state.work_queue.dequeue(), Some("b".to_string()));
-        assert_eq!(state.work_queue.dequeue(), None);
-        assert!(state.scheduler.intervals.contains_key("a"));
-        assert!(!state.scheduler.intervals.contains_key("b"));
-    }
-
-    #[test]
-    fn next_spawnable_skips_in_flight() {
-        let mut state = ServeState::new(&[]);
-        state.work_queue.enqueue("a".to_string());
-        state.work_queue.enqueue("b".to_string());
-        state.in_flight.insert("a".to_string());
-
-        assert_eq!(state.next_spawnable(), Some("b".to_string()));
-        assert_eq!(state.next_spawnable(), None);
-        assert!(state.in_flight.contains("b"));
-    }
-
-    #[test]
-    fn handle_eval_result_success_propagates_downstream() {
-        let edges = vec![edge("a", "b"), edge("a", "c")];
-        let mut state = ServeState::new(&edges);
-        state.in_flight.insert("a".to_string());
-
-        let result = eval_ok("a", true);
-        let propagated = state.handle_eval_result("a", &result);
-
-        assert_eq!(propagated, vec!["b".to_string(), "c".to_string()]);
-        assert!(!state.in_flight.contains("a"));
-    }
-
-    #[test]
-    fn handle_eval_result_error_marks_not_ready() {
-        let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges);
-        state.in_flight.insert("a".to_string());
-
-        // First make "a" ready
-        state.handle_eval_result("a", &eval_ok("a", true));
-
-        // Now error — readiness becomes false, no propagation
-        state.in_flight.insert("a".to_string());
-        let err: Result<AssetEvalResult, EvaluateError> =
-            Err(EvaluateError::Parse("test error".to_string()));
-        let propagated = state.handle_eval_result("a", &err);
-
-        assert!(propagated.is_empty());
-        assert!(!state.readiness.ready.get("a").copied().unwrap_or(false));
-    }
-
-    #[test]
-    fn handle_eval_result_no_propagation_when_stays_ready() {
-        let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges);
-        state.in_flight.insert("a".to_string());
-
-        let result = eval_ok("a", true);
-        state.handle_eval_result("a", &result);
-
-        // Second evaluation still ready — no propagation
-        state.in_flight.insert("a".to_string());
-        let propagated = state.handle_eval_result("a", &result);
-        assert!(propagated.is_empty());
-    }
-
-    #[test]
-    fn handle_eval_result_skips_in_flight_downstream() {
-        let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges);
-        state.in_flight.insert("a".to_string());
-        state.in_flight.insert("b".to_string()); // b already running
-
-        let result = eval_ok("a", true);
-        let propagated = state.handle_eval_result("a", &result);
-
-        assert!(propagated.is_empty());
-    }
-
-    // ── Sync management tests ─────────────────────────────────────────
-
-    #[test]
-    fn request_sync_enqueues_when_auto_sync_enabled() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a")]);
-        // drain the initial work_queue
-        state.work_queue.dequeue();
-
-        assert!(state.request_sync("a"));
-        assert_eq!(state.sync_queue.dequeue(), Some("a".to_string()));
-    }
-
-    #[test]
-    fn request_sync_skips_when_auto_sync_false() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry("a", None)]);
-        state.work_queue.dequeue();
-
-        assert!(!state.request_sync("a"));
-        assert!(state.sync_queue.is_empty());
-    }
-
-    #[test]
-    fn request_sync_skips_when_already_syncing() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
-
-        state.syncing = Some("a".to_string());
-        assert!(!state.request_sync("a"));
-    }
-
-    #[test]
-    fn request_sync_dedup() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
-
-        assert!(state.request_sync("a"));
-        assert!(!state.request_sync("a")); // duplicate rejected
-    }
-
-    #[test]
-    fn next_syncable_returns_none_while_syncing() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
-        state.request_sync("a");
-        state.request_sync("b");
-
-        assert_eq!(state.next_syncable(), Some("a".to_string()));
-        assert!(state.syncing.is_some());
-        // While "a" is syncing, next_syncable returns None
-        assert_eq!(state.next_syncable(), None);
-    }
-
-    #[test]
-    fn handle_sync_result_clears_syncing_and_enqueues_re_eval() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a")]);
-        // drain initial work_queue
-        state.work_queue.dequeue();
-
-        state.syncing = Some("a".to_string());
-        state.handle_sync_result("a");
-
-        assert!(state.syncing.is_none());
-        // Re-evaluate enqueued
-        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
-    }
-
-    #[test]
-    fn handle_sync_result_allows_next_sync() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
-        state.request_sync("a");
-        state.request_sync("b");
-
-        // Start "a" sync
-        assert_eq!(state.next_syncable(), Some("a".to_string()));
-        // "b" blocked while "a" syncing
-        assert_eq!(state.next_syncable(), None);
-
-        // Complete "a" sync
-        state.handle_sync_result("a");
-        // Now "b" can sync
-        assert_eq!(state.next_syncable(), Some("b".to_string()));
-    }
-
-    #[test]
-    fn handle_eval_not_ready_with_auto_sync_requests_sync() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a")]);
-        state.in_flight.insert("a".to_string());
-
-        let result = eval_ok("a", false);
-        state.handle_eval_result("a", &result);
-
-        assert_eq!(state.sync_queue.dequeue(), Some("a".to_string()));
-    }
-
-    #[test]
-    fn handle_eval_ready_does_not_request_sync() {
-        let mut state = ServeState::new(&[]);
-        state.init(&[asset_entry_with_sync("a")]);
-        state.in_flight.insert("a".to_string());
-
-        let result = eval_ok("a", true);
-        state.handle_eval_result("a", &result);
-
-        assert!(state.sync_queue.is_empty());
-    }
-
-    // ── build_controller_inputs tests ───────────────────────────────────
 
     #[test]
     fn build_controller_inputs_splits_components() {

@@ -255,20 +255,25 @@ pub fn dry_run_sync(
 }
 
 pub(crate) fn generate_uuid() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     let nanos = now.as_nanos();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     let random: u64 = {
-        // Simple pseudo-random from time + thread id hash.
+        // Pseudo-random from time + thread id hash + monotonic counter.
         let tid = format!("{:?}", std::thread::current().id());
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for b in tid.bytes() {
             hash ^= b as u64;
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
-        hash ^ (nanos as u64)
+        hash ^ (nanos as u64) ^ seq
     };
     // UUID v4-like format.
     format!(
