@@ -190,14 +190,17 @@ fn build_controller_inputs(
         let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
 
         // Parse each compiled YAML to extract interval and sync config.
-        // Assets that fail to parse or aren't in asset_map are silently skipped.
         let assets: Vec<_> = component
             .iter()
             .filter_map(|name| {
                 let yaml = asset_map.get(name)?;
-                let compiled: CompiledAsset = serde_yaml::from_str(yaml)
-                    .map_err(|e| ServeError::Parse(e.to_string()))
-                    .ok()?;
+                let compiled: CompiledAsset = match serde_yaml::from_str(yaml) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("[serve] warning: skipping asset {name}: {e}");
+                        return None;
+                    }
+                };
                 let min_interval = compute_min_interval(&compiled);
                 Some(AssetEntry {
                     name: name.clone(),
