@@ -31,6 +31,7 @@ pub trait Cache: Send + Sync {
 /// Manages per-asset suspension flags.
 pub trait SuspendedStore: Send + Sync {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError>;
+    fn read(&self, asset_name: &str) -> Result<Option<SuspendedInfo>, StorageError>;
     fn remove(&self, asset_name: &str) -> Result<(), StorageError>;
     fn exists(&self, asset_name: &str) -> Result<bool, StorageError>;
     fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError>;

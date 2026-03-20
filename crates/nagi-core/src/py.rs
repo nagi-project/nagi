@@ -160,15 +160,16 @@ pub fn execute_sync_proposal(
 
 // ── Status ───────────────────────────────────────────────────────────────────
 
-/// Returns convergence status (cached evaluation + latest sync log) as JSON.
+/// Returns convergence status (cached evaluation + latest sync log + suspended state) as JSON.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None, db_path=None, logs_dir=None))]
+#[pyo3(signature = (target_dir, selectors, cache_dir=None, db_path=None, logs_dir=None, suspended_dir=None))]
 pub fn asset_status(
     target_dir: &str,
     selectors: Vec<String>,
     cache_dir: Option<&str>,
     db_path: Option<&str>,
     logs_dir: Option<&str>,
+    suspended_dir: Option<&str>,
 ) -> PyResult<String> {
     let db = db_path
         .map(std::path::PathBuf::from)
@@ -176,6 +177,9 @@ pub fn asset_status(
     let logs = logs_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(crate::init::default_logs_dir);
+    let suspended = suspended_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(crate::storage::local::LocalSuspendedStore::default_dir);
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::status::asset_status(
         std::path::Path::new(target_dir),
@@ -183,6 +187,7 @@ pub fn asset_status(
         cache_dir.map(std::path::Path::new),
         &db,
         &logs,
+        Some(&suspended),
     )
     .map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)

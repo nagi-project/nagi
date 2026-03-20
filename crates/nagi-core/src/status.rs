@@ -6,8 +6,9 @@ use thiserror::Error;
 use crate::compile::{self, CompileError};
 use crate::evaluate::AssetEvalResult;
 use crate::log::{LogError, LogStore, SyncLogEntry};
-use crate::storage::local::LocalCache;
-use crate::storage::{Cache, StorageError};
+use crate::serve::SuspendedInfo;
+use crate::storage::local::{LocalCache, LocalSuspendedStore};
+use crate::storage::{Cache, StorageError, SuspendedStore};
 
 #[derive(Debug, Error)]
 pub enum StatusError {
@@ -27,6 +28,8 @@ pub struct AssetStatus {
     pub evaluation: Option<AssetEvalResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync: Option<Vec<SyncLogEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suspended: Option<SuspendedInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,13 +37,14 @@ pub struct StatusResult {
     pub assets: Vec<AssetStatus>,
 }
 
-/// Collects convergence status for compiled assets: cached evaluation + latest sync log.
+/// Collects convergence status for compiled assets: cached evaluation + latest sync log + suspended state.
 pub fn asset_status(
     target_dir: &Path,
     selectors: &[&str],
     cache_dir: Option<&Path>,
     db_path: &Path,
     logs_dir: &Path,
+    suspended_dir: Option<&Path>,
 ) -> Result<StatusResult, StatusError> {
     let asset_names = compile::resolve_compiled_asset_names(target_dir, selectors)?;
 
@@ -54,6 +58,8 @@ pub fn asset_status(
     } else {
         None
     };
+
+    let suspended_store = suspended_dir.map(|d| LocalSuspendedStore::new(d.to_path_buf()));
 
     let mut assets = Vec::with_capacity(asset_names.len());
     for name in asset_names {
@@ -71,10 +77,16 @@ pub fn asset_status(
             None => None,
         };
 
+        let suspended = match &suspended_store {
+            Some(ss) => ss.read(&name)?,
+            None => None,
+        };
+
         assets.push(AssetStatus {
             asset: name,
             evaluation,
             last_sync,
+            suspended,
         });
     }
 
@@ -147,7 +159,7 @@ mod tests {
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir).unwrap();
+        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
         assert!(result.assets.is_empty());
     }
 
@@ -163,7 +175,8 @@ mod tests {
         let db_path = dir.path().join("nonexistent.db");
         let logs_dir = dir.path().join("logs");
 
-        let result = asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir).unwrap();
+        let result =
+            asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert_eq!(result.assets[0].asset, "asset-a");
         assert!(result.assets[0].evaluation.is_some());
@@ -183,7 +196,7 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir).unwrap();
+        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].evaluation.is_none());
         assert!(result.assets[0].last_sync.is_some());
@@ -207,7 +220,8 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let result = asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir).unwrap();
+        let result =
+            asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].evaluation.is_some());
         assert!(result.assets[0].last_sync.is_some());
@@ -221,8 +235,56 @@ mod tests {
         let db_path = dir.path().join("nonexistent.db");
         let logs_dir = dir.path().join("logs");
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir).unwrap();
+        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].last_sync.is_none());
+    }
+
+    #[test]
+    fn includes_suspended_info() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_compiled_target(dir.path(), &["asset-e"]);
+
+        let suspended_dir = dir.path().join("suspended");
+        let ss = LocalSuspendedStore::new(suspended_dir.clone());
+        ss.write(&SuspendedInfo {
+            asset_name: "asset-e".to_string(),
+            reason: "3 consecutive sync failures".to_string(),
+            suspended_at: "2026-03-20T15:00:00Z".to_string(),
+            execution_id: Some("exec-123".to_string()),
+        })
+        .unwrap();
+
+        let db_path = dir.path().join("nonexistent.db");
+        let logs_dir = dir.path().join("logs");
+
+        let result = asset_status(
+            dir.path(),
+            &[],
+            None,
+            &db_path,
+            &logs_dir,
+            Some(&suspended_dir),
+        )
+        .unwrap();
+        assert_eq!(result.assets.len(), 1);
+        let status = &result.assets[0];
+        assert!(status.suspended.is_some());
+        let info = status.suspended.as_ref().unwrap();
+        assert_eq!(info.asset_name, "asset-e");
+        assert_eq!(info.reason, "3 consecutive sync failures");
+    }
+
+    #[test]
+    fn no_suspended_dir_skips_suspended() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_compiled_target(dir.path(), &["asset-f"]);
+
+        let db_path = dir.path().join("nonexistent.db");
+        let logs_dir = dir.path().join("logs");
+
+        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
+        assert_eq!(result.assets.len(), 1);
+        assert!(result.assets[0].suspended.is_none());
     }
 }

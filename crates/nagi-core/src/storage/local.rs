@@ -116,6 +116,15 @@ impl SuspendedStore for LocalSuspendedStore {
         Ok(())
     }
 
+    fn read(&self, asset_name: &str) -> Result<Option<SuspendedInfo>, StorageError> {
+        let path = self.asset_path(asset_name)?;
+        match std::fs::read_to_string(path) {
+            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     fn remove(&self, asset_name: &str) -> Result<(), StorageError> {
         let path = self.asset_path(asset_name)?;
         match std::fs::remove_file(path) {
