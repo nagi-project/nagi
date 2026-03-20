@@ -67,6 +67,7 @@ pub struct ResolvedAsset {
     pub metadata: Metadata,
     pub spec: AssetSpec,
     pub sync: Option<SyncSpec>,
+    pub sync_ref_name: Option<String>,
     pub resync: Option<SyncSpec>,
     pub connection: Option<ResolvedConnection>,
 }
@@ -511,10 +512,12 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
                 }),
             });
 
+        let sync_ref_name = spec.sync.as_ref().map(|s| s.ref_name.clone());
         resolved_assets.push(ResolvedAsset {
             metadata,
             spec,
             sync: resolved_sync,
+            sync_ref_name,
             resync: resolved_resync,
             connection,
         });
@@ -641,6 +644,8 @@ struct CompiledAssetSpecYaml<'a> {
     desired_sets: &'a Vec<DesiredSetEntry>,
     auto_sync: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    sync_ref_name: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     sync: &'a Option<SyncSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     resync: &'a Option<SyncSpec>,
@@ -668,6 +673,8 @@ pub struct CompiledAssetSpec {
     pub desired_sets: Vec<DesiredSetEntry>,
     #[serde(default = "default_true")]
     pub auto_sync: bool,
+    #[serde(default)]
+    pub sync_ref_name: Option<String>,
     pub sync: Option<SyncSpec>,
     pub resync: Option<SyncSpec>,
 }
@@ -690,6 +697,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
                 sources: &asset.spec.sources,
                 desired_sets: &asset.spec.desired_sets,
                 auto_sync: asset.spec.auto_sync,
+                sync_ref_name: &asset.sync_ref_name,
                 sync: &asset.sync,
                 resync: &asset.resync,
             },

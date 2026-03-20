@@ -88,7 +88,7 @@ async fn run_controller(
 ) -> Result<(), ServeError> {
     let mut state = ServeState::new(&edges, suspended_dir());
     let mut eval_tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
-    let mut sync_task: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
+    let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
 
     state.init(&assets);
@@ -102,7 +102,7 @@ async fn run_controller(
     //
     // Each iteration:
     //   1. Spawn: drain work_queue into eval JoinSet (concurrent).
-    //   2. Spawn: start at most one sync from sync_queue (serialized).
+    //   2. Spawn: start syncs from sync_queue (serialized per sync ref).
     //   3. Wait:  select! on the first event that fires:
     //      a) Timer        — interval elapsed → enqueue the due asset.
     //      b) Eval done    — update readiness; if Ready, propagate to
@@ -111,8 +111,8 @@ async fn run_controller(
     //      d) Shutdown      — break out of the loop.
     //
     // Evaluations run concurrently (read-only).
-    // Syncs run one at a time per Controller to prevent concurrent writes
-    // to external systems within the same connected component.
+    // Syncs sharing the same sync ref are serialized; different refs may
+    // run concurrently.
 
     loop {
         // (1) Spawn pending evaluations — multiple may run concurrently.
@@ -126,11 +126,11 @@ async fn run_controller(
             }
         }
 
-        // (2) Spawn next sync if no sync is currently running.
-        if let Some(name) = state.next_syncable() {
+        // (2) Spawn syncs whose sync ref is not currently in use.
+        while let Some(name) = state.next_syncable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
                 eprintln!("[serve] starting sync for {name}");
-                sync_task.spawn(reconciler::spawn_sync(name, yaml.to_string()));
+                sync_tasks.spawn(reconciler::spawn_sync(name, yaml.to_string()));
             }
         }
 
@@ -154,7 +154,7 @@ async fn run_controller(
             }
 
             // (c) Sync complete: enqueue re-evaluation to verify convergence.
-            result = sync_task.join_next(), if !sync_task.is_empty() => {
+            result = sync_tasks.join_next(), if !sync_tasks.is_empty() => {
                 state.on_sync_complete(result);
             }
 
@@ -205,6 +205,7 @@ fn build_controller_inputs(
                     min_interval,
                     auto_sync: compiled.spec.auto_sync,
                     has_sync: compiled.spec.sync.is_some(),
+                    sync_ref_name: compiled.spec.sync_ref_name,
                 })
             })
             .collect();

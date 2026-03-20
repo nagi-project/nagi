@@ -205,6 +205,9 @@ pub struct AssetEntry {
     pub auto_sync: bool,
     /// Whether this asset has a sync spec defined.
     pub has_sync: bool,
+    /// The sync ref name from the original asset spec. Assets sharing the same
+    /// sync ref are serialized; assets with different refs may sync concurrently.
+    pub sync_ref_name: Option<String>,
 }
 
 /// Per-asset sync configuration derived from the compiled asset.
@@ -212,6 +215,7 @@ pub struct AssetEntry {
 struct AssetSyncConfig {
     auto_sync: bool,
     has_sync: bool,
+    sync_ref_name: Option<String>,
 }
 
 // ── ServeState ───────────────────────────────────────────────────────────────
@@ -233,9 +237,11 @@ pub struct ServeState {
     sync_configs: HashMap<String, AssetSyncConfig>,
     /// FIFO queue of assets waiting for sync execution.
     pub sync_queue: WorkQueue,
-    /// The asset currently being synced. At most one sync runs at a time
-    /// within a Controller to prevent concurrent writes to external systems.
-    pub syncing: Option<String>,
+    /// Sync refs currently being synced. Assets sharing the same sync ref
+    /// are serialized; different refs may run concurrently.
+    syncing_refs: HashSet<String>,
+    /// Asset names currently being synced (for dedup and completion tracking).
+    pub syncing: HashSet<String>,
     /// Tracks consecutive sync failures and exponential backoff.
     pub guardrail: GuardrailState,
     /// Directory for suspended flag files.
@@ -256,7 +262,8 @@ impl ServeState {
             downstream_map: build_downstream_map(edges),
             sync_configs: HashMap::new(),
             sync_queue: WorkQueue::new(),
-            syncing: None,
+            syncing_refs: HashSet::new(),
+            syncing: HashSet::new(),
             guardrail: GuardrailState::new(),
             suspended_dir,
             last_ready_count: HashMap::new(),
@@ -277,6 +284,7 @@ impl ServeState {
                 AssetSyncConfig {
                     auto_sync: asset.auto_sync,
                     has_sync: asset.has_sync,
+                    sync_ref_name: asset.sync_ref_name.clone(),
                 },
             );
         }
@@ -316,7 +324,7 @@ impl ServeState {
         // is not already syncing, not suspended, and not in backoff.
         let eligible = config.auto_sync
             && config.has_sync
-            && self.syncing.as_deref() != Some(asset_name)
+            && !self.syncing.contains(asset_name)
             && !suspended_path(&self.suspended_dir, asset_name).exists()
             && !self.guardrail.is_backoff_active(asset_name);
         if !eligible {
@@ -325,15 +333,37 @@ impl ServeState {
         self.sync_queue.enqueue(asset_name.to_string())
     }
 
-    /// Returns the next asset to sync, or None if a sync is already running
-    /// or the queue is empty.
+    /// Returns the next asset whose sync ref is not currently in use.
+    /// Assets sharing the same sync ref are serialized; different refs may
+    /// run concurrently.
     pub fn next_syncable(&mut self) -> Option<String> {
-        if self.syncing.is_some() {
-            return None;
+        let mut skipped = Vec::new();
+        let result = loop {
+            let Some(name) = self.sync_queue.dequeue() else {
+                break None;
+            };
+            let ref_key = self.sync_ref_key(&name);
+            if self.syncing_refs.contains(&ref_key) {
+                skipped.push(name);
+            } else {
+                self.syncing_refs.insert(ref_key);
+                self.syncing.insert(name.clone());
+                break Some(name);
+            }
+        };
+        for name in skipped {
+            self.sync_queue.enqueue(name);
         }
-        let name = self.sync_queue.dequeue()?;
-        self.syncing = Some(name.clone());
-        Some(name)
+        result
+    }
+
+    /// Returns the sync ref key for an asset. Falls back to the asset name
+    /// when no sync ref is defined, ensuring per-asset serialization.
+    fn sync_ref_key(&self, asset_name: &str) -> String {
+        self.sync_configs
+            .get(asset_name)
+            .and_then(|c| c.sync_ref_name.clone())
+            .unwrap_or_else(|| asset_name.to_string())
     }
 
     /// Processes a sync completion: clears the syncing slot, updates guardrail
@@ -348,8 +378,9 @@ impl ServeState {
         success: bool,
         execution_id: Option<&str>,
     ) {
-        if self.syncing.as_deref() == Some(asset_name) {
-            self.syncing = None;
+        if self.syncing.remove(asset_name) {
+            let ref_key = self.sync_ref_key(asset_name);
+            self.syncing_refs.remove(&ref_key);
         }
         if success {
             self.guardrail.record_sync_success(asset_name);
@@ -505,6 +536,7 @@ mod tests {
             min_interval: interval,
             auto_sync: false,
             has_sync: false,
+            sync_ref_name: None,
         }
     }
 
@@ -515,6 +547,18 @@ mod tests {
             min_interval: None,
             auto_sync: true,
             has_sync: true,
+            sync_ref_name: None,
+        }
+    }
+
+    fn asset_entry_with_sync_ref(name: &str, sync_ref: &str) -> AssetEntry {
+        AssetEntry {
+            name: name.to_string(),
+            yaml: String::new(),
+            min_interval: None,
+            auto_sync: true,
+            has_sync: true,
+            sync_ref_name: Some(sync_ref.to_string()),
         }
     }
 
@@ -835,7 +879,7 @@ mod tests {
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         assert!(!state.request_sync("a"));
     }
 
@@ -850,15 +894,33 @@ mod tests {
     }
 
     #[test]
-    fn next_syncable_returns_none_while_syncing() {
+    fn next_syncable_serializes_same_sync_ref() {
         let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
-        state.init(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
+        state.init(&[
+            asset_entry_with_sync_ref("a", "dbt-run"),
+            asset_entry_with_sync_ref("b", "dbt-run"),
+        ]);
         state.request_sync("a");
         state.request_sync("b");
 
         assert_eq!(state.next_syncable(), Some("a".to_string()));
-        assert!(state.syncing.is_some());
+        // "b" shares the same sync ref, so it must wait.
         assert_eq!(state.next_syncable(), None);
+    }
+
+    #[test]
+    fn next_syncable_allows_different_sync_refs() {
+        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        state.init(&[
+            asset_entry_with_sync_ref("a", "dbt-run"),
+            asset_entry_with_sync_ref("b", "bq-copy"),
+        ]);
+        state.request_sync("a");
+        state.request_sync("b");
+
+        assert_eq!(state.next_syncable(), Some("a".to_string()));
+        // "b" has a different sync ref, so it can run concurrently.
+        assert_eq!(state.next_syncable(), Some("b".to_string()));
     }
 
     #[test]
@@ -867,17 +929,20 @@ mod tests {
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
 
-        assert!(state.syncing.is_none());
+        assert!(state.syncing.is_empty());
         assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
     }
 
     #[test]
-    fn handle_sync_result_allows_next_sync() {
+    fn handle_sync_result_unblocks_same_sync_ref() {
         let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
-        state.init(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
+        state.init(&[
+            asset_entry_with_sync_ref("a", "dbt-run"),
+            asset_entry_with_sync_ref("b", "dbt-run"),
+        ]);
         state.request_sync("a");
         state.request_sync("b");
 
@@ -885,6 +950,7 @@ mod tests {
         assert_eq!(state.next_syncable(), None);
 
         state.handle_sync_result("a", true, None);
+        // Now "b" can proceed since "dbt-run" is no longer in use.
         assert_eq!(state.next_syncable(), Some("b".to_string()));
     }
 
@@ -920,7 +986,7 @@ mod tests {
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         state.handle_sync_result("a", false, None);
 
         assert!(!state.request_sync("a"));
@@ -933,7 +999,7 @@ mod tests {
         state.init(&[asset_entry_with_sync("a")]);
 
         for _ in 0..MAX_CONSECUTIVE_FAILURES {
-            state.syncing = Some("a".to_string());
+            state.syncing.insert("a".to_string());
             state.handle_sync_result("a", false, None);
         }
 
@@ -996,10 +1062,10 @@ mod tests {
         state.init(&[asset_entry_with_sync("a")]);
         while state.work_queue.dequeue().is_some() {}
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         state.handle_sync_result("a", false, None);
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         let sync_result = Ok(crate::sync::SyncExecutionResult {
             execution_id: "test".to_string(),
             asset_name: "a".to_string(),
@@ -1009,7 +1075,7 @@ mod tests {
         });
         state.on_sync_complete(Some(Ok(("a".to_string(), sync_result))));
 
-        assert!(state.syncing.is_none());
+        assert!(state.syncing.is_empty());
         assert!(!state.guardrail.should_suspend("a"));
     }
 
@@ -1018,7 +1084,7 @@ mod tests {
         let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
         state.init(&[asset_entry_with_sync("a")]);
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         let sync_result: Result<crate::sync::SyncExecutionResult, SyncError> =
             Err(SyncError::NoSyncSpec {
                 asset_name: "a".to_string(),
@@ -1032,10 +1098,10 @@ mod tests {
     fn on_sync_complete_ignores_none() {
         let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
         state.init(&[asset_entry_with_sync("a")]);
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
 
         state.on_sync_complete(None);
-        assert!(state.syncing.is_some());
+        assert!(!state.syncing.is_empty());
     }
 
     // ── Degradation detection tests ──────────────────────────────────────
@@ -1056,7 +1122,7 @@ mod tests {
         state.handle_eval_result("a", &result);
         assert_eq!(state.last_ready_count["a"], 2);
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
         assert!(state.pending_sync_reeval.contains("a"));
 
@@ -1087,7 +1153,7 @@ mod tests {
         });
         state.handle_eval_result("a", &result);
 
-        state.syncing = Some("a".to_string());
+        state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
         state.in_flight.insert("a".to_string());
         let same = Ok(AssetEvalResult {
