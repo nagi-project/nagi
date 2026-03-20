@@ -8,6 +8,7 @@ pub mod evaluate;
 pub mod init;
 pub mod kind;
 pub mod log;
+pub mod notify;
 pub mod select;
 pub mod serve;
 pub mod status;
