@@ -30,8 +30,9 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 use crate::compile::{CompiledAsset, DependencyGraph, GraphEdge};
-use crate::evaluate::{AssetEvalResult, EvaluateError};
+use crate::evaluate::EvaluateError;
 use crate::kind::asset::DesiredSetEntry;
+use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
 use crate::sync::SyncError;
 
@@ -99,6 +100,45 @@ fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
     });
 }
 
+/// Processes eval outcome: writes to log store and returns the result for state update.
+/// Returns a tuple of (name, eval_result) and an optional notification event.
+fn process_eval_outcome(
+    name: String,
+    outcome: reconciler::EvalOutcome,
+    log_store: &Option<LogStore>,
+) -> (
+    (
+        String,
+        Result<crate::evaluate::AssetEvalResult, EvaluateError>,
+    ),
+    Option<NotifyEvent>,
+) {
+    if let (Some(store), Ok(ref eval)) = (log_store, &outcome.result) {
+        let eval_id = crate::sync::generate_uuid();
+        if let Err(e) =
+            store.write_evaluate_log(&eval_id, eval, &outcome.started_at, &outcome.finished_at)
+        {
+            eprintln!("[serve] warning: failed to log evaluation for {name}: {e}");
+        }
+    }
+    let event = if let Err(ref e) = outcome.result {
+        Some(NotifyEvent::EvalFailed {
+            asset_name: name.clone(),
+            error: e.to_string(),
+        })
+    } else {
+        None
+    };
+    ((name, outcome.result), event)
+}
+
+/// Writes sync result to log store. Errors are logged but not propagated.
+fn log_sync_result(name: &str, result: &crate::sync::SyncExecutionResult, log_store: &LogStore) {
+    if let Err(e) = log_store.write_sync_log(result) {
+        eprintln!("[serve] warning: failed to log sync for {name}: {e}");
+    }
+}
+
 /// Computes the minimum interval across all inline conditions of a compiled asset.
 fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
     compiled
@@ -129,10 +169,11 @@ async fn run_controller(
     edges: Vec<GraphEdge>,
     cache_dir: Option<PathBuf>,
     notifier: Option<Arc<dyn Notifier>>,
+    log_store: Option<LogStore>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
     let mut state = ServeState::new(&edges, suspended_dir()?);
-    let mut eval_tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
+    let mut eval_tasks: JoinSet<(String, reconciler::EvalOutcome)> = JoinSet::new();
     let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
 
@@ -193,16 +234,14 @@ async fn run_controller(
                 state.enqueue_due();
             }
 
-            // (b) Eval complete: update state, propagate or request sync.
-            result = eval_tasks.join_next(), if !eval_tasks.is_empty() => {
-                // Notify on eval failure before updating state.
-                if let Some(Ok((ref name, Err(ref e)))) = result {
-                    fire_notify(&notifier, NotifyEvent::EvalFailed {
-                        asset_name: name.clone(),
-                        error: e.to_string(),
-                    });
-                }
-                if let Some(event) = state.on_eval_complete(result) {
+            // (b) Eval complete: log, update state, propagate or request sync.
+            join_result = eval_tasks.join_next(), if !eval_tasks.is_empty() => {
+                let eval_result = join_result.map(|r| r.map(|(name, outcome)| {
+                    let (name_and_result, event) = process_eval_outcome(name, outcome, &log_store);
+                    if let Some(ev) = event { fire_notify(&notifier, ev); }
+                    name_and_result
+                }));
+                if let Some(event) = state.on_eval_complete(eval_result) {
                     fire_notify(&notifier, NotifyEvent::Suspended {
                         asset_name: event.asset_name,
                         reason: event.reason,
@@ -210,8 +249,13 @@ async fn run_controller(
                 }
             }
 
-            // (c) Sync complete: enqueue re-evaluation to verify convergence.
+            // (c) Sync complete: log, enqueue re-evaluation to verify convergence.
             result = sync_tasks.join_next(), if !sync_tasks.is_empty() => {
+                if let Some(Ok((ref name, Ok(ref sync_result)))) = result {
+                    if let Some(ref store) = log_store {
+                        log_sync_result(name, sync_result, store);
+                    }
+                }
                 if let Some(event) = state.on_sync_complete(result) {
                     fire_notify(&notifier, NotifyEvent::Suspended {
                         asset_name: event.asset_name,
@@ -331,6 +375,9 @@ pub async fn serve(
 
     let notifier = build_notifier(project_dir);
 
+    let db_path = crate::init::default_db_path();
+    let logs_dir = crate::init::default_logs_dir();
+
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let inputs = build_controller_inputs(&graph, &asset_map)?;
 
@@ -341,11 +388,16 @@ pub async fn serve(
         let rx = shutdown_tx.subscribe();
         let cd = cache_dir.map(PathBuf::from);
         let n = notifier.clone();
+        // LogStore uses rusqlite::Connection which is !Send, so each controller
+        // needs its own instance.
+        let store = LogStore::open(&db_path, &logs_dir)
+            .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
         handles.push(tokio::spawn(run_controller(
             input.assets,
             input.edges,
             cd,
             n,
+            Some(store),
             rx,
         )));
     }
@@ -613,5 +665,109 @@ mod tests {
         // Should not panic.
         drain_sync_tasks(&mut tasks).await;
         assert!(tasks.is_empty());
+    }
+
+    // ── process_eval_outcome tests ────────────────────────────────────────
+
+    fn sample_eval_result(name: &str, ready: bool) -> crate::evaluate::AssetEvalResult {
+        crate::evaluate::AssetEvalResult {
+            asset_name: name.to_string(),
+            ready,
+            conditions: vec![],
+            evaluation_id: None,
+        }
+    }
+
+    fn sample_outcome_ok(name: &str) -> reconciler::EvalOutcome {
+        reconciler::EvalOutcome {
+            result: Ok(sample_eval_result(name, true)),
+            started_at: "2025-01-01T00:00:00Z".to_string(),
+            finished_at: "2025-01-01T00:00:01Z".to_string(),
+        }
+    }
+
+    fn sample_outcome_err() -> reconciler::EvalOutcome {
+        reconciler::EvalOutcome {
+            result: Err(EvaluateError::Parse("test".to_string())),
+            started_at: "2025-01-01T00:00:00Z".to_string(),
+            finished_at: "2025-01-01T00:00:01Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn process_eval_outcome_ok_returns_result_no_event() {
+        let (name_and_result, event) =
+            process_eval_outcome("a".to_string(), sample_outcome_ok("a"), &None);
+        assert_eq!(name_and_result.0, "a");
+        assert!(name_and_result.1.is_ok());
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn process_eval_outcome_err_returns_eval_failed_event() {
+        let (name_and_result, event) =
+            process_eval_outcome("a".to_string(), sample_outcome_err(), &None);
+        assert_eq!(name_and_result.0, "a");
+        assert!(name_and_result.1.is_err());
+        assert!(matches!(event, Some(NotifyEvent::EvalFailed { .. })));
+    }
+
+    #[test]
+    fn process_eval_outcome_writes_log_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("logs.db");
+        let logs_dir = dir.path().join("logs");
+        let store = LogStore::open(&db_path, &logs_dir).unwrap();
+
+        let (name_and_result, _) =
+            process_eval_outcome("a".to_string(), sample_outcome_ok("a"), &Some(store));
+        assert!(name_and_result.1.is_ok());
+        // Verify a log was written by checking the db is non-empty.
+        assert!(db_path.metadata().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn process_eval_outcome_skips_log_on_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("logs.db");
+        let logs_dir = dir.path().join("logs");
+        let store = LogStore::open(&db_path, &logs_dir).unwrap();
+        let initial_size = db_path.metadata().unwrap().len();
+
+        let (_name_and_result, event) =
+            process_eval_outcome("a".to_string(), sample_outcome_err(), &Some(store));
+        assert!(event.is_some());
+        // DB size unchanged (no eval log written on error).
+        assert_eq!(db_path.metadata().unwrap().len(), initial_size);
+    }
+
+    // ── log_sync_result tests ─────────────────────────────────────────────
+
+    #[test]
+    fn log_sync_result_writes_to_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("logs.db");
+        let logs_dir = dir.path().join("logs");
+        let store = LogStore::open(&db_path, &logs_dir).unwrap();
+
+        let result = crate::sync::SyncExecutionResult {
+            execution_id: "exec-1".to_string(),
+            asset_name: "a".to_string(),
+            sync_type: crate::sync::SyncType::Sync,
+            stages: vec![crate::sync::StageResult {
+                stage: crate::sync::Stage::Run,
+                started_at: "2025-01-01T00:00:00Z".to_string(),
+                finished_at: "2025-01-01T00:00:01Z".to_string(),
+                exit_code: 0,
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+                args: vec![],
+            }],
+            success: true,
+        };
+        log_sync_result("a", &result, &store);
+
+        // Verify log files were written.
+        assert!(logs_dir.join("a").exists());
     }
 }

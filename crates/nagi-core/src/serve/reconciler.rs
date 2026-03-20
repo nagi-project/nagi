@@ -38,15 +38,31 @@ pub async fn evaluate_and_cache(
     Ok(result)
 }
 
+/// Result of a spawned evaluation, including timestamps for logging.
+pub struct EvalOutcome {
+    pub result: Result<AssetEvalResult, EvaluateError>,
+    pub started_at: String,
+    pub finished_at: String,
+}
+
 /// Spawn wrapper: pairs the asset name with the evaluation result so the
 /// Controller can identify which asset completed.
 pub async fn spawn_evaluate(
     asset_name: String,
     yaml: String,
     cache_dir: Option<PathBuf>,
-) -> (String, Result<AssetEvalResult, EvaluateError>) {
+) -> (String, EvalOutcome) {
+    let started_at = chrono::Utc::now().to_rfc3339();
     let result = evaluate_and_cache(&yaml, cache_dir.as_deref()).await;
-    (asset_name, result)
+    let finished_at = chrono::Utc::now().to_rfc3339();
+    (
+        asset_name,
+        EvalOutcome {
+            result,
+            started_at,
+            finished_at,
+        },
+    )
 }
 
 /// Executes sync for a compiled asset. Called via `JoinSet::spawn` so all
