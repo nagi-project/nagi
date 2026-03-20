@@ -278,9 +278,15 @@ pub async fn serve(
     eprintln!("[serve] received Ctrl-C, shutting down...");
     shutdown_tx.send(true).ok();
 
+    let shutdown_timeout = StdDuration::from_secs(30);
     for h in handles {
-        if let Err(e) = h.await {
-            eprintln!("[serve] controller error: {e}");
+        match tokio::time::timeout(shutdown_timeout, h).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => eprintln!("[serve] controller error: {e}"),
+            Ok(Err(e)) => eprintln!("[serve] controller task panicked: {e}"),
+            Err(_) => eprintln!(
+                "[serve] controller did not shut down within {shutdown_timeout:?}, aborting"
+            ),
         }
     }
 
