@@ -342,7 +342,12 @@ impl ServeState {
     /// On failure: increments consecutive failure count and applies exponential
     /// backoff. If failures reach the threshold, writes a suspended flag file
     /// to prevent further sync attempts until manually resumed.
-    pub fn handle_sync_result(&mut self, asset_name: &str, success: bool) {
+    pub fn handle_sync_result(
+        &mut self,
+        asset_name: &str,
+        success: bool,
+        execution_id: Option<&str>,
+    ) {
         if self.syncing.as_deref() == Some(asset_name) {
             self.syncing = None;
         }
@@ -355,6 +360,7 @@ impl ServeState {
                     asset_name: asset_name.to_string(),
                     reason: format!("{MAX_CONSECUTIVE_FAILURES} consecutive sync failures"),
                     suspended_at: chrono::Utc::now().to_rfc3339(),
+                    execution_id: execution_id.map(|s| s.to_string()),
                 };
                 let _ = write_suspended(&self.suspended_dir, &info);
             }
@@ -396,6 +402,7 @@ impl ServeState {
                 "degradation after sync: ready conditions {prev_count} → {ready_count}"
             ),
             suspended_at: chrono::Utc::now().to_rfc3339(),
+            execution_id: None,
         };
         let _ = write_suspended(&self.suspended_dir, &info);
     }
@@ -469,8 +476,11 @@ impl ServeState {
             ),
             Err(e) => eprintln!("[serve] sync failed for {asset_name}: {e}"),
         }
-        let success = sync_result.as_ref().map(|r| r.success).unwrap_or(false);
-        self.handle_sync_result(&asset_name, success);
+        let (success, execution_id) = match &sync_result {
+            Ok(r) => (r.success, Some(r.execution_id.as_str())),
+            Err(_) => (false, None),
+        };
+        self.handle_sync_result(&asset_name, success, execution_id);
     }
 }
 
@@ -858,7 +868,7 @@ mod tests {
         state.work_queue.dequeue();
 
         state.syncing = Some("a".to_string());
-        state.handle_sync_result("a", true);
+        state.handle_sync_result("a", true, None);
 
         assert!(state.syncing.is_none());
         assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
@@ -874,7 +884,7 @@ mod tests {
         assert_eq!(state.next_syncable(), Some("a".to_string()));
         assert_eq!(state.next_syncable(), None);
 
-        state.handle_sync_result("a", true);
+        state.handle_sync_result("a", true, None);
         assert_eq!(state.next_syncable(), Some("b".to_string()));
     }
 
@@ -911,7 +921,7 @@ mod tests {
         state.work_queue.dequeue();
 
         state.syncing = Some("a".to_string());
-        state.handle_sync_result("a", false);
+        state.handle_sync_result("a", false, None);
 
         assert!(!state.request_sync("a"));
     }
@@ -924,7 +934,7 @@ mod tests {
 
         for _ in 0..MAX_CONSECUTIVE_FAILURES {
             state.syncing = Some("a".to_string());
-            state.handle_sync_result("a", false);
+            state.handle_sync_result("a", false, None);
         }
 
         assert!(suspended_path(dir.path(), "a").exists());
@@ -943,6 +953,7 @@ mod tests {
                 asset_name: "a".to_string(),
                 reason: "test".to_string(),
                 suspended_at: "2025-01-01T00:00:00Z".to_string(),
+                execution_id: None,
             },
         )
         .unwrap();
@@ -986,7 +997,7 @@ mod tests {
         while state.work_queue.dequeue().is_some() {}
 
         state.syncing = Some("a".to_string());
-        state.handle_sync_result("a", false);
+        state.handle_sync_result("a", false, None);
 
         state.syncing = Some("a".to_string());
         let sync_result = Ok(crate::sync::SyncExecutionResult {
@@ -1046,7 +1057,7 @@ mod tests {
         assert_eq!(state.last_ready_count["a"], 2);
 
         state.syncing = Some("a".to_string());
-        state.handle_sync_result("a", true);
+        state.handle_sync_result("a", true, None);
         assert!(state.pending_sync_reeval.contains("a"));
 
         state.in_flight.insert("a".to_string());
@@ -1077,7 +1088,7 @@ mod tests {
         state.handle_eval_result("a", &result);
 
         state.syncing = Some("a".to_string());
-        state.handle_sync_result("a", true);
+        state.handle_sync_result("a", true, None);
         state.in_flight.insert("a".to_string());
         let same = Ok(AssetEvalResult {
             asset_name: "a".to_string(),

@@ -12,6 +12,9 @@ pub struct SuspendedInfo {
     pub asset_name: String,
     pub reason: String,
     pub suspended_at: String,
+    /// The sync execution_id that triggered the suspension, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
 }
 
 pub fn suspended_dir() -> PathBuf {
@@ -76,6 +79,7 @@ mod tests {
             asset_name: name.to_string(),
             reason: "3 consecutive sync failures".to_string(),
             suspended_at: "2025-06-15T03:12:00Z".to_string(),
+            execution_id: Some("exec-001".to_string()),
         }
     }
 
