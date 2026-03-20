@@ -1,3 +1,19 @@
+//! Reconciliation loop for continuous evaluation.
+//!
+//! Architecture (inspired by k8s controller-runtime):
+//!
+//! - **Controller** ([`run_controller`]) — one per connected component of the
+//!   dependency graph.  Runs a `tokio::select!` loop that reacts to three
+//!   events: timer fire, task completion, and shutdown signal.
+//! - **ServeState** — all mutable in-memory state lives here.  Sub-states:
+//!   [`WorkQueue`], [`SchedulerState`], [`ReadinessState`], plus `in_flight`
+//!   tracking and the downstream propagation map.
+//! - **Reconciler** ([`evaluate_and_cache`]) — stateless async function that
+//!   evaluates a single asset and writes the result to the local cache.
+//!
+//! The top-level [`serve`] function loads compiled assets, partitions them into
+//! connected components, and spawns one Controller per component.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration as StdDuration;
@@ -78,35 +94,48 @@ pub fn connected_components(graph: &DependencyGraph) -> Vec<Vec<String>> {
     result
 }
 
-// ── QueueState ───────────────────────────────────────────────────────────────
+// ── AssetEntry ───────────────────────────────────────────────────────────────
 
-#[derive(Debug)]
-struct QueueState {
-    queue: VecDeque<String>,
-    in_queue: HashSet<String>,
+/// A compiled asset prepared for the Controller: name, raw YAML, and
+/// the shortest evaluation interval derived from its conditions.
+#[derive(Debug, Clone)]
+struct AssetEntry {
+    name: String,
+    yaml: String,
+    min_interval: Option<StdDuration>,
 }
 
-impl QueueState {
+// ── WorkQueue ────────────────────────────────────────────────────────────────
+
+/// FIFO queue with deduplication. An asset that is already queued will not be
+/// added again until it is dequeued.
+#[derive(Debug)]
+struct WorkQueue {
+    queue: VecDeque<String>,
+    pending: HashSet<String>,
+}
+
+impl WorkQueue {
     fn new() -> Self {
         Self {
             queue: VecDeque::new(),
-            in_queue: HashSet::new(),
+            pending: HashSet::new(),
         }
     }
 
-    /// Enqueues an asset. Returns false if already in queue.
+    /// Enqueues an asset. Returns false if already queued.
     fn enqueue(&mut self, name: String) -> bool {
-        if self.in_queue.contains(&name) {
+        if self.pending.contains(&name) {
             return false;
         }
-        self.in_queue.insert(name.clone());
+        self.pending.insert(name.clone());
         self.queue.push_back(name);
         true
     }
 
     fn dequeue(&mut self) -> Option<String> {
         let name = self.queue.pop_front()?;
-        self.in_queue.remove(&name);
+        self.pending.remove(&name);
         Some(name)
     }
 
@@ -118,37 +147,39 @@ impl QueueState {
 
 // ── SchedulerState ───────────────────────────────────────────────────────────
 
+/// Tracks per-asset evaluation intervals and computes the next due time.
 #[derive(Debug)]
 struct SchedulerState {
     intervals: HashMap<String, StdDuration>,
-    next_eval: HashMap<String, Instant>,
+    next_eval_at: HashMap<String, Instant>,
 }
 
 impl SchedulerState {
     fn new() -> Self {
         Self {
             intervals: HashMap::new(),
-            next_eval: HashMap::new(),
+            next_eval_at: HashMap::new(),
         }
     }
 
     fn register(&mut self, asset_name: String, interval: StdDuration) {
-        self.next_eval
+        self.next_eval_at
             .insert(asset_name.clone(), Instant::now() + interval);
         self.intervals.insert(asset_name, interval);
     }
 
     /// Returns the asset due soonest and its scheduled time, or None.
     fn next_due(&self) -> Option<(&str, Instant)> {
-        self.next_eval
+        self.next_eval_at
             .iter()
             .min_by_key(|(_, instant)| *instant)
             .map(|(name, instant)| (name.as_str(), *instant))
     }
 
-    fn mark_evaluated(&mut self, asset_name: &str) {
+    /// Resets the timer for an asset to `now + interval`.
+    fn reschedule(&mut self, asset_name: &str) {
         if let Some(interval) = self.intervals.get(asset_name) {
-            self.next_eval
+            self.next_eval_at
                 .insert(asset_name.to_string(), Instant::now() + *interval);
         }
     }
@@ -156,6 +187,9 @@ impl SchedulerState {
 
 // ── ReadinessState ────────────────────────────────────────────────────────────
 
+/// Tracks the Ready / Not Ready state of each asset.
+/// Detects the Not Ready → Ready transition, which triggers downstream
+/// propagation.
 #[derive(Debug)]
 struct ReadinessState {
     ready: HashMap<String, bool>,
@@ -168,9 +202,9 @@ impl ReadinessState {
         }
     }
 
-    /// Updates readiness for an asset. Returns true if the asset transitioned
-    /// from Not Ready to Ready (triggers downstream propagation).
-    fn update(&mut self, asset_name: &str, ready: bool) -> bool {
+    /// Records the latest readiness. Returns `true` only when the asset
+    /// transitions from Not Ready to Ready (i.e. became_ready).
+    fn record(&mut self, asset_name: &str, ready: bool) -> bool {
         let was_ready = self.ready.get(asset_name).copied().unwrap_or(false);
         self.ready.insert(asset_name.to_string(), ready);
         !was_ready && ready
@@ -179,37 +213,101 @@ impl ReadinessState {
 
 // ── ServeState ───────────────────────────────────────────────────────────────
 
+/// All mutable in-memory state for one Controller.
+///
+/// Sub-states are intentionally kept as flat fields rather than nested behind
+/// traits so that each method can be unit-tested with plain assertions.
 #[derive(Debug)]
 struct ServeState {
     scheduler: SchedulerState,
-    queue: QueueState,
+    work_queue: WorkQueue,
     readiness: ReadinessState,
+    /// Assets currently being evaluated in the JoinSet.
+    in_flight: HashSet<String>,
+    /// asset name → list of downstream asset names.
+    downstream_map: HashMap<String, Vec<String>>,
 }
 
 impl ServeState {
-    fn new() -> Self {
+    fn new(edges: &[GraphEdge]) -> Self {
         Self {
             scheduler: SchedulerState::new(),
-            queue: QueueState::new(),
+            work_queue: WorkQueue::new(),
             readiness: ReadinessState::new(),
+            in_flight: HashSet::new(),
+            downstream_map: build_downstream_map(edges),
         }
+    }
+
+    /// Registers all assets: enqueue for initial evaluation + register intervals.
+    fn init(&mut self, assets: &[AssetEntry]) {
+        for asset in assets {
+            self.work_queue.enqueue(asset.name.clone());
+            if let Some(dur) = asset.min_interval {
+                self.scheduler.register(asset.name.clone(), dur);
+            }
+        }
+    }
+
+    /// Enqueues the next due asset (if any) when its timer fires.
+    fn enqueue_due(&mut self) {
+        if let Some((name, _)) = self.scheduler.next_due() {
+            let name = name.to_string();
+            if !self.in_flight.contains(&name) {
+                self.work_queue.enqueue(name);
+            }
+        }
+    }
+
+    /// Dequeues the next asset to spawn, skipping those already in flight.
+    fn next_spawnable(&mut self) -> Option<String> {
+        while let Some(name) = self.work_queue.dequeue() {
+            if !self.in_flight.contains(&name) {
+                self.in_flight.insert(name.clone());
+                return Some(name);
+            }
+        }
+        None
+    }
+
+    /// Processes an evaluation result: updates scheduler, readiness, and
+    /// in-flight tracking.  Returns names of downstream assets that were
+    /// enqueued due to a Not Ready → Ready transition.
+    fn handle_eval_result(
+        &mut self,
+        asset_name: &str,
+        result: &Result<AssetEvalResult, EvaluateError>,
+    ) -> Vec<String> {
+        self.in_flight.remove(asset_name);
+        self.scheduler.reschedule(asset_name);
+
+        let ready = match result {
+            Ok(r) => r.ready,
+            Err(_) => false,
+        };
+
+        let mut propagated = Vec::new();
+        if self.readiness.record(asset_name, ready) {
+            if let Some(downstreams) = self.downstream_map.get(asset_name) {
+                for ds in downstreams {
+                    if !self.in_flight.contains(ds) && self.work_queue.enqueue(ds.clone()) {
+                        propagated.push(ds.clone());
+                    }
+                }
+            }
+        }
+        propagated
     }
 }
 
 // ── Reconciler ───────────────────────────────────────────────────────────────
 
-/// Stateless reconciler: evaluates an asset and writes cache.
-/// Avoids `evaluate_from_compiled` because `LogStore` is `!Send`.
-async fn reconcile_evaluate(
-    asset_name: String,
-    yaml: String,
-    cache_dir: Option<PathBuf>,
-) -> (String, Result<AssetEvalResult, EvaluateError>) {
-    let result = reconcile_evaluate_inner(&yaml, cache_dir.as_deref()).await;
-    (asset_name, result)
-}
-
-async fn reconcile_evaluate_inner(
+/// Evaluates a single compiled asset and writes the result to the local cache.
+///
+/// This is the "stateless reconciler": it takes all inputs by value so the
+/// returned future is `Send` and can be spawned on a `JoinSet`.
+/// (`evaluate_from_compiled` cannot be used here because `LogStore` is `!Send`.)
+async fn evaluate_and_cache(
     yaml: &str,
     cache_dir: Option<&Path>,
 ) -> Result<AssetEvalResult, EvaluateError> {
@@ -221,7 +319,6 @@ async fn reconcile_evaluate_inner(
         .as_ref()
         .map(crate::evaluate::resolve_connection)
         .transpose()?;
-    // Use evaluate_asset_no_log to produce a Send future (LogStore is !Send).
     let result =
         crate::evaluate::evaluate_asset_no_log(&compiled.metadata.name, &spec, conn.as_deref())
             .await?;
@@ -237,11 +334,19 @@ async fn reconcile_evaluate_inner(
     Ok(result)
 }
 
-// ── Downstream Map ───────────────────────────────────────────────────────────
+/// Spawn wrapper: pairs the asset name with the evaluation result so the
+/// Controller can identify which asset completed.
+async fn spawn_evaluate(
+    asset_name: String,
+    yaml: String,
+    cache_dir: Option<PathBuf>,
+) -> (String, Result<AssetEvalResult, EvaluateError>) {
+    let result = evaluate_and_cache(&yaml, cache_dir.as_deref()).await;
+    (asset_name, result)
+}
 
-/// Builds a map from asset/source name → downstream asset names.
-/// Used for upstream propagation: when an asset becomes Ready, its downstreams
-/// are enqueued for re-evaluation.
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 fn build_downstream_map(edges: &[GraphEdge]) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
     for edge in edges {
@@ -252,40 +357,48 @@ fn build_downstream_map(edges: &[GraphEdge]) -> HashMap<String, Vec<String>> {
     map
 }
 
+/// Computes the minimum interval across all inline conditions of a compiled asset.
+fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
+    compiled
+        .spec
+        .desired_sets
+        .iter()
+        .filter_map(|entry| match entry {
+            DesiredSetEntry::Inline(cond) => cond.interval().map(|d| d.as_std()),
+            _ => None,
+        })
+        .min()
+}
+
 // ── Controller ───────────────────────────────────────────────────────────────
 
 /// Runs the reconciliation loop for one connected component.
-pub async fn run_controller(
-    assets: Vec<(String, String, Option<StdDuration>)>,
+///
+/// The loop reacts to three events via `tokio::select!`:
+/// 1. **Timer** — a scheduled asset becomes due → enqueue it.
+/// 2. **Task completion** — a spawned evaluation finishes → update state,
+///    propagate to downstream assets if newly Ready.
+/// 3. **Shutdown** — break and return.
+async fn run_controller(
+    assets: Vec<AssetEntry>,
     edges: Vec<GraphEdge>,
     cache_dir: Option<PathBuf>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
-    let mut state = ServeState::new();
+    let mut state = ServeState::new(&edges);
     let mut tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
-    let downstream_map = build_downstream_map(&edges);
 
-    // Initial setup: enqueue all assets + register intervals
-    for (name, _yaml, interval) in &assets {
-        state.queue.enqueue(name.clone());
-        if let Some(dur) = interval {
-            state.scheduler.register(name.clone(), *dur);
-        }
-    }
+    state.init(&assets);
 
-    let asset_map: HashMap<String, String> = assets
-        .into_iter()
-        .map(|(name, yaml, _)| (name, yaml))
+    let yaml_map: HashMap<&str, &str> = assets
+        .iter()
+        .map(|a| (a.name.as_str(), a.yaml.as_str()))
         .collect();
 
     loop {
-        // Drain queue into JoinSet
-        while let Some(asset_name) = state.queue.dequeue() {
-            if let Some(yaml) = asset_map.get(&asset_name) {
-                let yaml = yaml.clone();
-                let cd = cache_dir.clone();
-                let name = asset_name.clone();
-                tasks.spawn(reconcile_evaluate(name, yaml, cd));
+        while let Some(name) = state.next_spawnable() {
+            if let Some(&yaml) = yaml_map.get(name.as_str()) {
+                tasks.spawn(spawn_evaluate(name, yaml.to_string(), cache_dir.clone()));
             }
         }
 
@@ -298,32 +411,18 @@ pub async fn run_controller(
                     None => std::future::pending().await,
                 }
             } => {
-                // Timer fired: enqueue the due asset
-                if let Some((name, _)) = state.scheduler.next_due() {
-                    let name = name.to_string();
-                    state.queue.enqueue(name);
-                }
+                state.enqueue_due();
             }
 
             result = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Ok((asset_name, eval_result))) = result {
-                    match eval_result {
-                        Ok(r) => {
-                            eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready);
-                            state.scheduler.mark_evaluated(&asset_name);
-                            // Upstream propagation: if Not Ready → Ready, enqueue downstreams
-                            if state.readiness.update(&asset_name, r.ready) {
-                                if let Some(downstreams) = downstream_map.get(&asset_name) {
-                                    for ds in downstreams {
-                                        eprintln!("[serve] propagating to downstream: {ds}");
-                                        state.queue.enqueue(ds.clone());
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[serve] evaluation failed for {asset_name}: {e}");
-                        }
+                    match &eval_result {
+                        Ok(r) => eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready),
+                        Err(e) => eprintln!("[serve] evaluation failed for {asset_name}: {e}"),
+                    }
+                    let propagated = state.handle_eval_result(&asset_name, &eval_result);
+                    for ds in &propagated {
+                        eprintln!("[serve] propagating to downstream: {ds}");
                     }
                 }
             }
@@ -340,20 +439,64 @@ pub async fn run_controller(
 
 // ── Entry Point ──────────────────────────────────────────────────────────────
 
-/// Computes the minimum interval across all conditions of a compiled asset.
-fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
-    compiled
-        .spec
-        .desired_sets
-        .iter()
-        .filter_map(|entry| match entry {
-            DesiredSetEntry::Inline(cond) => cond.interval().map(|d| d.as_std()),
-            _ => None,
-        })
-        .min()
+/// Input for one Controller: assets with their YAML and intervals, plus edges.
+struct ControllerInput {
+    assets: Vec<AssetEntry>,
+    edges: Vec<GraphEdge>,
+}
+
+/// Builds per-component [`ControllerInput`]s from the graph and compiled assets.
+fn build_controller_inputs(
+    graph: &DependencyGraph,
+    asset_map: &HashMap<String, String>,
+) -> Result<Vec<ControllerInput>, ServeError> {
+    let components = connected_components(graph);
+    let mut inputs = Vec::new();
+
+    for component in components {
+        let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
+
+        let assets: Vec<_> = component
+            .iter()
+            .filter_map(|name| {
+                let yaml = asset_map.get(name)?;
+                let compiled: CompiledAsset = serde_yaml::from_str(yaml)
+                    .map_err(|e| ServeError::Parse(e.to_string()))
+                    .ok()?;
+                let min_interval = compute_min_interval(&compiled);
+                Some(AssetEntry {
+                    name: name.clone(),
+                    yaml: yaml.clone(),
+                    min_interval,
+                })
+            })
+            .collect();
+
+        if assets.is_empty() {
+            continue;
+        }
+
+        let edges: Vec<GraphEdge> = graph
+            .edges
+            .iter()
+            .filter(|e| {
+                component_set.contains(e.from.as_str()) || component_set.contains(e.to.as_str())
+            })
+            .cloned()
+            .collect();
+
+        inputs.push(ControllerInput { assets, edges });
+    }
+
+    Ok(inputs)
 }
 
 /// Entry point for `nagi serve`.
+///
+/// 1. Loads compiled assets and the dependency graph from `target_dir`.
+/// 2. Partitions assets into connected components.
+/// 3. Spawns one [`run_controller`] per component.
+/// 4. Waits for Ctrl-C, then signals all Controllers to shut down.
 pub async fn serve(
     target_dir: &Path,
     selectors: &[&str],
@@ -366,41 +509,18 @@ pub async fn serve(
     let graph: DependencyGraph =
         serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
 
-    let components = connected_components(&graph);
-
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
+    let inputs = build_controller_inputs(&graph, &asset_map)?;
 
     let (shutdown_tx, _) = watch::channel(false);
 
     let mut handles = Vec::new();
-    for component in components {
-        let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
-        let mut component_assets = Vec::new();
-        for name in &component {
-            if let Some(yaml) = asset_map.get(name) {
-                let compiled: CompiledAsset =
-                    serde_yaml::from_str(yaml).map_err(|e| ServeError::Parse(e.to_string()))?;
-                let min_interval = compute_min_interval(&compiled);
-                component_assets.push((name.clone(), yaml.clone(), min_interval));
-            }
-        }
-        if component_assets.is_empty() {
-            continue;
-        }
-        // Filter edges to those relevant to this component
-        let component_edges: Vec<GraphEdge> = graph
-            .edges
-            .iter()
-            .filter(|e| {
-                component_set.contains(e.from.as_str()) || component_set.contains(e.to.as_str())
-            })
-            .cloned()
-            .collect();
+    for input in inputs {
         let rx = shutdown_tx.subscribe();
         let cd = cache_dir.map(PathBuf::from);
         handles.push(tokio::spawn(run_controller(
-            component_assets,
-            component_edges,
+            input.assets,
+            input.edges,
             cd,
             rx,
         )));
@@ -505,11 +625,11 @@ mod tests {
         } => Vec::<Vec<String>>::new();
     }
 
-    // ── QueueState tests ─────────────────────────────────────────────────
+    // ── WorkQueue tests ─────────────────────────────────────────────────
 
     #[test]
-    fn queue_enqueue_dequeue() {
-        let mut q = QueueState::new();
+    fn work_queue_enqueue_dequeue() {
+        let mut q = WorkQueue::new();
         assert!(q.is_empty());
 
         assert!(q.enqueue("a".to_string()));
@@ -523,8 +643,8 @@ mod tests {
     }
 
     #[test]
-    fn queue_dedup() {
-        let mut q = QueueState::new();
+    fn work_queue_dedup() {
+        let mut q = WorkQueue::new();
         assert!(q.enqueue("a".to_string()));
         assert!(!q.enqueue("a".to_string())); // duplicate rejected
         assert_eq!(q.dequeue(), Some("a".to_string()));
@@ -552,7 +672,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scheduler_mark_evaluated_resets_timer() {
+    async fn scheduler_reschedule_resets_timer() {
         tokio::time::pause();
 
         let mut s = SchedulerState::new();
@@ -563,10 +683,10 @@ mod tests {
         // Advance time by 60s so "a" is due
         tokio::time::advance(StdDuration::from_secs(60)).await;
 
-        s.mark_evaluated("a");
+        s.reschedule("a");
         let (_, second_due) = s.next_due().unwrap();
 
-        // After mark_evaluated, next_due should be ~60s from now (later than first)
+        // After reschedule, next_due should be ~60s from now (later than first)
         assert!(second_due > first_due);
     }
 
@@ -575,31 +695,28 @@ mod tests {
     #[test]
     fn readiness_initial_not_ready_to_ready() {
         let mut r = ReadinessState::new();
-        // First time becoming ready → transition
-        assert!(r.update("a", true));
+        assert!(r.record("a", true));
     }
 
     #[test]
     fn readiness_stays_ready_no_transition() {
         let mut r = ReadinessState::new();
-        r.update("a", true);
-        // Already ready → no transition
-        assert!(!r.update("a", true));
+        r.record("a", true);
+        assert!(!r.record("a", true));
     }
 
     #[test]
     fn readiness_not_ready_no_transition() {
         let mut r = ReadinessState::new();
-        // Not ready → not ready: no transition
-        assert!(!r.update("a", false));
+        assert!(!r.record("a", false));
     }
 
     #[test]
     fn readiness_ready_to_not_ready_to_ready() {
         let mut r = ReadinessState::new();
-        assert!(r.update("a", true)); // transition
-        assert!(!r.update("a", false)); // no transition (became not ready)
-        assert!(r.update("a", true)); // transition again
+        assert!(r.record("a", true));
+        assert!(!r.record("a", false));
+        assert!(r.record("a", true));
     }
 
     // ── build_downstream_map tests ──────────────────────────────────────
@@ -620,5 +737,141 @@ mod tests {
     fn downstream_map_empty() {
         let map = build_downstream_map(&[]);
         assert!(map.is_empty());
+    }
+
+    // ── ServeState tests ────────────────────────────────────────────────
+
+    fn asset_entry(name: &str, interval: Option<StdDuration>) -> AssetEntry {
+        AssetEntry {
+            name: name.to_string(),
+            yaml: String::new(),
+            min_interval: interval,
+        }
+    }
+
+    fn eval_ok(name: &str, ready: bool) -> Result<AssetEvalResult, EvaluateError> {
+        Ok(AssetEvalResult {
+            asset_name: name.to_string(),
+            ready,
+            conditions: vec![],
+            evaluation_id: None,
+        })
+    }
+
+    #[test]
+    fn serve_state_init_enqueues_and_registers() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges);
+        let assets = vec![
+            asset_entry("a", Some(StdDuration::from_secs(60))),
+            asset_entry("b", None),
+        ];
+        state.init(&assets);
+
+        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
+        assert_eq!(state.work_queue.dequeue(), Some("b".to_string()));
+        assert_eq!(state.work_queue.dequeue(), None);
+        assert!(state.scheduler.intervals.contains_key("a"));
+        assert!(!state.scheduler.intervals.contains_key("b"));
+    }
+
+    #[test]
+    fn next_spawnable_skips_in_flight() {
+        let mut state = ServeState::new(&[]);
+        state.work_queue.enqueue("a".to_string());
+        state.work_queue.enqueue("b".to_string());
+        state.in_flight.insert("a".to_string());
+
+        assert_eq!(state.next_spawnable(), Some("b".to_string()));
+        assert_eq!(state.next_spawnable(), None);
+        assert!(state.in_flight.contains("b"));
+    }
+
+    #[test]
+    fn handle_eval_result_success_propagates_downstream() {
+        let edges = vec![edge("a", "b"), edge("a", "c")];
+        let mut state = ServeState::new(&edges);
+        state.in_flight.insert("a".to_string());
+
+        let result = eval_ok("a", true);
+        let propagated = state.handle_eval_result("a", &result);
+
+        assert_eq!(propagated, vec!["b".to_string(), "c".to_string()]);
+        assert!(!state.in_flight.contains("a"));
+    }
+
+    #[test]
+    fn handle_eval_result_error_marks_not_ready() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges);
+        state.in_flight.insert("a".to_string());
+
+        // First make "a" ready
+        state.handle_eval_result("a", &eval_ok("a", true));
+
+        // Now error — readiness becomes false, no propagation
+        state.in_flight.insert("a".to_string());
+        let err: Result<AssetEvalResult, EvaluateError> =
+            Err(EvaluateError::Parse("test error".to_string()));
+        let propagated = state.handle_eval_result("a", &err);
+
+        assert!(propagated.is_empty());
+        assert!(!state.readiness.ready.get("a").copied().unwrap_or(false));
+    }
+
+    #[test]
+    fn handle_eval_result_no_propagation_when_stays_ready() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges);
+        state.in_flight.insert("a".to_string());
+
+        let result = eval_ok("a", true);
+        state.handle_eval_result("a", &result);
+
+        // Second evaluation still ready — no propagation
+        state.in_flight.insert("a".to_string());
+        let propagated = state.handle_eval_result("a", &result);
+        assert!(propagated.is_empty());
+    }
+
+    #[test]
+    fn handle_eval_result_skips_in_flight_downstream() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges);
+        state.in_flight.insert("a".to_string());
+        state.in_flight.insert("b".to_string()); // b already running
+
+        let result = eval_ok("a", true);
+        let propagated = state.handle_eval_result("a", &result);
+
+        assert!(propagated.is_empty());
+    }
+
+    // ── build_controller_inputs tests ───────────────────────────────────
+
+    #[test]
+    fn build_controller_inputs_splits_components() {
+        let graph = DependencyGraph {
+            nodes: vec![
+                source_node("s1"),
+                asset_node("a1"),
+                source_node("s2"),
+                asset_node("a2"),
+            ],
+            edges: vec![edge("s1", "a1"), edge("s2", "a2")],
+        };
+        let yaml = |name: &str| {
+            format!("apiVersion: v1\nmetadata:\n  name: {name}\nspec:\n  desiredSets: []\n")
+        };
+        let asset_map: HashMap<String, String> = [
+            ("a1".to_string(), yaml("a1")),
+            ("a2".to_string(), yaml("a2")),
+        ]
+        .into();
+
+        let inputs = build_controller_inputs(&graph, &asset_map).unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].assets.len(), 1);
+        assert_eq!(inputs[1].assets.len(), 1);
     }
 }
