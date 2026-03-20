@@ -17,31 +17,53 @@ pub struct SuspendedInfo {
     pub execution_id: Option<String>,
 }
 
-pub fn suspended_dir() -> PathBuf {
+pub fn suspended_dir() -> std::io::Result<PathBuf> {
     dirs::home_dir()
-        .expect("home directory not found")
-        .join(".nagi")
-        .join("suspended")
+        .map(|h| h.join(".nagi").join("suspended"))
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
+        })
 }
 
-pub fn suspended_path(dir: &Path, asset_name: &str) -> PathBuf {
-    dir.join(format!("{asset_name}.json"))
+/// Validates that the asset name is a safe filename component (no path
+/// separators, no `.` or `..`, no null bytes).
+fn validate_asset_name(asset_name: &str) -> std::io::Result<()> {
+    if asset_name.is_empty()
+        || asset_name == "."
+        || asset_name == ".."
+        || asset_name.contains('/')
+        || asset_name.contains('\\')
+        || asset_name.contains('\0')
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid asset name: {asset_name:?}"),
+        ));
+    }
+    Ok(())
+}
+
+pub fn suspended_path(dir: &Path, asset_name: &str) -> std::io::Result<PathBuf> {
+    validate_asset_name(asset_name)?;
+    Ok(dir.join(format!("{asset_name}.json")))
 }
 
 pub fn write_suspended(dir: &Path, info: &SuspendedInfo) -> std::io::Result<()> {
+    validate_asset_name(&info.asset_name)?;
     std::fs::create_dir_all(dir)?;
-    let json = serde_json::to_string_pretty(info).expect("SuspendedInfo serialization");
-    std::fs::write(suspended_path(dir, &info.asset_name), json)
+    let json = serde_json::to_string_pretty(info)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(suspended_path(dir, &info.asset_name)?, json)
 }
 
 #[cfg(test)]
 pub fn read_suspended(dir: &Path, asset_name: &str) -> std::io::Result<SuspendedInfo> {
-    let data = std::fs::read_to_string(suspended_path(dir, asset_name))?;
+    let data = std::fs::read_to_string(suspended_path(dir, asset_name)?)?;
     serde_json::from_str(&data).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 pub fn remove_suspended(dir: &Path, asset_name: &str) -> std::io::Result<()> {
-    let path = suspended_path(dir, asset_name);
+    let path = suspended_path(dir, asset_name)?;
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -130,5 +152,28 @@ mod tests {
     fn suspended_list_nonexistent_dir() {
         let list = list_suspended(Path::new("/tmp/nonexistent-nagi-test-dir")).unwrap();
         assert!(list.is_empty());
+    }
+
+    macro_rules! validate_asset_name_test {
+        ($($name:ident: $input:expr => $ok:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(validate_asset_name($input).is_ok(), $ok);
+                }
+            )*
+        };
+    }
+
+    validate_asset_name_test! {
+        valid_simple: "daily-sales" => true;
+        valid_with_dots: "my.asset" => true;
+        reject_empty: "" => false;
+        reject_dot: "." => false;
+        reject_dotdot: ".." => false;
+        reject_slash: "a/b" => false;
+        reject_backslash: "a\\b" => false;
+        reject_null: "a\0b" => false;
+        reject_path_traversal: "../etc/passwd" => false;
     }
 }

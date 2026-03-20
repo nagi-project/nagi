@@ -325,7 +325,9 @@ impl ServeState {
         let eligible = config.auto_sync
             && config.has_sync
             && !self.syncing.contains(asset_name)
-            && !suspended_path(&self.suspended_dir, asset_name).exists()
+            && !suspended_path(&self.suspended_dir, asset_name)
+                .map(|p| p.exists())
+                .unwrap_or(false)
             && !self.guardrail.is_backoff_active(asset_name);
         if !eligible {
             return false;
@@ -1003,7 +1005,7 @@ mod tests {
             state.handle_sync_result("a", false, None);
         }
 
-        assert!(suspended_path(dir.path(), "a").exists());
+        assert!(suspended_path(dir.path(), "a").unwrap().exists());
         assert!(!state.request_sync("a"));
     }
 
@@ -1135,7 +1137,7 @@ mod tests {
         });
         state.handle_eval_result("a", &degraded);
 
-        assert!(suspended_path(dir.path(), "a").exists());
+        assert!(suspended_path(dir.path(), "a").unwrap().exists());
     }
 
     #[test]
@@ -1164,6 +1166,6 @@ mod tests {
         });
         state.handle_eval_result("a", &same);
 
-        assert!(!suspended_path(dir.path(), "a").exists());
+        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
     }
 }

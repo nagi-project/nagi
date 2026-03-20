@@ -86,7 +86,7 @@ async fn run_controller(
     cache_dir: Option<PathBuf>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
-    let mut state = ServeState::new(&edges, suspended_dir());
+    let mut state = ServeState::new(&edges, suspended_dir()?);
     let mut eval_tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
     let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
@@ -286,7 +286,7 @@ pub async fn serve(
 
 /// Lists all currently suspended assets.
 pub fn list_suspended_assets() -> Result<Vec<SuspendedInfo>, std::io::Error> {
-    list_suspended(&suspended_dir())
+    list_suspended(&suspended_dir()?)
 }
 
 /// Resumes suspended assets by removing their flag files.
@@ -294,14 +294,14 @@ pub fn list_suspended_assets() -> Result<Vec<SuspendedInfo>, std::io::Error> {
 /// If `selectors` is empty, lists suspended assets without removing.
 /// If `selectors` is non-empty, removes the suspended flag for each matching asset.
 pub fn resume(selectors: &[&str]) -> Result<Vec<String>, std::io::Error> {
-    let dir = suspended_dir();
+    let dir = suspended_dir()?;
     if selectors.is_empty() {
         let items = list_suspended(&dir)?;
         return Ok(items.into_iter().map(|i| i.asset_name).collect());
     }
     let mut resumed = Vec::new();
     for &sel in selectors {
-        if suspended_path(&dir, sel).exists() {
+        if suspended_path(&dir, sel)?.exists() {
             remove_suspended(&dir, sel)?;
             resumed.push(sel.to_string());
         }
