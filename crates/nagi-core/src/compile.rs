@@ -335,34 +335,49 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         syncs: HashMap::new(),
         assets: Vec::new(),
     };
+    // Track Asset names separately for overlay merge (max 2 allowed).
+    let mut asset_indices: HashMap<String, usize> = HashMap::new();
 
     for resource in resources {
         let kind = resource.kind().to_string();
         let name = resource.metadata().name.clone();
-        if !seen.insert((kind.clone(), name.clone())) {
-            return Err(CompileError::DuplicateName { kind, name });
-        }
         match resource {
-            NagiKind::Connection { spec, .. } => {
-                result.connections.insert(name, spec);
-            }
-            NagiKind::Source { spec, .. } => {
-                result
-                    .source_connections
-                    .insert(name.clone(), spec.connection);
-                result.sources.insert(name);
-            }
-            NagiKind::DesiredGroup { spec, .. } => {
-                result.desired_groups.insert(name, spec.0.clone());
-            }
-            NagiKind::Sync { spec, .. } => {
-                result.syncs.insert(name, spec);
-            }
             NagiKind::Asset { metadata, spec, .. } => {
-                result.assets.push((metadata, spec));
+                if let Some(&idx) = asset_indices.get(&name) {
+                    // Second occurrence: merge desiredSets into the first.
+                    if !seen.insert((kind.clone(), name.clone())) {
+                        // Third or more: error.
+                        return Err(CompileError::DuplicateName { kind, name });
+                    }
+                    result.assets[idx].1.desired_sets.extend(spec.desired_sets);
+                } else {
+                    asset_indices.insert(name, result.assets.len());
+                    result.assets.push((metadata, spec));
+                }
             }
-            NagiKind::Origin { .. } => {
-                // Origin resources are processed before categorize; skip here.
+            _ => {
+                if !seen.insert((kind.clone(), name.clone())) {
+                    return Err(CompileError::DuplicateName { kind, name });
+                }
+                match resource {
+                    NagiKind::Connection { spec, .. } => {
+                        result.connections.insert(name, spec);
+                    }
+                    NagiKind::Source { spec, .. } => {
+                        result
+                            .source_connections
+                            .insert(name.clone(), spec.connection);
+                        result.sources.insert(name);
+                    }
+                    NagiKind::DesiredGroup { spec, .. } => {
+                        result.desired_groups.insert(name, spec.0.clone());
+                    }
+                    NagiKind::Sync { spec, .. } => {
+                        result.syncs.insert(name, spec);
+                    }
+                    NagiKind::Origin { .. } => {}
+                    NagiKind::Asset { .. } => unreachable!(),
+                }
             }
         }
     }
@@ -888,9 +903,80 @@ spec:
     }
 
     #[test]
-    fn resolve_rejects_duplicate_asset() {
+    fn resolve_merges_duplicate_asset_desired_sets() {
         let resources = parse(
             "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  desiredSets:
+    - name: check-a
+      type: SQL
+      query: \"SELECT 1\"
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  desiredSets:
+    - name: check-b
+      type: SQL
+      query: \"SELECT 2\"",
+        );
+        let output = resolve(resources).unwrap();
+        assert_eq!(output.assets.len(), 1);
+        assert_eq!(output.assets[0].metadata.name, "daily-sales");
+        // Both conditions are merged.
+        assert_eq!(output.assets[0].spec.desired_sets.len(), 2);
+    }
+
+    #[test]
+    fn resolve_merge_preserves_first_asset_fields() {
+        let resources = parse(
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  tags: [finance]
+  desiredSets:
+    - name: check-a
+      type: SQL
+      query: \"SELECT 1\"
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  tags: [other]
+  desiredSets:
+    - name: check-b
+      type: SQL
+      query: \"SELECT 2\"",
+        );
+        let output = resolve(resources).unwrap();
+        let asset = &output.assets[0];
+        // First Asset's tags are preserved.
+        assert_eq!(asset.spec.tags, vec!["finance".to_string()]);
+        assert_eq!(asset.spec.desired_sets.len(), 2);
+    }
+
+    #[test]
+    fn resolve_rejects_triple_duplicate_asset() {
+        let resources = parse(
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  desiredSets: []
+---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
