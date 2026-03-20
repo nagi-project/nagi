@@ -1,4 +1,5 @@
 pub mod compile;
+pub mod config;
 pub mod cron;
 pub mod db;
 pub mod dbt;
