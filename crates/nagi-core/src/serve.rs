@@ -6,7 +6,7 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-use crate::compile::{CompiledAsset, DependencyGraph};
+use crate::compile::{CompiledAsset, DependencyGraph, GraphEdge};
 use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::kind::asset::DesiredSetEntry;
 use crate::storage::local::LocalCache;
@@ -154,12 +154,36 @@ impl SchedulerState {
     }
 }
 
+// ── ReadinessState ────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+struct ReadinessState {
+    ready: HashMap<String, bool>,
+}
+
+impl ReadinessState {
+    fn new() -> Self {
+        Self {
+            ready: HashMap::new(),
+        }
+    }
+
+    /// Updates readiness for an asset. Returns true if the asset transitioned
+    /// from Not Ready to Ready (triggers downstream propagation).
+    fn update(&mut self, asset_name: &str, ready: bool) -> bool {
+        let was_ready = self.ready.get(asset_name).copied().unwrap_or(false);
+        self.ready.insert(asset_name.to_string(), ready);
+        !was_ready && ready
+    }
+}
+
 // ── ServeState ───────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
 struct ServeState {
     scheduler: SchedulerState,
     queue: QueueState,
+    readiness: ReadinessState,
 }
 
 impl ServeState {
@@ -167,6 +191,7 @@ impl ServeState {
         Self {
             scheduler: SchedulerState::new(),
             queue: QueueState::new(),
+            readiness: ReadinessState::new(),
         }
     }
 }
@@ -212,16 +237,33 @@ async fn reconcile_evaluate_inner(
     Ok(result)
 }
 
+// ── Downstream Map ───────────────────────────────────────────────────────────
+
+/// Builds a map from asset/source name → downstream asset names.
+/// Used for upstream propagation: when an asset becomes Ready, its downstreams
+/// are enqueued for re-evaluation.
+fn build_downstream_map(edges: &[GraphEdge]) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for edge in edges {
+        map.entry(edge.from.clone())
+            .or_default()
+            .push(edge.to.clone());
+    }
+    map
+}
+
 // ── Controller ───────────────────────────────────────────────────────────────
 
 /// Runs the reconciliation loop for one connected component.
 pub async fn run_controller(
     assets: Vec<(String, String, Option<StdDuration>)>,
+    edges: Vec<GraphEdge>,
     cache_dir: Option<PathBuf>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
     let mut state = ServeState::new();
     let mut tasks: JoinSet<(String, Result<AssetEvalResult, EvaluateError>)> = JoinSet::new();
+    let downstream_map = build_downstream_map(&edges);
 
     // Initial setup: enqueue all assets + register intervals
     for (name, _yaml, interval) in &assets {
@@ -269,6 +311,15 @@ pub async fn run_controller(
                         Ok(r) => {
                             eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready);
                             state.scheduler.mark_evaluated(&asset_name);
+                            // Upstream propagation: if Not Ready → Ready, enqueue downstreams
+                            if state.readiness.update(&asset_name, r.ready) {
+                                if let Some(downstreams) = downstream_map.get(&asset_name) {
+                                    for ds in downstreams {
+                                        eprintln!("[serve] propagating to downstream: {ds}");
+                                        state.queue.enqueue(ds.clone());
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
                             eprintln!("[serve] evaluation failed for {asset_name}: {e}");
@@ -323,21 +374,36 @@ pub async fn serve(
 
     let mut handles = Vec::new();
     for component in components {
+        let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
         let mut component_assets = Vec::new();
-        for name in component {
-            if let Some(yaml) = asset_map.get(&name) {
+        for name in &component {
+            if let Some(yaml) = asset_map.get(name) {
                 let compiled: CompiledAsset =
                     serde_yaml::from_str(yaml).map_err(|e| ServeError::Parse(e.to_string()))?;
                 let min_interval = compute_min_interval(&compiled);
-                component_assets.push((name, yaml.clone(), min_interval));
+                component_assets.push((name.clone(), yaml.clone(), min_interval));
             }
         }
         if component_assets.is_empty() {
             continue;
         }
+        // Filter edges to those relevant to this component
+        let component_edges: Vec<GraphEdge> = graph
+            .edges
+            .iter()
+            .filter(|e| {
+                component_set.contains(e.from.as_str()) || component_set.contains(e.to.as_str())
+            })
+            .cloned()
+            .collect();
         let rx = shutdown_tx.subscribe();
         let cd = cache_dir.map(PathBuf::from);
-        handles.push(tokio::spawn(run_controller(component_assets, cd, rx)));
+        handles.push(tokio::spawn(run_controller(
+            component_assets,
+            component_edges,
+            cd,
+            rx,
+        )));
     }
 
     eprintln!(
@@ -502,5 +568,57 @@ mod tests {
 
         // After mark_evaluated, next_due should be ~60s from now (later than first)
         assert!(second_due > first_due);
+    }
+
+    // ── ReadinessState tests ────────────────────────────────────────────
+
+    #[test]
+    fn readiness_initial_not_ready_to_ready() {
+        let mut r = ReadinessState::new();
+        // First time becoming ready → transition
+        assert!(r.update("a", true));
+    }
+
+    #[test]
+    fn readiness_stays_ready_no_transition() {
+        let mut r = ReadinessState::new();
+        r.update("a", true);
+        // Already ready → no transition
+        assert!(!r.update("a", true));
+    }
+
+    #[test]
+    fn readiness_not_ready_no_transition() {
+        let mut r = ReadinessState::new();
+        // Not ready → not ready: no transition
+        assert!(!r.update("a", false));
+    }
+
+    #[test]
+    fn readiness_ready_to_not_ready_to_ready() {
+        let mut r = ReadinessState::new();
+        assert!(r.update("a", true)); // transition
+        assert!(!r.update("a", false)); // no transition (became not ready)
+        assert!(r.update("a", true)); // transition again
+    }
+
+    // ── build_downstream_map tests ──────────────────────────────────────
+
+    #[test]
+    fn downstream_map_basic() {
+        let edges = vec![edge("a", "b"), edge("a", "c"), edge("b", "c")];
+        let map = build_downstream_map(&edges);
+        assert_eq!(
+            map.get("a").unwrap(),
+            &vec!["b".to_string(), "c".to_string()]
+        );
+        assert_eq!(map.get("b").unwrap(), &vec!["c".to_string()]);
+        assert!(map.get("c").is_none());
+    }
+
+    #[test]
+    fn downstream_map_empty() {
+        let map = build_downstream_map(&[]);
+        assert!(map.is_empty());
     }
 }
