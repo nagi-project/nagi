@@ -316,6 +316,16 @@ mod tests {
         fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
             Box::new(sqlparser::dialect::BigQueryDialect {})
         }
+
+        async fn table_stats(
+            &self,
+            _table_name: &str,
+        ) -> Result<crate::db::TableStats, ConnectionError> {
+            Ok(crate::db::TableStats {
+                num_rows: 0,
+                num_bytes: 0,
+            })
+        }
     }
 
     fn stub_freshness_sql(asset_name: &str, column: Option<&str>) -> String {
@@ -471,6 +481,16 @@ mod tests {
 
             fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
                 Box::new(sqlparser::dialect::BigQueryDialect {})
+            }
+
+            async fn table_stats(
+                &self,
+                _table_name: &str,
+            ) -> Result<crate::db::TableStats, ConnectionError> {
+                Ok(crate::db::TableStats {
+                    num_rows: 0,
+                    num_bytes: 0,
+                })
             }
         }
         let spec = AssetSpec {

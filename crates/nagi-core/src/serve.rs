@@ -208,6 +208,7 @@ async fn run_controller(
                     name,
                     yaml.to_string(),
                     cache_dir.clone(),
+                    None,
                 ));
             }
         }

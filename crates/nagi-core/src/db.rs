@@ -1,6 +1,7 @@
 pub mod bigquery;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::dbt::profile::AdapterConfig;
@@ -21,6 +22,14 @@ pub enum ConnectionError {
     Http(#[from] reqwest::Error),
 }
 
+/// Row count and byte size of a table, used for Source change detection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableStats {
+    pub num_rows: u64,
+    pub num_bytes: u64,
+}
+
 /// Executes a SQL query and returns the first column of the first row as a JSON value.
 #[async_trait]
 pub trait Connection: Send + Sync {
@@ -33,6 +42,9 @@ pub trait Connection: Send + Sync {
 
     /// Returns the sqlparser dialect for this connection's adapter type.
     fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect>;
+
+    /// Returns row count and byte size of a table via metadata API (no query cost).
+    async fn table_stats(&self, table_name: &str) -> Result<TableStats, ConnectionError>;
 }
 
 /// Creates a `Connection` implementation based on the adapter type in the profile output.

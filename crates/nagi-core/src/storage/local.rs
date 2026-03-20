@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use crate::evaluate::AssetEvalResult;
 use crate::serve::SuspendedInfo;
 
-use super::{Cache, StorageError, SuspendedStore};
+use crate::db::TableStats;
+
+use super::{Cache, SourceStatsCache, StorageError, SuspendedStore};
 
 /// Local file-based cache backend.
 /// Stores evaluate results as `{cache_dir}/{asset_name}.json`.
@@ -144,6 +146,51 @@ impl SuspendedStore for LocalSuspendedStore {
         }
         result.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
         Ok(result)
+    }
+}
+
+// ── LocalSourceStatsCache ──────────────────────────────────────────────────
+
+/// Local file-based cache for Source `TableStats`.
+/// Stores stats as `{dir}/{source_name}.json`.
+pub struct LocalSourceStatsCache {
+    dir: PathBuf,
+}
+
+impl LocalSourceStatsCache {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    pub fn default_dir() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".nagi")
+            .join("source_stats")
+    }
+
+    fn source_path(&self, source_name: &str) -> Result<PathBuf, StorageError> {
+        super::validate_asset_name(source_name)?;
+        Ok(self.dir.join(format!("{source_name}.json")))
+    }
+}
+
+impl SourceStatsCache for LocalSourceStatsCache {
+    fn read(&self, source_name: &str) -> Result<Option<TableStats>, StorageError> {
+        let path = self.source_path(source_name)?;
+        match std::fs::read_to_string(path) {
+            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn write(&self, source_name: &str, stats: &TableStats) -> Result<(), StorageError> {
+        super::validate_asset_name(source_name)?;
+        std::fs::create_dir_all(&self.dir)?;
+        let json = serde_json::to_string_pretty(stats)?;
+        std::fs::write(self.source_path(source_name)?, json)?;
+        Ok(())
     }
 }
 
@@ -327,5 +374,48 @@ mod tests {
         reject_slash: "a/b" => false;
         reject_backslash: "a\\b" => false;
         reject_null: "a\0b" => false;
+    }
+
+    // ── LocalSourceStatsCache tests ─────────────────────────────────────
+
+    #[test]
+    fn source_stats_write_and_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalSourceStatsCache::new(dir.path().to_path_buf());
+        let stats = TableStats {
+            num_rows: 100,
+            num_bytes: 2048,
+        };
+
+        cache.write("my-source", &stats).unwrap();
+        let loaded = cache.read("my-source").unwrap().unwrap();
+        assert_eq!(loaded, stats);
+    }
+
+    #[test]
+    fn source_stats_read_missing_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalSourceStatsCache::new(dir.path().to_path_buf());
+        assert!(cache.read("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn source_stats_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalSourceStatsCache::new(dir.path().to_path_buf());
+
+        let v1 = TableStats {
+            num_rows: 10,
+            num_bytes: 100,
+        };
+        let v2 = TableStats {
+            num_rows: 20,
+            num_bytes: 200,
+        };
+
+        cache.write("src", &v1).unwrap();
+        cache.write("src", &v2).unwrap();
+        let loaded = cache.read("src").unwrap().unwrap();
+        assert_eq!(loaded, v2);
     }
 }

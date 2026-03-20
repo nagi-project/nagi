@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::db::TableStats;
 use crate::evaluate::AssetEvalResult;
 use crate::serve::SuspendedInfo;
 
@@ -50,6 +51,12 @@ pub trait SuspendedStore: Send + Sync {
     fn remove(&self, asset_name: &str) -> Result<(), StorageError>;
     fn exists(&self, asset_name: &str) -> Result<bool, StorageError>;
     fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError>;
+}
+
+/// Caches `TableStats` per source for change detection.
+pub trait SourceStatsCache: Send + Sync {
+    fn read(&self, source_name: &str) -> Result<Option<TableStats>, StorageError>;
+    fn write(&self, source_name: &str, stats: &TableStats) -> Result<(), StorageError>;
 }
 
 /// Distributed lock for serializing sync execution per sync ref.
