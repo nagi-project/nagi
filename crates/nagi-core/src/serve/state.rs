@@ -406,7 +406,11 @@ impl ServeState {
                     suspended_at: chrono::Utc::now().to_rfc3339(),
                     execution_id: execution_id.map(|s| s.to_string()),
                 };
-                let _ = write_suspended(&self.suspended_dir, &info);
+                if let Err(e) = write_suspended(&self.suspended_dir, &info) {
+                    eprintln!(
+                        "[serve] warning: failed to write suspended flag for {asset_name}: {e}"
+                    );
+                }
                 suspended_reason = Some(reason);
             }
         }
@@ -449,7 +453,9 @@ impl ServeState {
             suspended_at: chrono::Utc::now().to_rfc3339(),
             execution_id: None,
         };
-        let _ = write_suspended(&self.suspended_dir, &info);
+        if let Err(e) = write_suspended(&self.suspended_dir, &info) {
+            eprintln!("[serve] warning: failed to write suspended flag for {asset_name}: {e}");
+        }
         Some(reason)
     }
 

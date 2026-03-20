@@ -28,19 +28,8 @@ pub fn suspended_dir() -> std::io::Result<PathBuf> {
 /// Validates that the asset name is a safe filename component (no path
 /// separators, no `.` or `..`, no null bytes).
 fn validate_asset_name(asset_name: &str) -> std::io::Result<()> {
-    if asset_name.is_empty()
-        || asset_name == "."
-        || asset_name == ".."
-        || asset_name.contains('/')
-        || asset_name.contains('\\')
-        || asset_name.contains('\0')
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("invalid asset name: {asset_name:?}"),
-        ));
-    }
-    Ok(())
+    crate::storage::validate_asset_name(asset_name)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
 }
 
 pub fn suspended_path(dir: &Path, asset_name: &str) -> std::io::Result<PathBuf> {

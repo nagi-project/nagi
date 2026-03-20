@@ -24,22 +24,23 @@ impl LocalCache {
             .join("cache")
     }
 
-    fn asset_path(&self, asset_name: &str) -> PathBuf {
-        self.cache_dir.join(format!("{asset_name}.json"))
+    fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
+        super::validate_asset_name(asset_name)?;
+        Ok(self.cache_dir.join(format!("{asset_name}.json")))
     }
 }
 
 impl Cache for LocalCache {
     fn write(&self, result: &AssetEvalResult) -> Result<(), StorageError> {
         std::fs::create_dir_all(&self.cache_dir)?;
-        let path = self.asset_path(&result.asset_name);
+        let path = self.asset_path(&result.asset_name)?;
         let json = serde_json::to_string_pretty(result)?;
         std::fs::write(path, json)?;
         Ok(())
     }
 
     fn read(&self, asset_name: &str) -> Result<Option<AssetEvalResult>, StorageError> {
-        let path = self.asset_path(asset_name);
+        let path = self.asset_path(asset_name)?;
         if !path.exists() {
             return Ok(None);
         }
@@ -69,20 +70,6 @@ impl Cache for LocalCache {
 
 // ── LocalSuspendedStore ──────────────────────────────────────────────────────
 
-/// Validates that the asset name is a safe filename component.
-fn validate_asset_name(asset_name: &str) -> Result<(), StorageError> {
-    if asset_name.is_empty()
-        || asset_name == "."
-        || asset_name == ".."
-        || asset_name.contains('/')
-        || asset_name.contains('\\')
-        || asset_name.contains('\0')
-    {
-        return Err(StorageError::InvalidAssetName(asset_name.to_string()));
-    }
-    Ok(())
-}
-
 /// Local file-based suspended store.
 /// Stores suspension flags as `{dir}/{asset_name}.json`.
 pub struct LocalSuspendedStore {
@@ -102,14 +89,14 @@ impl LocalSuspendedStore {
     }
 
     fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
-        validate_asset_name(asset_name)?;
+        super::validate_asset_name(asset_name)?;
         Ok(self.dir.join(format!("{asset_name}.json")))
     }
 }
 
 impl SuspendedStore for LocalSuspendedStore {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError> {
-        validate_asset_name(&info.asset_name)?;
+        super::validate_asset_name(&info.asset_name)?;
         std::fs::create_dir_all(&self.dir)?;
         let json = serde_json::to_string_pretty(info)?;
         std::fs::write(self.asset_path(&info.asset_name)?, json)?;
@@ -325,7 +312,7 @@ mod tests {
             $(
                 #[test]
                 fn $name() {
-                    assert_eq!(validate_asset_name($input).is_ok(), $ok);
+                    assert_eq!(crate::storage::validate_asset_name($input).is_ok(), $ok);
                 }
             )*
         };

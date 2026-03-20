@@ -21,6 +21,21 @@ pub enum StorageError {
     InvalidAssetName(String),
 }
 
+/// Validates that the asset name is a safe filename component (no path
+/// separators, no `.` or `..`, no null bytes).
+pub fn validate_asset_name(asset_name: &str) -> Result<(), StorageError> {
+    if asset_name.is_empty()
+        || asset_name == "."
+        || asset_name == ".."
+        || asset_name.contains('/')
+        || asset_name.contains('\\')
+        || asset_name.contains('\0')
+    {
+        return Err(StorageError::InvalidAssetName(asset_name.to_string()));
+    }
+    Ok(())
+}
+
 /// Reads and writes evaluate result caches per asset.
 pub trait Cache: Send + Sync {
     fn write(&self, result: &AssetEvalResult) -> Result<(), StorageError>;

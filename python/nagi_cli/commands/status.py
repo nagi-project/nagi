@@ -1,3 +1,5 @@
+import json
+
 import click
 
 from nagi_cli._nagi_core import asset_status
@@ -29,9 +31,7 @@ def status(
     """Show current convergence status (reads cache and latest sync log)."""
     try:
         result_json = asset_status(target_dir, list(selectors), cache_dir)
-    except RuntimeError as e:
-        import json
-
+    except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
