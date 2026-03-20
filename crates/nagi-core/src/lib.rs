@@ -8,6 +8,7 @@ pub mod init;
 pub mod kind;
 pub mod log;
 pub mod select;
+pub mod serve;
 pub mod status;
 pub mod storage;
 pub mod sync;
