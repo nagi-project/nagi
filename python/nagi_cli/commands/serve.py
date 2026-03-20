@@ -24,18 +24,25 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
     default=None,
     help="Cache directory (defaults to ~/.nagi/cache/)",
 )
+@click.option(
+    "--project-dir",
+    default=".",
+    show_default=True,
+    help="Project root directory containing nagi.yaml.",
+)
 @click.pass_context
 def serve(
     ctx: click.Context,
     selectors: tuple[str, ...],
     target_dir: str,
     cache_dir: str | None,
+    project_dir: str,
 ) -> None:
     """Start the reconciliation loop for continuous evaluation."""
     if ctx.invoked_subcommand is not None:
         return
     try:
-        _serve(target_dir, list(selectors), cache_dir)
+        _serve(target_dir, list(selectors), cache_dir, project_dir)
     except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)

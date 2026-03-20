@@ -11,6 +11,14 @@ use crate::sync::SyncError;
 use super::graph::build_downstream_map;
 use super::suspended::{suspended_path, write_suspended, SuspendedInfo};
 
+/// Emitted when an asset is suspended, allowing the controller to
+/// trigger notifications without coupling ServeState to the notifier.
+#[derive(Debug, Clone)]
+pub struct SuspendedEvent {
+    pub asset_name: String,
+    pub reason: String,
+}
+
 // ── Type aliases for JoinSet results ─────────────────────────────────────────
 
 pub type EvalJoinResult =
@@ -374,33 +382,38 @@ impl ServeState {
     /// On failure: increments consecutive failure count and applies exponential
     /// backoff. If failures reach the threshold, writes a suspended flag file
     /// to prevent further sync attempts until manually resumed.
+    /// Returns the suspension reason if the asset was suspended.
     pub fn handle_sync_result(
         &mut self,
         asset_name: &str,
         success: bool,
         execution_id: Option<&str>,
-    ) {
+    ) -> Option<String> {
         if self.syncing.remove(asset_name) {
             let ref_key = self.sync_ref_key(asset_name);
             self.syncing_refs.remove(&ref_key);
         }
+        let mut suspended_reason = None;
         if success {
             self.guardrail.record_sync_success(asset_name);
         } else {
             self.guardrail.record_sync_failure(asset_name);
             if self.guardrail.should_suspend(asset_name) {
+                let reason = format!("{MAX_CONSECUTIVE_FAILURES} consecutive sync failures");
                 let info = SuspendedInfo {
                     asset_name: asset_name.to_string(),
-                    reason: format!("{MAX_CONSECUTIVE_FAILURES} consecutive sync failures"),
+                    reason: reason.clone(),
                     suspended_at: chrono::Utc::now().to_rfc3339(),
                     execution_id: execution_id.map(|s| s.to_string()),
                 };
                 let _ = write_suspended(&self.suspended_dir, &info);
+                suspended_reason = Some(reason);
             }
         }
         // Re-evaluate after sync to check convergence (and detect degradation).
         self.pending_sync_reeval.insert(asset_name.to_string());
         self.work_queue.enqueue(asset_name.to_string());
+        suspended_reason
     }
 
     /// If a Not Ready → Ready transition occurred, enqueues downstream assets
@@ -422,32 +435,33 @@ impl ServeState {
     }
 
     /// Suspends the asset if the Ready condition count decreased after sync.
-    fn check_degradation(&self, asset_name: &str, ready_count: usize) {
-        let Some(&prev_count) = self.last_ready_count.get(asset_name) else {
-            return;
-        };
+    /// Returns the suspension reason if suspended.
+    fn check_degradation(&self, asset_name: &str, ready_count: usize) -> Option<String> {
+        let &prev_count = self.last_ready_count.get(asset_name)?;
         if ready_count >= prev_count {
-            return;
+            return None;
         }
+        let reason =
+            format!("degradation after sync: ready conditions {prev_count} → {ready_count}");
         let info = SuspendedInfo {
             asset_name: asset_name.to_string(),
-            reason: format!(
-                "degradation after sync: ready conditions {prev_count} → {ready_count}"
-            ),
+            reason: reason.clone(),
             suspended_at: chrono::Utc::now().to_rfc3339(),
             execution_id: None,
         };
         let _ = write_suspended(&self.suspended_dir, &info);
+        Some(reason)
     }
 
     /// Processes an evaluation result: updates scheduler, readiness, and
     /// in-flight tracking.  Returns names of downstream assets that were
     /// enqueued due to a Not Ready → Ready transition.
+    /// Returns (propagated downstream names, optional suspension reason).
     pub fn handle_eval_result(
         &mut self,
         asset_name: &str,
         result: &Result<AssetEvalResult, EvaluateError>,
-    ) -> Vec<String> {
+    ) -> (Vec<String>, Option<SuspendedEvent>) {
         self.in_flight.remove(asset_name);
         self.scheduler.reschedule(asset_name);
 
@@ -465,10 +479,15 @@ impl ServeState {
 
         // Degradation detection: if this is a post-sync re-evaluation and
         // the number of Ready conditions decreased, suspend the asset.
-        let is_post_sync = self.pending_sync_reeval.remove(asset_name);
-        if is_post_sync {
-            self.check_degradation(asset_name, ready_count);
-        }
+        let suspended = if self.pending_sync_reeval.remove(asset_name) {
+            self.check_degradation(asset_name, ready_count)
+                .map(|reason| SuspendedEvent {
+                    asset_name: asset_name.to_string(),
+                    reason,
+                })
+        } else {
+            None
+        };
         self.last_ready_count
             .insert(asset_name.to_string(), ready_count);
 
@@ -477,30 +496,31 @@ impl ServeState {
             self.request_sync(asset_name);
         }
 
-        self.propagate_downstream(asset_name, ready)
+        (self.propagate_downstream(asset_name, ready), suspended)
     }
 
     /// Handles a JoinSet result from an eval task.
     /// Logs the outcome, updates state, and returns downstream propagations.
-    pub fn on_eval_complete(&mut self, join_result: EvalJoinResult) {
+    pub fn on_eval_complete(&mut self, join_result: EvalJoinResult) -> Option<SuspendedEvent> {
         let Some(Ok((asset_name, eval_result))) = join_result else {
-            return;
+            return None;
         };
         match &eval_result {
             Ok(r) => eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready),
             Err(e) => eprintln!("[serve] evaluation failed for {asset_name}: {e}"),
         }
-        let propagated = self.handle_eval_result(&asset_name, &eval_result);
+        let (propagated, suspended) = self.handle_eval_result(&asset_name, &eval_result);
         for ds in &propagated {
             eprintln!("[serve] propagating to downstream: {ds}");
         }
+        suspended
     }
 
     /// Handles a JoinSet result from a sync task.
     /// Logs the outcome and updates guardrail / suspended state.
-    pub fn on_sync_complete(&mut self, join_result: SyncJoinResult) {
+    pub fn on_sync_complete(&mut self, join_result: SyncJoinResult) -> Option<SuspendedEvent> {
         let Some(Ok((asset_name, sync_result))) = join_result else {
-            return;
+            return None;
         };
         match &sync_result {
             Ok(r) => eprintln!(
@@ -513,7 +533,8 @@ impl ServeState {
             Ok(r) => (r.success, Some(r.execution_id.as_str())),
             Err(_) => (false, None),
         };
-        self.handle_sync_result(&asset_name, success, execution_id);
+        self.handle_sync_result(&asset_name, success, execution_id)
+            .map(|reason| SuspendedEvent { asset_name, reason })
     }
 }
 

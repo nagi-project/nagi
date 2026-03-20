@@ -42,9 +42,8 @@ pub struct NotifyConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct SlackConfig {
-    pub webhook_url: String,
+    pub channel: String,
 }
 
 const CONFIG_FILE: &str = "nagi.yaml";
@@ -84,33 +83,30 @@ mod tests {
     #[test]
     fn load_full_config() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r##"
 backend:
   type: gcs
   bucket: my-nagi-state
 
 notify:
   slack:
-    webhookUrl: https://hooks.slack.com/services/T/B/xxx
-"#;
+    channel: "#nagi-alerts"
+"##;
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.backend.r#type, "gcs");
         let slack = config.notify.slack.unwrap();
-        assert_eq!(
-            slack.webhook_url,
-            "https://hooks.slack.com/services/T/B/xxx"
-        );
+        assert_eq!(slack.channel, "#nagi-alerts");
     }
 
     #[test]
     fn load_notify_only() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r##"
 notify:
   slack:
-    webhookUrl: https://hooks.slack.com/services/T/B/yyy
-"#;
+    channel: "#alerts"
+"##;
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.backend.r#type, "local");

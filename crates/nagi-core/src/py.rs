@@ -216,14 +216,20 @@ pub fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> 
 /// Starts the reconciliation loop for continuous evaluation.
 /// Blocks until Ctrl-C is received.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None))]
-pub fn serve(target_dir: &str, selectors: Vec<String>, cache_dir: Option<&str>) -> PyResult<()> {
+#[pyo3(signature = (target_dir, selectors, cache_dir=None, project_dir=None))]
+pub fn serve(
+    target_dir: &str,
+    selectors: Vec<String>,
+    cache_dir: Option<&str>,
+    project_dir: Option<&str>,
+) -> PyResult<()> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::serve::serve(
         std::path::Path::new(target_dir),
         &selector_refs,
         cache_dir.map(std::path::Path::new),
+        project_dir.map(std::path::Path::new),
     ))
     .map_err(to_py_err)
 }

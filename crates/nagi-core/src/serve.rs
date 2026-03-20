@@ -23,6 +23,7 @@ pub mod suspended;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use tokio::sync::watch;
@@ -31,6 +32,7 @@ use tokio::task::JoinSet;
 use crate::compile::{CompiledAsset, DependencyGraph, GraphEdge};
 use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::kind::asset::DesiredSetEntry;
+use crate::notify::{Notifier, NotifyEvent};
 use crate::sync::SyncError;
 
 pub use graph::connected_components;
@@ -54,6 +56,18 @@ pub enum ServeError {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Sends a notification asynchronously without blocking the serve loop.
+fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
+    let Some(n) = notifier.clone() else {
+        return;
+    };
+    tokio::spawn(async move {
+        if let Err(e) = n.notify(&event).await {
+            eprintln!("[serve] notification failed: {e}");
+        }
+    });
+}
 
 /// Computes the minimum interval across all inline conditions of a compiled asset.
 fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
@@ -84,6 +98,7 @@ async fn run_controller(
     assets: Vec<AssetEntry>,
     edges: Vec<GraphEdge>,
     cache_dir: Option<PathBuf>,
+    notifier: Option<Arc<dyn Notifier>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
     let mut state = ServeState::new(&edges, suspended_dir()?);
@@ -150,12 +165,29 @@ async fn run_controller(
 
             // (b) Eval complete: update state, propagate or request sync.
             result = eval_tasks.join_next(), if !eval_tasks.is_empty() => {
-                state.on_eval_complete(result);
+                // Notify on eval failure before updating state.
+                if let Some(Ok((ref name, Err(ref e)))) = result {
+                    fire_notify(&notifier, NotifyEvent::EvalFailed {
+                        asset_name: name.clone(),
+                        error: e.to_string(),
+                    });
+                }
+                if let Some(event) = state.on_eval_complete(result) {
+                    fire_notify(&notifier, NotifyEvent::Suspended {
+                        asset_name: event.asset_name,
+                        reason: event.reason,
+                    });
+                }
             }
 
             // (c) Sync complete: enqueue re-evaluation to verify convergence.
             result = sync_tasks.join_next(), if !sync_tasks.is_empty() => {
-                state.on_sync_complete(result);
+                if let Some(event) = state.on_sync_complete(result) {
+                    fire_notify(&notifier, NotifyEvent::Suspended {
+                        asset_name: event.asset_name,
+                        reason: event.reason,
+                    });
+                }
             }
 
             // (d) Shutdown signal received.
@@ -244,6 +276,7 @@ pub async fn serve(
     target_dir: &Path,
     selectors: &[&str],
     cache_dir: Option<&Path>,
+    project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
     let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
 
@@ -251,6 +284,13 @@ pub async fn serve(
     let graph_json = std::fs::read_to_string(&graph_path)?;
     let graph: DependencyGraph =
         serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
+
+    // Load project config and construct notifier if configured.
+    let notifier: Option<Arc<dyn Notifier>> = project_dir.and_then(|dir| {
+        let config = crate::config::load_config(dir).ok()?;
+        let slack = config.notify.slack?;
+        Some(Arc::new(crate::notify::slack::SlackNotifier::new(slack.channel)) as Arc<dyn Notifier>)
+    });
 
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let inputs = build_controller_inputs(&graph, &asset_map)?;
@@ -261,10 +301,12 @@ pub async fn serve(
     for input in inputs {
         let rx = shutdown_tx.subscribe();
         let cd = cache_dir.map(PathBuf::from);
+        let n = notifier.clone();
         handles.push(tokio::spawn(run_controller(
             input.assets,
             input.edges,
             cd,
+            n,
             rx,
         )));
     }
@@ -324,6 +366,8 @@ pub fn resume(selectors: &[&str]) -> Result<Vec<String>, std::io::Error> {
 mod tests {
     use super::*;
     use crate::compile::{GraphEdge, GraphNode};
+    use crate::notify::NotifyError;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn asset_node(name: &str) -> GraphNode {
         GraphNode {
@@ -346,6 +390,57 @@ mod tests {
             from: from.to_string(),
             to: to.to_string(),
         }
+    }
+
+    struct MockNotifier {
+        call_count: AtomicUsize,
+    }
+
+    impl MockNotifier {
+        fn new() -> Self {
+            Self {
+                call_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::notify::Notifier for MockNotifier {
+        async fn notify(&self, _event: &NotifyEvent) -> Result<(), NotifyError> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn fire_notify_skips_when_none() {
+        // Should not panic.
+        fire_notify(
+            &None,
+            NotifyEvent::Suspended {
+                asset_name: "a".to_string(),
+                reason: "test".to_string(),
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn fire_notify_calls_notifier_when_some() {
+        let mock = Arc::new(MockNotifier::new());
+        let notifier: Option<Arc<dyn Notifier>> = Some(mock.clone());
+
+        fire_notify(
+            &notifier,
+            NotifyEvent::Suspended {
+                asset_name: "a".to_string(),
+                reason: "test".to_string(),
+            },
+        );
+
+        // fire_notify spawns a task; yield to let it run.
+        tokio::task::yield_now().await;
+
+        assert_eq!(mock.call_count.load(Ordering::SeqCst), 1);
     }
 
     #[test]
