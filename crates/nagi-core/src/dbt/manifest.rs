@@ -171,6 +171,7 @@ fn tests_to_desired_sets(tests: &[&DbtNode]) -> Vec<DesiredSetEntry> {
                     "--select".to_string(),
                     test.name.clone(),
                 ],
+                interval: None,
             }));
         }
     }

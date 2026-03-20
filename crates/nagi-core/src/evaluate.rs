@@ -119,6 +119,34 @@ pub async fn evaluate_asset(
     Ok(result)
 }
 
+/// Evaluates all desired conditions without logging.
+/// Produces a `Send` future (unlike `evaluate_asset` which takes `&LogStore`).
+pub(crate) async fn evaluate_asset_no_log(
+    asset_name: &str,
+    spec: &AssetSpec,
+    conn: Option<&dyn Connection>,
+) -> Result<AssetEvalResult, EvaluateError> {
+    let mut results = Vec::new();
+    for (i, entry) in spec.desired_sets.iter().enumerate() {
+        match entry {
+            DesiredSetEntry::Ref(_) => continue,
+            DesiredSetEntry::Inline(condition) => {
+                let result =
+                    condition::evaluate_condition(condition.name(), i, asset_name, condition, conn)
+                        .await?;
+                results.push(result);
+            }
+        }
+    }
+    let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
+    Ok(AssetEvalResult {
+        asset_name: asset_name.to_string(),
+        ready,
+        conditions: results,
+        evaluation_id: None,
+    })
+}
+
 /// A single condition from an asset's desiredSets, with its name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DryRunCondition {
@@ -155,7 +183,7 @@ pub fn dry_run_asset(asset_name: &str, spec: &AssetSpec) -> DryRunResult {
     }
 }
 
-fn compiled_to_asset_spec(compiled: &CompiledAsset) -> AssetSpec {
+pub(crate) fn compiled_to_asset_spec(compiled: &CompiledAsset) -> AssetSpec {
     AssetSpec {
         tags: compiled.spec.tags.clone(),
         sources: compiled.spec.sources.clone(),
@@ -166,7 +194,7 @@ fn compiled_to_asset_spec(compiled: &CompiledAsset) -> AssetSpec {
     }
 }
 
-fn resolve_connection(
+pub(crate) fn resolve_connection(
     conn_info: &crate::compile::ResolvedConnection,
 ) -> Result<Box<dyn Connection>, EvaluateError> {
     match conn_info {
@@ -395,6 +423,7 @@ mod tests {
         let spec = asset_spec_with(DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT true".to_string(),
+            interval: None,
         });
         let result = evaluate_asset("my_table", &spec, Some(&conn), None)
             .await
@@ -410,6 +439,7 @@ mod tests {
         let spec = asset_spec_with(DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT false".to_string(),
+            interval: None,
         });
         let result = evaluate_asset("my_table", &spec, Some(&conn), None)
             .await
@@ -450,10 +480,12 @@ mod tests {
                 DesiredSetEntry::Inline(DesiredCondition::SQL {
                     name: "check-a".to_string(),
                     query: "SELECT true".to_string(),
+                    interval: None,
                 }),
                 DesiredSetEntry::Inline(DesiredCondition::SQL {
                     name: "check-b".to_string(),
                     query: "SELECT false".to_string(),
+                    interval: None,
                 }),
             ],
             auto_sync: true,
@@ -500,6 +532,7 @@ mod tests {
         let condition = DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT COUNT(*) > 0 FROM orders".to_string(),
+            interval: None,
         };
         let spec = asset_spec_with(condition.clone());
         let result = dry_run_asset("my_table", &spec);
@@ -511,6 +544,7 @@ mod tests {
         let condition = DesiredCondition::Command {
             name: "dbt-test".to_string(),
             run: vec!["dbt".to_string(), "test".to_string()],
+            interval: None,
         };
         let spec = asset_spec_with(condition.clone());
         let result = dry_run_asset("my_table", &spec);
@@ -529,6 +563,7 @@ mod tests {
                 DesiredSetEntry::Inline(DesiredCondition::SQL {
                     name: "check".to_string(),
                     query: "SELECT 1".to_string(),
+                    interval: None,
                 }),
             ],
             auto_sync: true,
@@ -562,6 +597,7 @@ mod tests {
         let spec = asset_spec_with(DesiredCondition::Command {
             name: "always-true".to_string(),
             run: vec!["true".to_string()],
+            interval: None,
         });
         let result = evaluate_asset("my_table", &spec, None, None).await.unwrap();
         assert!(result.ready);
@@ -572,6 +608,7 @@ mod tests {
         let spec = asset_spec_with(DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT 1".to_string(),
+            interval: None,
         });
         let result = evaluate_asset("my_table", &spec, None, None).await;
         assert!(matches!(
@@ -599,6 +636,7 @@ mod tests {
             let spec = asset_spec_with(DesiredCondition::SQL {
                 name: "bad".to_string(),
                 query: query.to_string(),
+                interval: None,
             });
             let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
             assert!(
@@ -623,6 +661,7 @@ mod tests {
             let spec = asset_spec_with(DesiredCondition::SQL {
                 name: "check".to_string(),
                 query: query.to_string(),
+                interval: None,
             });
             let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
             assert!(

@@ -81,10 +81,22 @@ pub enum DesiredCondition {
         column: Option<String>,
     },
     /// Query must return a scalar boolean. Ready when the result is true.
-    SQL { name: String, query: String },
+    SQL {
+        name: String,
+        query: String,
+        /// Optional polling interval. If omitted, only evaluated via upstream propagation.
+        #[serde(default)]
+        interval: Option<Duration>,
+    },
     /// Runs an external command. Ready when the process exits with code 0.
     /// `run` is argv: the first element is the program, the rest are arguments.
-    Command { name: String, run: Vec<String> },
+    Command {
+        name: String,
+        run: Vec<String>,
+        /// Optional polling interval. If omitted, only evaluated via upstream propagation.
+        #[serde(default)]
+        interval: Option<Duration>,
+    },
 }
 
 impl AssetSpec {
@@ -139,6 +151,15 @@ impl DesiredCondition {
             DesiredCondition::Freshness { name, .. } => name,
             DesiredCondition::SQL { name, .. } => name,
             DesiredCondition::Command { name, .. } => name,
+        }
+    }
+
+    /// Returns the evaluation interval if configured.
+    pub fn interval(&self) -> Option<&Duration> {
+        match self {
+            DesiredCondition::Freshness { interval, .. } => Some(interval),
+            DesiredCondition::SQL { interval, .. } => interval.as_ref(),
+            DesiredCondition::Command { interval, .. } => interval.as_ref(),
         }
     }
 
@@ -232,11 +253,11 @@ resync:
         ));
         assert!(matches!(
             &spec.desired_sets[2],
-            DesiredSetEntry::Inline(DesiredCondition::SQL { name, query }) if name == "no-negative-amount" && query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
+            DesiredSetEntry::Inline(DesiredCondition::SQL { name, query, .. }) if name == "no-negative-amount" && query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
         ));
         assert!(matches!(
             &spec.desired_sets[3],
-            DesiredSetEntry::Inline(DesiredCondition::Command { name, run }) if name == "dbt-test-sales" && run == &["dbt", "test", "--select", "daily_sales"]
+            DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. }) if name == "dbt-test-sales" && run == &["dbt", "test", "--select", "daily_sales"]
         ));
 
         assert!(spec.auto_sync);
@@ -375,6 +396,7 @@ autoSync: false
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
                 name: "check".to_string(),
                 query: "SELECT true".to_string(),
+                interval: None,
             })],
             auto_sync: true,
             sync: None,
@@ -425,7 +447,7 @@ desiredSets:
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(
             &spec.desired_sets[0],
-            DesiredSetEntry::Inline(DesiredCondition::Command { name, run }) if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
+            DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. }) if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
         ));
     }
 
@@ -437,6 +459,7 @@ desiredSets:
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
                 name: "check".to_string(),
                 run: vec![],
+                interval: None,
             })],
             auto_sync: true,
             sync: None,
@@ -454,6 +477,7 @@ desiredSets:
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
                 name: "check".to_string(),
                 run: vec!["".to_string()],
+                interval: None,
             })],
             auto_sync: true,
             sync: None,
@@ -493,10 +517,12 @@ desiredSets:
             DesiredCondition::SQL {
                 name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
+                interval: None,
             },
             DesiredCondition::SQL {
                 name: "check-b".to_string(),
                 query: "SELECT false".to_string(),
+                interval: None,
             },
         ];
         assert!(validate_no_duplicate_condition_names(&conditions).is_ok());
@@ -508,10 +534,12 @@ desiredSets:
             DesiredCondition::SQL {
                 name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
+                interval: None,
             },
             DesiredCondition::SQL {
                 name: "check-a".to_string(),
                 query: "SELECT false".to_string(),
+                interval: None,
             },
         ];
         let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
@@ -542,6 +570,7 @@ desiredSets:
             desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
                 name: "".to_string(),
                 query: "SELECT true".to_string(),
+                interval: None,
             })],
             auto_sync: true,
             sync: None,
