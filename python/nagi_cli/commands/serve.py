@@ -36,7 +36,7 @@ def serve(
         return
     try:
         _serve(target_dir, list(selectors), cache_dir)
-    except RuntimeError as e:
+    except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
@@ -106,6 +106,6 @@ def resume(selectors: tuple[str, ...]) -> None:
         resumed = json.loads(result_json)
         for name in resumed:
             click.echo(f"Resumed: {name}")
-    except RuntimeError as e:
+    except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
