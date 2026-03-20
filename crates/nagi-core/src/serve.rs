@@ -209,6 +209,21 @@ async fn run_controller(
         }
     }
 
+    // Drain in-flight sync tasks (side-effects) before exiting.
+    // Eval tasks are read-only and safe to abort, so we drop them.
+    drop(eval_tasks);
+    if !sync_tasks.is_empty() {
+        eprintln!(
+            "[serve] waiting for {} in-flight sync task(s) to finish",
+            sync_tasks.len()
+        );
+        while let Some(result) = sync_tasks.join_next().await {
+            if let Ok((name, Err(e))) = result {
+                eprintln!("[serve] sync for {name} failed during shutdown: {e}");
+            }
+        }
+    }
+
     Ok(())
 }
 
