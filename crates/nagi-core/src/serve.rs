@@ -57,6 +57,15 @@ pub enum ServeError {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Builds a notifier from project config, if configured.
+/// Returns `None` if no project dir, no config, or no Slack config.
+fn build_notifier(project_dir: Option<&Path>) -> Option<Arc<dyn Notifier>> {
+    let dir = project_dir?;
+    let config = crate::config::load_config(dir).ok()?;
+    let slack = config.notify.slack?;
+    Some(Arc::new(crate::notify::slack::SlackNotifier::new(slack.channel)) as Arc<dyn Notifier>)
+}
+
 /// Sends a notification asynchronously without blocking the serve loop.
 fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
     let Some(n) = notifier.clone() else {
@@ -285,12 +294,7 @@ pub async fn serve(
     let graph: DependencyGraph =
         serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
 
-    // Load project config and construct notifier if configured.
-    let notifier: Option<Arc<dyn Notifier>> = project_dir.and_then(|dir| {
-        let config = crate::config::load_config(dir).ok()?;
-        let slack = config.notify.slack?;
-        Some(Arc::new(crate::notify::slack::SlackNotifier::new(slack.channel)) as Arc<dyn Notifier>)
-    });
+    let notifier = build_notifier(project_dir);
 
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let inputs = build_controller_inputs(&graph, &asset_map)?;
@@ -441,6 +445,35 @@ mod tests {
         tokio::task::yield_now().await;
 
         assert_eq!(mock.call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn build_notifier_returns_none_when_no_project_dir() {
+        assert!(build_notifier(None).is_none());
+    }
+
+    #[test]
+    fn build_notifier_returns_none_when_no_config() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(build_notifier(Some(dir.path())).is_none());
+    }
+
+    #[test]
+    fn build_notifier_returns_none_when_no_slack_config() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("nagi.yaml"), "backend:\n  type: local\n").unwrap();
+        assert!(build_notifier(Some(dir.path())).is_none());
+    }
+
+    #[test]
+    fn build_notifier_returns_some_when_slack_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("nagi.yaml"),
+            "notify:\n  slack:\n    channel: \"#test\"\n",
+        )
+        .unwrap();
+        assert!(build_notifier(Some(dir.path())).is_some());
     }
 
     #[test]
