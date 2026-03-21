@@ -63,7 +63,7 @@ def _make_sync_command(sync_type: str) -> click.Command:
             proposals = json.loads(
                 propose_sync(target_dir, list(selectors), sync_type, stages, cache_dir)
             )
-        except RuntimeError as e:
+        except (RuntimeError, json.JSONDecodeError) as e:
             click.echo(json.dumps({"error": str(e)}))
             raise SystemExit(1)
 

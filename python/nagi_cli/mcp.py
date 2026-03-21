@@ -124,16 +124,19 @@ def _run_sync(
     cache_dir: str | None,
     force: bool,
 ) -> str:
-    proposals = json.loads(
-        propose_sync(target_dir, selectors or [], sync_type, stages, cache_dir)
-    )
-    results = []
-    for proposal in proposals:
-        result_json = execute_sync_proposal(
-            json.dumps(proposal), sync_type, stages, cache_dir, force
+    try:
+        proposals = json.loads(
+            propose_sync(target_dir, selectors or [], sync_type, stages, cache_dir)
         )
-        results.append(json.loads(result_json))
-    return json.dumps(results)
+        results = []
+        for proposal in proposals:
+            result_json = execute_sync_proposal(
+                json.dumps(proposal), sync_type, stages, cache_dir, force
+            )
+            results.append(json.loads(result_json))
+        return json.dumps(results)
+    except (RuntimeError, json.JSONDecodeError) as e:
+        return json.dumps({"error": str(e)})
 
 
 def run_stdio(*, allow_sync: bool = False) -> None:

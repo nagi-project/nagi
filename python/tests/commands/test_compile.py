@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -60,6 +61,45 @@ class TestCompileSuccess:
             ],
         )
         assert (tmp_path / "target" / expected_path).exists()
+
+
+class TestCompileYesFlag:
+    def test_yes_skips_confirmation(self, tmp_path: Path) -> None:
+        write_valid_assets(tmp_path / "assets")
+        runner = CliRunner()
+        result = runner.invoke(
+            compile,
+            [
+                "--assets-dir",
+                str(tmp_path / "assets"),
+                "--target-dir",
+                str(tmp_path / "target"),
+                "--yes",
+            ],
+        )
+        assert result.exit_code == 0
+
+    @patch(
+        "nagi_cli.commands.compile.list_dbt_origin_dirs",
+        return_value=["/some/dbt/dir"],
+    )
+    def test_declined_confirmation_aborts(
+        self, mock_dirs: object, tmp_path: Path
+    ) -> None:
+        write_valid_assets(tmp_path / "assets")
+        runner = CliRunner()
+        result = runner.invoke(
+            compile,
+            [
+                "--assets-dir",
+                str(tmp_path / "assets"),
+                "--target-dir",
+                str(tmp_path / "target"),
+            ],
+            input="n\n",
+        )
+        assert result.exit_code == 0
+        assert not (tmp_path / "target" / "graph.json").exists()
 
 
 class TestCompileFailure:

@@ -4,12 +4,32 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from nagi_cli.commands.serve import halt, resume
+from nagi_cli.commands.serve import halt, resume, serve
 
 
 @pytest.fixture()
 def runner() -> CliRunner:
     return CliRunner()
+
+
+class TestServeMain:
+    """Tests for `nagi serve` main command."""
+
+    @patch("nagi_cli.commands.serve._serve")
+    def test_serve_calls_rust_core(
+        self, mock_serve: MagicMock, runner: CliRunner
+    ) -> None:
+        runner.invoke(serve, ["--assets-dir", "a", "--target-dir", "t"])
+        mock_serve.assert_called_once_with("a", "t", [], None, ".")
+
+    @patch("nagi_cli.commands.serve._serve", side_effect=RuntimeError("fail"))
+    def test_serve_error_returns_exit_code_1(
+        self, mock_serve: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(serve, [])
+        assert result.exit_code == 1
+        output = json.loads(result.output)
+        assert "error" in output
 
 
 class TestResumeInteractive:
