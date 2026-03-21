@@ -15,8 +15,10 @@ pub const KIND: &str = "Asset";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSpec {
+    /// Tags for filtering with `--select tag:X`.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// References to upstream Source resources.
     #[serde(default)]
     pub sources: Vec<SourceRef>,
     /// All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.
@@ -25,8 +27,9 @@ pub struct AssetSpec {
     /// Controls automatic sync execution in `nagi serve`. Defaults to `true`.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
+    /// Reference to the Sync resource for convergence operations.
     pub sync: Option<SyncRef>,
-    /// Falls back to `sync` when omitted.
+    /// Reference to the Sync resource for recovery operations. Falls back to `sync` when omitted.
     pub resync: Option<SyncRef>,
 }
 
@@ -36,14 +39,17 @@ fn default_auto_sync() -> bool {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceRef {
+    /// Name of the Source resource to reference.
     #[serde(rename = "ref")]
     pub ref_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncRef {
+    /// Name of the Sync resource to reference.
     #[serde(rename = "ref")]
     pub ref_name: String,
+    /// Template variables passed to the Sync resource for argument interpolation.
     #[serde(default)]
     pub with: HashMap<String, String>,
 }
@@ -59,6 +65,7 @@ pub enum DesiredSetEntry {
 /// A reference to a `kind: DesiredGroup` resource.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DesiredGroupRef {
+    /// Name of the DesiredGroup resource to reference.
     #[serde(rename = "ref")]
     pub ref_name: String,
 }
@@ -71,9 +78,12 @@ pub struct DesiredGroupRef {
 pub enum DesiredCondition {
     /// Can transition to Not Ready as time passes beyond `maxAge`.
     Freshness {
+        /// Unique identifier for this condition within the Asset.
         name: String,
+        /// Maximum acceptable age of the data before the condition becomes Not Ready.
         #[serde(rename = "maxAge")]
         max_age: Duration,
+        /// Polling interval for re-evaluating this condition.
         interval: Duration,
         /// Optional cron expression for additional evaluation at a specific time.
         #[serde(rename = "checkAt")]
@@ -83,18 +93,22 @@ pub enum DesiredCondition {
     },
     /// Query must return a scalar boolean. Ready when the result is true.
     SQL {
+        /// Unique identifier for this condition within the Asset.
         name: String,
+        /// SQL query that must return a scalar boolean.
         query: String,
-        /// Optional polling interval. If omitted, only evaluated via upstream propagation.
+        /// Optional polling interval. If omitted, only evaluated on upstream state change or after sync.
         #[serde(default)]
         interval: Option<Duration>,
     },
     /// Runs an external command. Ready when the process exits with code 0.
     /// `run` is argv: the first element is the program, the rest are arguments.
     Command {
+        /// Unique identifier for this condition within the Asset.
         name: String,
+        /// Command and arguments in argv format.
         run: Vec<String>,
-        /// Optional polling interval. If omitted, only evaluated via upstream propagation.
+        /// Optional polling interval. If omitted, only evaluated on upstream state change or after sync.
         #[serde(default)]
         interval: Option<Duration>,
     },

@@ -7,10 +7,13 @@ use serde::{Deserialize, Serialize};
 /// Each suspended asset gets a JSON file at `{suspended_dir}/{asset_name}.json`.
 /// The serve loop reads these flags to skip sync for suspended assets;
 /// `nagi serve resume` deletes them to re-enable sync.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SuspendedInfo {
+    /// Name of the suspended Asset resource.
     pub asset_name: String,
+    /// Human-readable reason for the suspension.
     pub reason: String,
+    /// RFC 3339 timestamp when the asset was suspended.
     pub suspended_at: String,
     /// The sync execution_id that triggered the suspension, if available.
     #[serde(skip_serializing_if = "Option::is_none")]

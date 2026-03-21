@@ -16,27 +16,35 @@ use crate::log::{LogError, LogStore};
 use crate::storage::local::LocalCache;
 use crate::storage::Cache;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConditionResult {
+    /// Name of the evaluated condition.
     pub condition_name: String,
+    /// Type discriminator of the condition (e.g. `Freshness`, `SQL`, `Command`).
     pub condition_type: String,
+    /// Evaluation outcome for this condition.
     pub status: ConditionStatus,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", tag = "state")]
 pub enum ConditionStatus {
     Ready,
-    NotReady { reason: String },
+    NotReady {
+        /// Human-readable explanation of why the condition is not satisfied.
+        reason: String,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetEvalResult {
+    /// Name of the evaluated Asset resource.
     pub asset_name: String,
     /// true when all conditions are Ready.
     pub ready: bool,
+    /// Per-condition evaluation results.
     pub conditions: Vec<ConditionResult>,
     /// Set when the result was logged via `LogStore`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,7 +158,9 @@ pub(crate) async fn evaluate_asset_no_log(
 /// A single condition from an asset's desiredSets, with its name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DryRunCondition {
+    /// Name of the condition.
     pub name: String,
+    /// Full condition definition.
     #[serde(flatten)]
     pub condition: DesiredCondition,
 }
@@ -158,7 +168,9 @@ pub struct DryRunCondition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DryRunResult {
+    /// Name of the Asset resource.
     pub asset_name: String,
+    /// Conditions that would be evaluated.
     pub conditions: Vec<DryRunCondition>,
 }
 

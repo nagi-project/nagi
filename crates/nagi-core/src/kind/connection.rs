@@ -21,6 +21,7 @@ pub struct ConnectionSpec {
 /// Reference to a profile defined in `~/.dbt/profiles.yml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DbtProfile {
+    /// Profile name as defined in `~/.dbt/profiles.yml`.
     pub profile: String,
     /// If omitted, the default target in profiles.yml is used.
     pub target: Option<String>,

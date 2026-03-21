@@ -6,10 +6,13 @@ use serde::{Deserialize, Serialize};
 use super::{StorageError, SyncLock};
 
 /// Lock metadata written to the lock file.
-#[derive(Debug, Serialize, Deserialize)]
-struct LockInfo {
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LockInfo {
+    /// Process ID of the lock holder.
     pid: u32,
+    /// Unix epoch seconds when the lock was acquired.
     acquired_at_epoch_secs: u64,
+    /// Time-to-live in seconds; the lock expires after this duration.
     ttl_secs: u64,
 }
 

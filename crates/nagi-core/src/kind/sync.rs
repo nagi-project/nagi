@@ -9,15 +9,20 @@ pub const KIND: &str = "Sync";
 /// Reusable across multiple Assets via `ref`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncSpec {
+    /// Optional step executed before the main sync command.
     pub pre: Option<SyncStep>,
+    /// The main convergence step.
     pub run: SyncStep,
+    /// Optional step executed after the main sync command.
     pub post: Option<SyncStep>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncStep {
+    /// Execution type for this step (currently only `Command`).
     #[serde(rename = "type")]
     pub step_type: StepType,
+    /// Command and arguments in argv format.
     pub args: Vec<String>,
 }
 

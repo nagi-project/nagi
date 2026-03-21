@@ -9,23 +9,35 @@ use super::{file, parse_date, sanitize_path_component, LogError, LogStore};
 /// Paths to stdout/stderr log files for a single stage.
 #[derive(Debug, Clone)]
 pub struct SyncLogFilePaths {
+    /// Path to the stdout log file.
     pub stdout: PathBuf,
+    /// Path to the stderr log file.
     pub stderr: PathBuf,
 }
 
 /// A sync log entry as read from SQLite.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncLogEntry {
+    /// Unique identifier for this sync execution.
     pub execution_id: String,
+    /// Pipeline stage (e.g. `pre`, `run`, `post`).
     pub stage: String,
+    /// Name of the Asset that was synced.
     pub asset_name: String,
+    /// Whether this was a `sync` or `resync` operation.
     pub sync_type: String,
+    /// RFC 3339 timestamp when the stage started.
     pub started_at: String,
+    /// RFC 3339 timestamp when the stage finished.
     pub finished_at: String,
+    /// Process exit code of the stage command.
     pub exit_code: i32,
+    /// File path where stdout output is stored.
     pub stdout_path: String,
+    /// File path where stderr output is stored.
     pub stderr_path: String,
+    /// Date partition key (YYYY-MM-DD) derived from `started_at`.
     pub date: String,
 }
 

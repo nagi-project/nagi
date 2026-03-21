@@ -14,8 +14,10 @@ pub enum ConfigError {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NagiConfig {
+    /// State storage backend configuration.
     #[serde(default)]
     pub backend: BackendConfig,
+    /// Notification channel configuration.
     #[serde(default)]
     pub notify: NotifyConfig,
     /// Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown.
@@ -29,6 +31,7 @@ fn default_backend_type() -> String {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct BackendConfig {
+    /// Backend type identifier (e.g. `local`, `gcs`). Defaults to `local`.
     #[serde(default = "default_backend_type")]
     pub r#type: String,
 }
@@ -43,11 +46,13 @@ impl Default for BackendConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, JsonSchema)]
 pub struct NotifyConfig {
+    /// Slack notification settings. When set, notifications are sent to the specified channel.
     pub slack: Option<SlackConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct SlackConfig {
+    /// Slack channel to send notifications to (e.g. `#nagi-alerts`).
     pub channel: String,
 }
 

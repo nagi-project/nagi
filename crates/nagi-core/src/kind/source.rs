@@ -8,6 +8,7 @@ pub const KIND: &str = "Source";
 /// Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceSpec {
+    /// Name of the Connection resource this Source uses.
     pub connection: String,
 }
 
