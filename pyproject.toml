@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.0",
+    "mcp>=1.2.0",
     "pyyaml>=6.0",
 ]
 
@@ -29,7 +30,7 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "ANN"]
 
 [[tool.ty.overrides]]
-include = ["python/nagi_cli/commands/*.py", "python/tests/*.py"]
+include = ["python/nagi_cli/commands/*.py", "python/nagi_cli/mcp.py", "python/tests/*.py", "python/tests/commands/*.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
