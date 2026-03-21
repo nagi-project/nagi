@@ -343,6 +343,26 @@ impl ServeState {
         self.sync_queue.enqueue(asset_name.to_string())
     }
 
+    /// Removes the suspended flag if the asset is Ready and was previously suspended.
+    /// Also resets the guardrail failure counter so sync can resume.
+    fn try_auto_unsuspend(&mut self, asset_name: &str) {
+        let is_suspended = suspended_path(&self.suspended_dir, asset_name)
+            .map(|p| p.exists())
+            .unwrap_or(false);
+        if !is_suspended {
+            return;
+        }
+        match super::suspended::remove_suspended(&self.suspended_dir, asset_name) {
+            Ok(()) => {
+                eprintln!("[serve] asset {asset_name} is Ready, auto-unsuspending");
+                self.guardrail.record_sync_success(asset_name);
+            }
+            Err(e) => {
+                eprintln!("[serve] warning: failed to remove suspended flag for {asset_name}: {e}");
+            }
+        }
+    }
+
     /// Returns the next asset whose sync ref is not currently in use.
     /// Assets sharing the same sync ref are serialized; different refs may
     /// run concurrently.
@@ -389,35 +409,52 @@ impl ServeState {
         success: bool,
         execution_id: Option<&str>,
     ) -> Option<String> {
-        if self.syncing.remove(asset_name) {
-            let ref_key = self.sync_ref_key(asset_name);
-            self.syncing_refs.remove(&ref_key);
-        }
-        let mut suspended_reason = None;
-        if success {
+        self.release_sync_slot(asset_name);
+
+        let suspended_reason = if success {
             self.guardrail.record_sync_success(asset_name);
+            None
         } else {
-            self.guardrail.record_sync_failure(asset_name);
-            if self.guardrail.should_suspend(asset_name) {
-                let reason = format!("{MAX_CONSECUTIVE_FAILURES} consecutive sync failures");
-                let info = SuspendedInfo {
-                    asset_name: asset_name.to_string(),
-                    reason: reason.clone(),
-                    suspended_at: chrono::Utc::now().to_rfc3339(),
-                    execution_id: execution_id.map(|s| s.to_string()),
-                };
-                if let Err(e) = write_suspended(&self.suspended_dir, &info) {
-                    eprintln!(
-                        "[serve] warning: failed to write suspended flag for {asset_name}: {e}"
-                    );
-                }
-                suspended_reason = Some(reason);
-            }
-        }
+            self.handle_sync_failure(asset_name, execution_id)
+        };
+
         // Re-evaluate after sync to check convergence (and detect degradation).
         self.pending_sync_reeval.insert(asset_name.to_string());
         self.work_queue.enqueue(asset_name.to_string());
         suspended_reason
+    }
+
+    fn release_sync_slot(&mut self, asset_name: &str) {
+        if self.syncing.remove(asset_name) {
+            let ref_key = self.sync_ref_key(asset_name);
+            self.syncing_refs.remove(&ref_key);
+        }
+    }
+
+    fn handle_sync_failure(
+        &mut self,
+        asset_name: &str,
+        execution_id: Option<&str>,
+    ) -> Option<String> {
+        self.guardrail.record_sync_failure(asset_name);
+        if !self.guardrail.should_suspend(asset_name) {
+            return None;
+        }
+        let reason = format!("{MAX_CONSECUTIVE_FAILURES} consecutive sync failures");
+        self.suspend_asset(asset_name, &reason, execution_id);
+        Some(reason)
+    }
+
+    fn suspend_asset(&self, asset_name: &str, reason: &str, execution_id: Option<&str>) {
+        let info = SuspendedInfo {
+            asset_name: asset_name.to_string(),
+            reason: reason.to_string(),
+            suspended_at: chrono::Utc::now().to_rfc3339(),
+            execution_id: execution_id.map(|s| s.to_string()),
+        };
+        if let Err(e) = write_suspended(&self.suspended_dir, &info) {
+            eprintln!("[serve] warning: failed to write suspended flag for {asset_name}: {e}");
+        }
     }
 
     /// If a Not Ready → Ready transition occurred, enqueues downstream assets
@@ -447,15 +484,7 @@ impl ServeState {
         }
         let reason =
             format!("degradation after sync: ready conditions {prev_count} → {ready_count}");
-        let info = SuspendedInfo {
-            asset_name: asset_name.to_string(),
-            reason: reason.clone(),
-            suspended_at: chrono::Utc::now().to_rfc3339(),
-            execution_id: None,
-        };
-        if let Err(e) = write_suspended(&self.suspended_dir, &info) {
-            eprintln!("[serve] warning: failed to write suspended flag for {asset_name}: {e}");
-        }
+        self.suspend_asset(asset_name, &reason, None);
         Some(reason)
     }
 
@@ -497,8 +526,9 @@ impl ServeState {
         self.last_ready_count
             .insert(asset_name.to_string(), ready_count);
 
-        // Not Ready → request sync (if auto_sync enabled)
-        if !ready {
+        if ready {
+            self.try_auto_unsuspend(asset_name);
+        } else {
             self.request_sync(asset_name);
         }
 
@@ -1194,5 +1224,217 @@ mod tests {
         state.handle_eval_result("a", &same);
 
         assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+    }
+
+    #[test]
+    fn auto_unsuspend_when_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        // Manually suspend the asset.
+        write_suspended(
+            dir.path(),
+            &SuspendedInfo {
+                asset_name: "a".to_string(),
+                reason: "test".to_string(),
+                suspended_at: "2025-01-01T00:00:00Z".to_string(),
+                execution_id: None,
+            },
+        )
+        .unwrap();
+        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+
+        // Evaluate returns Ready.
+        state.in_flight.insert("a".to_string());
+        let result = Ok(AssetEvalResult {
+            asset_name: "a".to_string(),
+            ready: true,
+            conditions: vec![ready_condition("c1")],
+            evaluation_id: None,
+        });
+        state.handle_eval_result("a", &result);
+
+        // Suspended flag should be removed.
+        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+        // Guardrail failure counter should be reset.
+        assert_eq!(state.guardrail.consecutive_failures.get("a").copied(), None);
+    }
+
+    #[test]
+    fn no_unsuspend_when_not_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        write_suspended(
+            dir.path(),
+            &SuspendedInfo {
+                asset_name: "a".to_string(),
+                reason: "test".to_string(),
+                suspended_at: "2025-01-01T00:00:00Z".to_string(),
+                execution_id: None,
+            },
+        )
+        .unwrap();
+
+        state.in_flight.insert("a".to_string());
+        let result = Ok(AssetEvalResult {
+            asset_name: "a".to_string(),
+            ready: false,
+            conditions: vec![not_ready_condition("c1")],
+            evaluation_id: None,
+        });
+        state.handle_eval_result("a", &result);
+
+        // Suspended flag should remain.
+        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+    }
+
+    // ── release_sync_slot tests ─────────────────────────────────────────
+
+    #[test]
+    fn release_sync_slot_clears_syncing_and_ref() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync_ref("a", "dbt-default")]);
+        state.syncing.insert("a".to_string());
+        state.syncing_refs.insert("dbt-default".to_string());
+
+        state.release_sync_slot("a");
+
+        assert!(!state.syncing.contains("a"));
+        assert!(!state.syncing_refs.contains("dbt-default"));
+    }
+
+    #[test]
+    fn release_sync_slot_noop_if_not_syncing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        state.release_sync_slot("a"); // should not panic
+        assert!(!state.syncing.contains("a"));
+    }
+
+    // ── handle_sync_failure tests ───────────────────────────────────────
+
+    #[test]
+    fn handle_sync_failure_returns_none_below_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        let result = state.handle_sync_failure("a", None);
+        assert!(result.is_none());
+        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+    }
+
+    #[test]
+    fn handle_sync_failure_suspends_at_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        for _ in 0..MAX_CONSECUTIVE_FAILURES - 1 {
+            assert!(state.handle_sync_failure("a", None).is_none());
+        }
+        let result = state.handle_sync_failure("a", None);
+        assert!(result.is_some());
+        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+    }
+
+    #[test]
+    fn handle_sync_failure_records_execution_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        for _ in 0..MAX_CONSECUTIVE_FAILURES {
+            state.handle_sync_failure("a", Some("exec-123"));
+        }
+        let info = crate::serve::suspended::list_suspended(dir.path()).unwrap();
+        assert_eq!(info[0].execution_id.as_deref(), Some("exec-123"));
+    }
+
+    // ── suspend_asset tests ─────────────────────────────────────────────
+
+    #[test]
+    fn suspend_asset_writes_flag_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ServeState::new(&[], dir.path().to_path_buf());
+
+        state.suspend_asset("a", "test reason", Some("exec-1"));
+
+        let path = suspended_path(dir.path(), "a").unwrap();
+        assert!(path.exists());
+        let content = std::fs::read_to_string(path).unwrap();
+        let info: SuspendedInfo = serde_json::from_str(&content).unwrap();
+        assert_eq!(info.asset_name, "a");
+        assert_eq!(info.reason, "test reason");
+        assert_eq!(info.execution_id.as_deref(), Some("exec-1"));
+    }
+
+    #[test]
+    fn suspend_asset_without_execution_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ServeState::new(&[], dir.path().to_path_buf());
+
+        state.suspend_asset("a", "test reason", None);
+
+        let info = crate::serve::suspended::list_suspended(dir.path()).unwrap();
+        assert_eq!(info[0].asset_name, "a");
+        assert!(info[0].execution_id.is_none());
+    }
+
+    // ── check_degradation tests ─────────────────────────────────────────
+
+    #[test]
+    fn check_degradation_returns_none_when_improved() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.last_ready_count.insert("a".to_string(), 1);
+
+        assert!(state.check_degradation("a", 2).is_none());
+        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+    }
+
+    #[test]
+    fn check_degradation_returns_none_when_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.last_ready_count.insert("a".to_string(), 2);
+
+        assert!(state.check_degradation("a", 2).is_none());
+    }
+
+    #[test]
+    fn check_degradation_suspends_when_decreased() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.last_ready_count.insert("a".to_string(), 3);
+
+        let reason = state.check_degradation("a", 1);
+        assert!(reason.is_some());
+        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+    }
+
+    #[test]
+    fn check_degradation_returns_none_when_no_previous() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ServeState::new(&[], dir.path().to_path_buf());
+
+        assert!(state.check_degradation("a", 1).is_none());
+    }
+
+    // ── try_auto_unsuspend tests ────────────────────────────────────────
+
+    #[test]
+    fn try_auto_unsuspend_noop_when_not_suspended() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        state.init(&[asset_entry_with_sync("a")]);
+
+        state.try_auto_unsuspend("a"); // should not panic
     }
 }
