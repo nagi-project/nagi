@@ -1,14 +1,15 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
-
-use tokio::time::Instant;
 
 use crate::compile::GraphEdge;
 use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::sync::SyncError;
 
 use super::graph::build_downstream_map;
+use super::guardrail::{GuardrailState, MAX_CONSECUTIVE_FAILURES};
+use super::queue::WorkQueue;
+use super::scheduler::SchedulerState;
 use super::suspended::{suspended_path, write_suspended, SuspendedInfo};
 
 /// Emitted when an asset is suspended, allowing the controller to
@@ -26,85 +27,6 @@ pub type EvalJoinResult =
 pub type SyncJoinResult = Option<
     Result<(String, Result<crate::sync::SyncExecutionResult, SyncError>), tokio::task::JoinError>,
 >;
-
-// ── WorkQueue ────────────────────────────────────────────────────────────────
-
-/// FIFO queue with deduplication. An asset that is already queued will not be
-/// added again until it is dequeued.
-#[derive(Debug, Default)]
-pub struct WorkQueue {
-    queue: VecDeque<String>,
-    pending: HashSet<String>,
-}
-
-impl WorkQueue {
-    pub fn new() -> Self {
-        Self {
-            queue: VecDeque::new(),
-            pending: HashSet::new(),
-        }
-    }
-
-    /// Enqueues an asset. Returns false if already queued.
-    pub fn enqueue(&mut self, name: String) -> bool {
-        if self.pending.contains(&name) {
-            return false;
-        }
-        self.pending.insert(name.clone());
-        self.queue.push_back(name);
-        true
-    }
-
-    pub fn dequeue(&mut self) -> Option<String> {
-        let name = self.queue.pop_front()?;
-        self.pending.remove(&name);
-        Some(name)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
-    }
-}
-
-// ── SchedulerState ───────────────────────────────────────────────────────────
-
-/// Tracks per-asset evaluation intervals and computes the next due time.
-#[derive(Debug, Default)]
-pub struct SchedulerState {
-    pub intervals: HashMap<String, StdDuration>,
-    pub next_eval_at: HashMap<String, Instant>,
-}
-
-impl SchedulerState {
-    pub fn new() -> Self {
-        Self {
-            intervals: HashMap::new(),
-            next_eval_at: HashMap::new(),
-        }
-    }
-
-    pub fn register(&mut self, asset_name: String, interval: StdDuration) {
-        self.next_eval_at
-            .insert(asset_name.clone(), Instant::now() + interval);
-        self.intervals.insert(asset_name, interval);
-    }
-
-    /// Returns the asset due soonest and its scheduled time, or None.
-    pub fn next_due(&self) -> Option<(&str, Instant)> {
-        self.next_eval_at
-            .iter()
-            .min_by_key(|(_, instant)| *instant)
-            .map(|(name, instant)| (name.as_str(), *instant))
-    }
-
-    /// Resets the timer for an asset to `now + interval`.
-    pub fn reschedule(&mut self, asset_name: &str) {
-        if let Some(interval) = self.intervals.get(asset_name) {
-            self.next_eval_at
-                .insert(asset_name.to_string(), Instant::now() + *interval);
-        }
-    }
-}
 
 // ── ReadinessState ───────────────────────────────────────────────────────────
 
@@ -129,73 +51,6 @@ impl ReadinessState {
         let was_ready = self.ready.get(asset_name).copied().unwrap_or(false);
         self.ready.insert(asset_name.to_string(), ready);
         !was_ready && ready
-    }
-}
-
-// ── GuardrailState ───────────────────────────────────────────────────────────
-
-pub const MAX_CONSECUTIVE_FAILURES: u32 = 3;
-const BACKOFF_BASE_SECS: u64 = 30;
-const BACKOFF_MAX_SECS: u64 = 30 * 60; // 30 minutes
-
-/// Tracks consecutive sync failures and backoff timers per asset.
-/// When failures reach `MAX_CONSECUTIVE_FAILURES`, the asset should be
-/// suspended (sync stopped, evaluate continues).
-#[derive(Debug, Default)]
-pub struct GuardrailState {
-    pub consecutive_failures: HashMap<String, u32>,
-    /// Earliest time at which the next sync attempt is allowed.
-    next_sync_at: HashMap<String, Instant>,
-}
-
-impl GuardrailState {
-    pub fn new() -> Self {
-        Self {
-            consecutive_failures: HashMap::new(),
-            next_sync_at: HashMap::new(),
-        }
-    }
-
-    pub fn record_sync_success(&mut self, asset_name: &str) {
-        self.consecutive_failures.remove(asset_name);
-        self.next_sync_at.remove(asset_name);
-    }
-
-    /// Increments the failure counter and sets the next backoff time.
-    /// Returns the new failure count.
-    pub fn record_sync_failure(&mut self, asset_name: &str) -> u32 {
-        let count = self
-            .consecutive_failures
-            .entry(asset_name.to_string())
-            .or_insert(0);
-        *count += 1;
-        let current = *count;
-
-        // Exponential backoff: base * 2^(failures-1), capped at max.
-        let backoff_secs = (BACKOFF_BASE_SECS * 2u64.saturating_pow(current.saturating_sub(1)))
-            .min(BACKOFF_MAX_SECS);
-        self.next_sync_at.insert(
-            asset_name.to_string(),
-            Instant::now() + StdDuration::from_secs(backoff_secs),
-        );
-
-        current
-    }
-
-    pub fn should_suspend(&self, asset_name: &str) -> bool {
-        self.consecutive_failures
-            .get(asset_name)
-            .copied()
-            .unwrap_or(0)
-            >= MAX_CONSECUTIVE_FAILURES
-    }
-
-    /// Returns true if the asset is in a backoff period (too early to retry).
-    pub fn is_backoff_active(&self, asset_name: &str) -> bool {
-        self.next_sync_at
-            .get(asset_name)
-            .map(|t| Instant::now() < *t)
-            .unwrap_or(false)
     }
 }
 
@@ -648,71 +503,6 @@ mod tests {
         })
     }
 
-    // ── WorkQueue tests ─────────────────────────────────────────────────
-
-    #[test]
-    fn work_queue_enqueue_dequeue() {
-        let mut q = WorkQueue::new();
-        assert!(q.is_empty());
-
-        assert!(q.enqueue("a".to_string()));
-        assert!(q.enqueue("b".to_string()));
-        assert!(!q.is_empty());
-
-        assert_eq!(q.dequeue(), Some("a".to_string()));
-        assert_eq!(q.dequeue(), Some("b".to_string()));
-        assert_eq!(q.dequeue(), None);
-        assert!(q.is_empty());
-    }
-
-    #[test]
-    fn work_queue_dedup() {
-        let mut q = WorkQueue::new();
-        assert!(q.enqueue("a".to_string()));
-        assert!(!q.enqueue("a".to_string())); // duplicate rejected
-        assert_eq!(q.dequeue(), Some("a".to_string()));
-
-        // After dequeue, can enqueue again
-        assert!(q.enqueue("a".to_string()));
-        assert_eq!(q.dequeue(), Some("a".to_string()));
-    }
-
-    // ── SchedulerState tests ─────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn scheduler_register_and_next_due() {
-        tokio::time::pause();
-
-        let mut s = SchedulerState::new();
-        assert!(s.next_due().is_none());
-
-        s.register("a".to_string(), StdDuration::from_secs(60));
-        s.register("b".to_string(), StdDuration::from_secs(30));
-
-        // "b" is due sooner (30s vs 60s)
-        let (name, _) = s.next_due().unwrap();
-        assert_eq!(name, "b");
-    }
-
-    #[tokio::test]
-    async fn scheduler_reschedule_resets_timer() {
-        tokio::time::pause();
-
-        let mut s = SchedulerState::new();
-        s.register("a".to_string(), StdDuration::from_secs(60));
-
-        let (_, first_due) = s.next_due().unwrap();
-
-        // Advance time by 60s so "a" is due
-        tokio::time::advance(StdDuration::from_secs(60)).await;
-
-        s.reschedule("a");
-        let (_, second_due) = s.next_due().unwrap();
-
-        // After reschedule, next_due should be ~60s from now (later than first)
-        assert!(second_due > first_due);
-    }
-
     // ── ReadinessState tests ────────────────────────────────────────────
 
     #[test]
@@ -740,70 +530,6 @@ mod tests {
         assert!(r.record("a", true));
         assert!(!r.record("a", false));
         assert!(r.record("a", true));
-    }
-
-    // ── GuardrailState tests ──────────────────────────────────────────
-
-    #[test]
-    fn guardrail_success_resets_counter() {
-        let mut g = GuardrailState::new();
-        g.record_sync_failure("a");
-        g.record_sync_failure("a");
-        assert_eq!(g.consecutive_failures.get("a").copied(), Some(2));
-
-        g.record_sync_success("a");
-        assert_eq!(g.consecutive_failures.get("a"), None);
-        assert!(!g.is_backoff_active("a"));
-    }
-
-    #[test]
-    fn guardrail_suspend_after_max_failures() {
-        let mut g = GuardrailState::new();
-        for _ in 0..MAX_CONSECUTIVE_FAILURES {
-            g.record_sync_failure("a");
-        }
-        assert!(g.should_suspend("a"));
-    }
-
-    #[test]
-    fn guardrail_no_suspend_below_max() {
-        let mut g = GuardrailState::new();
-        for _ in 0..MAX_CONSECUTIVE_FAILURES - 1 {
-            g.record_sync_failure("a");
-        }
-        assert!(!g.should_suspend("a"));
-    }
-
-    #[tokio::test]
-    async fn guardrail_backoff_active_after_failure() {
-        tokio::time::pause();
-        let mut g = GuardrailState::new();
-        g.record_sync_failure("a");
-        assert!(g.is_backoff_active("a"));
-
-        // Advance past first backoff (30s)
-        tokio::time::advance(StdDuration::from_secs(31)).await;
-        assert!(!g.is_backoff_active("a"));
-    }
-
-    #[tokio::test]
-    async fn guardrail_backoff_increases_exponentially() {
-        tokio::time::pause();
-
-        // 1st failure: 30s backoff
-        let mut g = GuardrailState::new();
-        g.record_sync_failure("a");
-        assert!(g.is_backoff_active("a"));
-        tokio::time::advance(StdDuration::from_secs(31)).await;
-        assert!(!g.is_backoff_active("a"));
-
-        // 2nd failure (consecutive): 60s backoff
-        let count = g.record_sync_failure("a");
-        assert_eq!(count, 2);
-        tokio::time::advance(StdDuration::from_secs(59)).await;
-        assert!(g.is_backoff_active("a"));
-        tokio::time::advance(StdDuration::from_secs(2)).await;
-        assert!(!g.is_backoff_active("a"));
     }
 
     // ── ServeState tests ────────────────────────────────────────────────

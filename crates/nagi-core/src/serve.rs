@@ -17,7 +17,10 @@
 //! connected components, and spawns one Controller per component.
 
 mod graph;
+pub mod guardrail;
+pub mod queue;
 mod reconciler;
+pub mod scheduler;
 pub mod state;
 pub mod suspended;
 
