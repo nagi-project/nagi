@@ -238,27 +238,24 @@ def render_schema(schema: dict, table_only: bool = False) -> list[str]:
 
     # Top-level oneOf (e.g., OriginSpec)
     elif "oneOf" in schema:
-        lines.append("## Variants")
-        lines.append("")
+        if not table_only:
+            lines.append("## Attributes")
+            lines.append("")
         lines.extend(render_oneof_variants(schema["oneOf"], definitions))
 
     # Newtype wrapper (e.g., DesiredGroupSpec wrapping a list)
     elif "items" in schema or schema.get("type") == "array":
         items = schema.get("items", {})
         if "oneOf" in items:
-            lines.append("## spec")
-            lines.append("")
-            lines.append("`spec` is a list of conditions.")
-            lines.append("")
+            if not table_only:
+                lines.append("## Attributes")
+                lines.append("")
             lines.extend(render_oneof_variants(items["oneOf"], definitions))
         elif "$ref" in items:
             resolved = resolve_ref(items["$ref"], definitions)
             if "oneOf" in resolved:
-                lines.append("## spec")
-                lines.append("")
-                desc = resolved.get("description", "")
-                if desc:
-                    lines.append(desc)
+                if not table_only:
+                    lines.append("## Attributes")
                     lines.append("")
                 lines.extend(render_oneof_variants(resolved["oneOf"], definitions))
 
