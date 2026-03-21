@@ -38,12 +38,16 @@ pub struct BackendConfig {
     /// Backend type identifier (e.g. `local`, `gcs`). Defaults to `local`.
     #[serde(default = "default_backend_type")]
     pub r#type: String,
+    /// Path prefix for remote storage (e.g. `my-project/nagi`). When set, all
+    /// remote paths are prefixed with this value. Ignored for the local backend.
+    pub prefix: Option<String>,
 }
 
 impl Default for BackendConfig {
     fn default() -> Self {
         Self {
             r#type: default_backend_type(),
+            prefix: None,
         }
     }
 }
@@ -164,6 +168,31 @@ notify:
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.max_controllers, Some(4));
+    }
+
+    #[test]
+    fn default_backend_prefix_is_none() {
+        let config = NagiConfig::default();
+        assert!(config.backend.prefix.is_none());
+    }
+
+    #[test]
+    fn load_backend_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: gcs\n  prefix: my-project/nagi";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.backend.prefix.as_deref(), Some("my-project/nagi"));
+    }
+
+    #[test]
+    fn load_backend_without_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: gcs";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.backend.r#type, "gcs");
+        assert!(config.backend.prefix.is_none());
     }
 
     #[test]
