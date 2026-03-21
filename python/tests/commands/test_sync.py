@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from nagi_cli.commands.sync import resync, sync
 from tests.helper import (
     ASSET_NAME,
-    write_valid_assets,
+    write_valid_resources,
 )
 
 MOCK_PROPOSALS = json.dumps(
@@ -35,13 +35,13 @@ MOCK_RESYNC_PROPOSALS = json.dumps(
 MOCK_EXEC_RESULT = json.dumps({"asset": ASSET_NAME, "success": True})
 
 
-def _compile_assets(tmp_path: Path) -> Path:
+def _compile_resources(tmp_path: Path) -> Path:
     from nagi_cli._nagi_core import compile_assets
 
-    assets_dir = tmp_path / "assets"
+    resources_dir = tmp_path / "resources"
     target_dir = tmp_path / "target"
-    write_valid_assets(assets_dir)
-    compile_assets(str(assets_dir), str(target_dir))
+    write_valid_resources(resources_dir)
+    compile_assets(str(resources_dir), str(target_dir))
     return target_dir
 
 
@@ -60,7 +60,7 @@ class TestSyncDryRun:
         proposals: str,
         expected_sync_type: str,
     ) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with (
@@ -97,7 +97,7 @@ class TestSyncExecution:
         proposals: str,
         expected_sync_type: str,
     ) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with (
@@ -121,7 +121,7 @@ class TestSyncExecution:
         assert args[1] == expected_sync_type
 
     def test_declined_sync_is_skipped(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with (
@@ -175,7 +175,7 @@ class TestSyncOptions:
         expected_selectors: list[str],
         expected_stages: str | None,
     ) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -214,7 +214,7 @@ class TestSyncFailure:
         side_effect: Exception,
         input_text: str | None,
     ) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(mock_target, side_effect=side_effect):
@@ -228,7 +228,7 @@ class TestSyncFailure:
         assert "error" in output
 
     def test_execute_error_returns_exit_code_1(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with (

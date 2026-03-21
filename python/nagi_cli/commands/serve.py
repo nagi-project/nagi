@@ -15,10 +15,10 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
     help="Asset selector expression (dbt-compatible). Can be repeated.",
 )
 @click.option(
-    "--assets-dir",
-    default="assets",
+    "--resources-dir",
+    default="resources",
     show_default=True,
-    help="Directory containing asset YAML files.",
+    help="Directory containing resource YAML files.",
 )
 @click.option(
     "--target-dir",
@@ -41,16 +41,16 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
 def serve(
     ctx: click.Context,
     selectors: tuple[str, ...],
-    assets_dir: str,
+    resources_dir: str,
     target_dir: str,
     cache_dir: str | None,
     project_dir: str,
 ) -> None:
-    """Compile assets and start the reconciliation loop."""
+    """Compile resources and start the reconciliation loop."""
     if ctx.invoked_subcommand is not None:
         return
     try:
-        _serve(assets_dir, target_dir, list(selectors), cache_dir, project_dir)
+        _serve(resources_dir, target_dir, list(selectors), cache_dir, project_dir)
     except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)

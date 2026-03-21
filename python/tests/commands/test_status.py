@@ -8,7 +8,7 @@ from click.testing import CliRunner
 from nagi_cli.commands.status import status
 from tests.helper import (
     ASSET_NAME,
-    write_valid_assets,
+    write_valid_resources,
 )
 
 MOCK_STATUS = json.dumps(
@@ -22,13 +22,13 @@ MOCK_STATUS = json.dumps(
 )
 
 
-def _compile_assets(tmp_path: Path) -> Path:
+def _compile_resources(tmp_path: Path) -> Path:
     from nagi_cli._nagi_core import compile_assets
 
-    assets_dir = tmp_path / "assets"
+    resources_dir = tmp_path / "resources"
     target_dir = tmp_path / "target"
-    write_valid_assets(assets_dir)
-    compile_assets(str(assets_dir), str(target_dir))
+    write_valid_resources(resources_dir)
+    compile_assets(str(resources_dir), str(target_dir))
     return target_dir
 
 
@@ -64,7 +64,7 @@ class TestStatusSuccess:
         expected_selectors: list[str],
         expected_cache_dir: str | None,
     ) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -82,7 +82,7 @@ class TestStatusSuccess:
         assert args[2] == expected_cache_dir
 
     def test_outputs_result_json(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -100,7 +100,7 @@ class TestStatusSuccess:
 
 class TestStatusFailure:
     def test_runtime_error_returns_exit_code_1(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(

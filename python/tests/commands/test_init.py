@@ -49,20 +49,20 @@ SINGLE_MULTI_TARGET_JSON = json.dumps(
 
 
 class TestInitNoDbt:
-    def test_creates_assets_dir_without_dbt(self, tmp_path: Path) -> None:
+    def test_creates_resources_dir_without_dbt(self, tmp_path: Path) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=tmp_path):
             result = runner.invoke(init, input="n\n")
             assert result.exit_code == 0
-            assert Path("assets").is_dir()
+            assert Path("resources").is_dir()
 
     def test_no_connection_or_origin(self, tmp_path: Path) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=tmp_path):
             result = runner.invoke(init, input="n\n")
             assert result.exit_code == 0
-            assert not (Path("assets") / "connection.yaml").exists()
-            assert not (Path("assets") / "origin.yaml").exists()
+            assert not (Path("resources") / "connection.yaml").exists()
+            assert not (Path("resources") / "origin.yaml").exists()
 
 
 class TestInitSingleProfile:
@@ -83,7 +83,7 @@ class TestInitSingleProfile:
         with runner.isolated_filesystem(temp_dir=nagi_dir):
             result = runner.invoke(init, input=f"y\n{dbt_dir}\nn\n")
             assert result.exit_code == 0
-            connection_path = Path("assets") / "connection.yaml"
+            connection_path = Path("resources") / "connection.yaml"
             assert connection_path.exists()
             content = connection_path.read_text()
             assert "kind: Connection" in content
@@ -106,7 +106,7 @@ class TestInitSingleProfile:
         with runner.isolated_filesystem(temp_dir=nagi_dir):
             result = runner.invoke(init, input=f"y\n{dbt_dir}\nn\n")
             assert result.exit_code == 0
-            assert (Path("assets") / "origin.yaml").exists()
+            assert (Path("resources") / "origin.yaml").exists()
 
     @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
@@ -128,7 +128,7 @@ class TestInitSingleProfile:
         with runner.isolated_filesystem(temp_dir=nagi_dir):
             result = runner.invoke(init, input=f"y\n{dbt_dir_a}\ny\n{dbt_dir_b}\nn\n")
             assert result.exit_code == 0
-            content = (Path("assets") / "origin.yaml").read_text()
+            content = (Path("resources") / "origin.yaml").read_text()
             assert content.count("kind: Origin") == 2
 
 
@@ -195,12 +195,12 @@ class TestInitMultipleProfiles:
             )
             assert result.exit_code == 0
 
-            conn_content = (Path("assets") / "connection.yaml").read_text()
+            conn_content = (Path("resources") / "connection.yaml").read_text()
             assert "name: project_a-dev" in conn_content
             assert "name: project_b-staging" in conn_content
             assert conn_content.count("kind: Connection") == 2
 
-            origin_content = (Path("assets") / "origin.yaml").read_text()
+            origin_content = (Path("resources") / "origin.yaml").read_text()
             assert "connection: project_a-dev" in origin_content
             assert "connection: project_b-staging" in origin_content
             assert origin_content.count("kind: Origin") == 2
@@ -229,12 +229,12 @@ class TestInitMultipleProfiles:
             )
             assert result.exit_code == 0
 
-            conn_content = (Path("assets") / "connection.yaml").read_text()
+            conn_content = (Path("resources") / "connection.yaml").read_text()
             assert conn_content.count("kind: Connection") == 2
             assert "name: my_project-dev" in conn_content
             assert "name: my_project-prod" in conn_content
 
-            origin_content = (Path("assets") / "origin.yaml").read_text()
+            origin_content = (Path("resources") / "origin.yaml").read_text()
             assert "connection: my_project-dev" in origin_content
             assert "connection: my_project-prod" in origin_content
 

@@ -60,10 +60,10 @@ SYNC_YAML = (
 )
 
 
-def write_valid_assets(assets_dir: Path) -> None:
-    """Write a minimal valid set of asset YAML files for testing."""
-    assets_dir.mkdir()
-    (assets_dir / "connection.yaml").write_text(CONNECTION_YAML)
-    (assets_dir / "source.yaml").write_text(SOURCE_YAML)
-    (assets_dir / "asset.yaml").write_text(ASSET_YAML)
-    (assets_dir / "sync.yaml").write_text(SYNC_YAML)
+def write_valid_resources(resources_dir: Path) -> None:
+    """Write a minimal valid set of resource YAML files for testing."""
+    resources_dir.mkdir()
+    (resources_dir / "connection.yaml").write_text(CONNECTION_YAML)
+    (resources_dir / "source.yaml").write_text(SOURCE_YAML)
+    (resources_dir / "asset.yaml").write_text(ASSET_YAML)
+    (resources_dir / "sync.yaml").write_text(SYNC_YAML)

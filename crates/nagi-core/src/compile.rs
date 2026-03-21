@@ -86,9 +86,9 @@ pub enum ResolvedConnection {
     },
 }
 
-/// Compiles all YAML resources from `assets_dir` and writes resolved output to `target_dir`.
-pub fn compile(assets_dir: &Path, target_dir: &Path) -> Result<CompileOutput, CompileError> {
-    let resources = load_resources(assets_dir)?;
+/// Compiles all YAML resources from `resources_dir` and writes resolved output to `target_dir`.
+pub fn compile(resources_dir: &Path, target_dir: &Path) -> Result<CompileOutput, CompileError> {
+    let resources = load_resources(resources_dir)?;
 
     let manifests = load_dbt_manifests(&resources)?;
 
@@ -183,8 +183,8 @@ fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOriginConfig> {
 }
 
 /// Returns the list of dbt Origin names and their project directories.
-pub fn list_dbt_origin_dirs(assets_dir: &Path) -> Result<Vec<(String, String)>, CompileError> {
-    let resources = load_resources(assets_dir)?;
+pub fn list_dbt_origin_dirs(resources_dir: &Path) -> Result<Vec<(String, String)>, CompileError> {
+    let resources = load_resources(resources_dir)?;
     Ok(collect_dbt_origin_configs(&resources)
         .into_iter()
         .map(|c| (c.origin_name, c.project_dir))
@@ -1380,8 +1380,8 @@ spec:
     #[test]
     fn load_resources_reads_subdirectories() {
         let tmp = TempDir::new().unwrap();
-        let assets = tmp.path().join("assets");
-        let subdir = assets.join("subdir");
+        let resources_dir = tmp.path().join("resources");
+        let subdir = resources_dir.join("subdir");
         std::fs::create_dir_all(&subdir).unwrap();
 
         write_yaml(
@@ -1399,7 +1399,7 @@ spec:
       query: \"SELECT true\"",
         );
 
-        let resources = load_resources(&assets).unwrap();
+        let resources = load_resources(&resources_dir).unwrap();
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0].metadata().name, "nested-asset");
     }
@@ -1416,11 +1416,11 @@ spec:
     #[test]
     fn load_resources_handles_circular_symlink() {
         let tmp = TempDir::new().unwrap();
-        let assets = tmp.path().join("assets");
-        std::fs::create_dir_all(&assets).unwrap();
+        let resources_dir = tmp.path().join("resources");
+        std::fs::create_dir_all(&resources_dir).unwrap();
 
         write_yaml(
-            &assets,
+            &resources_dir,
             "asset.yaml",
             "\
 apiVersion: nagi.io/v1alpha1
@@ -1433,8 +1433,8 @@ spec:
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&assets, assets.join("loop")).unwrap();
-            let resources = load_resources(&assets).unwrap();
+            std::os::unix::fs::symlink(&resources_dir, resources_dir.join("loop")).unwrap();
+            let resources = load_resources(&resources_dir).unwrap();
             assert_eq!(resources.len(), 1);
             assert_eq!(resources[0].metadata().name, "my-asset");
         }
@@ -1547,17 +1547,17 @@ spec:
     #[test]
     fn compile_with_origin_writes_target() {
         let tmp = TempDir::new().unwrap();
-        let assets_dir = tmp.path().join("assets");
+        let resources_dir = tmp.path().join("resources");
         let target_dir = tmp.path().join("nagi_target");
-        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::create_dir_all(&resources_dir).unwrap();
 
         write_yaml(
-            &assets_dir,
+            &resources_dir,
             "infra.yaml",
             &yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]),
         );
 
-        let resources = load_resources(&assets_dir).unwrap();
+        let resources = load_resources(&resources_dir).unwrap();
         let manifests = manifests_for("my-dbt");
         let resources = expand_origins(resources, &manifests).unwrap();
         let output = resolve(resources).unwrap();

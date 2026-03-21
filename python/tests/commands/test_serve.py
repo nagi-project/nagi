@@ -19,7 +19,7 @@ class TestServeMain:
     def test_serve_calls_rust_core(
         self, mock_serve: MagicMock, runner: CliRunner
     ) -> None:
-        runner.invoke(serve, ["--assets-dir", "a", "--target-dir", "t"])
+        runner.invoke(serve, ["--resources-dir", "a", "--target-dir", "t"])
         mock_serve.assert_called_once_with("a", "t", [], None, ".")
 
     @patch("nagi_cli.commands.serve._serve", side_effect=RuntimeError("fail"))

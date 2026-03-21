@@ -34,9 +34,9 @@ pub enum InitError {
     DbtProjectParse(String),
 }
 
-/// Creates `assets/` directory under `base_dir` if it does not exist.
-pub fn ensure_assets_dir(base_dir: &Path) -> Result<(), InitError> {
-    std::fs::create_dir_all(base_dir.join("assets"))?;
+/// Creates `resources/` directory under `base_dir` if it does not exist.
+pub fn ensure_resources_dir(base_dir: &Path) -> Result<(), InitError> {
+    std::fs::create_dir_all(base_dir.join("resources"))?;
     Ok(())
 }
 
@@ -60,9 +60,9 @@ pub fn ensure_log_store(db_path: &Path, logs_dir: &Path) -> Result<(), InitError
     Ok(())
 }
 
-/// Initialises the workspace: creates `assets/`, config, and log store.
+/// Initialises the workspace: creates `resources/`, config, and log store.
 pub fn init_workspace(base_dir: &Path, db_path: &Path, logs_dir: &Path) -> Result<(), InitError> {
-    ensure_assets_dir(base_dir)?;
+    ensure_resources_dir(base_dir)?;
     ensure_config()?;
     ensure_log_store(db_path, logs_dir)?;
     Ok(())
@@ -148,9 +148,9 @@ pub fn write_init_dbt_files(
     base_dir: &Path,
     entries: &[DbtProjectEntry],
 ) -> Result<InitDbtFilesResult, InitError> {
-    let assets_dir = base_dir.join("assets");
-    let connection_path = assets_dir.join("connection.yaml");
-    let origin_path = assets_dir.join("origin.yaml");
+    let resources_dir = base_dir.join("resources");
+    let connection_path = resources_dir.join("connection.yaml");
+    let origin_path = resources_dir.join("origin.yaml");
 
     if origin_path.exists() {
         return Ok(InitDbtFilesResult {
@@ -252,10 +252,10 @@ mod tests {
     }
 
     #[test]
-    fn ensure_assets_dir_creates_directory() {
+    fn ensure_resources_dir_creates_directory() {
         let dir = tempfile::tempdir().unwrap();
-        ensure_assets_dir(dir.path()).unwrap();
-        assert!(dir.path().join("assets").exists());
+        ensure_resources_dir(dir.path()).unwrap();
+        assert!(dir.path().join("resources").exists());
     }
 
     #[test]
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn write_init_dbt_files_creates_both_files() {
         let dir = tempfile::tempdir().unwrap();
-        ensure_assets_dir(dir.path()).unwrap();
+        ensure_resources_dir(dir.path()).unwrap();
 
         let dbt_dir = tempfile::tempdir().unwrap();
         std::fs::write(dbt_dir.path().join("dbt_project.yml"), "name: my-project\n").unwrap();
@@ -285,18 +285,18 @@ mod tests {
         assert!(result.connection_path.is_some());
         assert!(result.origin_path.is_some());
 
-        let conn = std::fs::read_to_string(dir.path().join("assets/connection.yaml")).unwrap();
+        let conn = std::fs::read_to_string(dir.path().join("resources/connection.yaml")).unwrap();
         assert!(conn.contains("name: prof-dev"));
 
-        let origin = std::fs::read_to_string(dir.path().join("assets/origin.yaml")).unwrap();
+        let origin = std::fs::read_to_string(dir.path().join("resources/origin.yaml")).unwrap();
         assert!(origin.contains("name: my-project"));
     }
 
     #[test]
     fn write_init_dbt_files_skips_if_origin_exists() {
         let dir = tempfile::tempdir().unwrap();
-        ensure_assets_dir(dir.path()).unwrap();
-        std::fs::write(dir.path().join("assets/origin.yaml"), "existing").unwrap();
+        ensure_resources_dir(dir.path()).unwrap();
+        std::fs::write(dir.path().join("resources/origin.yaml"), "existing").unwrap();
 
         let result = write_init_dbt_files(dir.path(), &[]).unwrap();
         assert!(result.connection_path.is_none());
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn write_init_dbt_files_deduplicates_connections() {
         let dir = tempfile::tempdir().unwrap();
-        ensure_assets_dir(dir.path()).unwrap();
+        ensure_resources_dir(dir.path()).unwrap();
 
         let dbt_dir1 = tempfile::tempdir().unwrap();
         std::fs::write(dbt_dir1.path().join("dbt_project.yml"), "name: proj1\n").unwrap();
@@ -329,11 +329,11 @@ mod tests {
         let result = write_init_dbt_files(dir.path(), &entries).unwrap();
         assert!(result.connection_path.is_some());
 
-        let conn = std::fs::read_to_string(dir.path().join("assets/connection.yaml")).unwrap();
+        let conn = std::fs::read_to_string(dir.path().join("resources/connection.yaml")).unwrap();
         // Should contain only one connection definition
         assert_eq!(conn.matches("kind: Connection").count(), 1);
 
-        let origin = std::fs::read_to_string(dir.path().join("assets/origin.yaml")).unwrap();
+        let origin = std::fs::read_to_string(dir.path().join("resources/origin.yaml")).unwrap();
         assert_eq!(origin.matches("kind: Origin").count(), 2);
     }
 
@@ -343,7 +343,7 @@ mod tests {
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
         init_workspace(dir.path(), &db_path, &logs_dir).unwrap();
-        assert!(dir.path().join("assets").exists());
+        assert!(dir.path().join("resources").exists());
         assert!(db_path.exists());
     }
 }

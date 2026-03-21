@@ -10,7 +10,7 @@ from tests.helper import (
     FRESHNESS_COLUMN,
     FRESHNESS_INTERVAL,
     FRESHNESS_MAX_AGE,
-    write_valid_assets,
+    write_valid_resources,
 )
 
 MOCK_RESULTS = json.dumps(
@@ -24,20 +24,20 @@ MOCK_RESULTS = json.dumps(
 )
 
 
-def _compile_assets(tmp_path: Path) -> Path:
-    """Compile valid assets into target/ and return the target dir."""
+def _compile_resources(tmp_path: Path) -> Path:
+    """Compile valid resources into target/ and return the target dir."""
     from nagi_cli._nagi_core import compile_assets
 
-    assets_dir = tmp_path / "assets"
+    resources_dir = tmp_path / "resources"
     target_dir = tmp_path / "target"
-    write_valid_assets(assets_dir)
-    compile_assets(str(assets_dir), str(target_dir))
+    write_valid_resources(resources_dir)
+    compile_assets(str(resources_dir), str(target_dir))
     return target_dir
 
 
 class TestEvaluateSuccess:
     def test_exit_code_is_zero(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -54,7 +54,7 @@ class TestEvaluateSuccess:
         assert result.exit_code == 0
 
     def test_outputs_result_json(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -73,7 +73,7 @@ class TestEvaluateSuccess:
         assert output[0]["ready"] is True
 
     def test_select_filters_assets(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -97,7 +97,7 @@ class TestEvaluateSuccess:
 
 class TestEvaluateDryRun:
     def test_dry_run_passes_flag(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(
@@ -117,7 +117,7 @@ class TestEvaluateDryRun:
         assert args[0][3] is True  # dry_run=True
 
     def test_dry_run_outputs_asset_list(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -158,7 +158,7 @@ class TestEvaluateFailure:
         assert "error" in output
 
     def test_runtime_error_returns_exit_code_1(self, tmp_path: Path) -> None:
-        target_dir = _compile_assets(tmp_path)
+        target_dir = _compile_resources(tmp_path)
 
         runner = CliRunner()
         with patch(

@@ -6,18 +6,18 @@ import pytest
 from click.testing import CliRunner
 
 from nagi_cli.commands.compile import compile
-from tests.helper import ASSET_NAME, SYNC_YAML, write_valid_assets
+from tests.helper import ASSET_NAME, SYNC_YAML, write_valid_resources
 
 
 class TestCompileSuccess:
     def test_exit_code_is_zero(self, tmp_path: Path) -> None:
-        write_valid_assets(tmp_path / "assets")
+        write_valid_resources(tmp_path / "resources")
         runner = CliRunner()
         result = runner.invoke(
             compile,
             [
-                "--assets-dir",
-                str(tmp_path / "assets"),
+                "--resources-dir",
+                str(tmp_path / "resources"),
                 "--target-dir",
                 str(tmp_path / "target"),
             ],
@@ -25,13 +25,13 @@ class TestCompileSuccess:
         assert result.exit_code == 0
 
     def test_output_contains_graph_summary(self, tmp_path: Path) -> None:
-        write_valid_assets(tmp_path / "assets")
+        write_valid_resources(tmp_path / "resources")
         runner = CliRunner()
         result = runner.invoke(
             compile,
             [
-                "--assets-dir",
-                str(tmp_path / "assets"),
+                "--resources-dir",
+                str(tmp_path / "resources"),
                 "--target-dir",
                 str(tmp_path / "target"),
             ],
@@ -49,13 +49,13 @@ class TestCompileSuccess:
         ],
     )
     def test_creates_target_files(self, tmp_path: Path, expected_path: str) -> None:
-        write_valid_assets(tmp_path / "assets")
+        write_valid_resources(tmp_path / "resources")
         runner = CliRunner()
         runner.invoke(
             compile,
             [
-                "--assets-dir",
-                str(tmp_path / "assets"),
+                "--resources-dir",
+                str(tmp_path / "resources"),
                 "--target-dir",
                 str(tmp_path / "target"),
             ],
@@ -65,13 +65,13 @@ class TestCompileSuccess:
 
 class TestCompileYesFlag:
     def test_yes_skips_confirmation(self, tmp_path: Path) -> None:
-        write_valid_assets(tmp_path / "assets")
+        write_valid_resources(tmp_path / "resources")
         runner = CliRunner()
         result = runner.invoke(
             compile,
             [
-                "--assets-dir",
-                str(tmp_path / "assets"),
+                "--resources-dir",
+                str(tmp_path / "resources"),
                 "--target-dir",
                 str(tmp_path / "target"),
                 "--yes",
@@ -86,13 +86,13 @@ class TestCompileYesFlag:
     def test_declined_confirmation_aborts(
         self, mock_dirs: object, tmp_path: Path
     ) -> None:
-        write_valid_assets(tmp_path / "assets")
+        write_valid_resources(tmp_path / "resources")
         runner = CliRunner()
         result = runner.invoke(
             compile,
             [
-                "--assets-dir",
-                str(tmp_path / "assets"),
+                "--resources-dir",
+                str(tmp_path / "resources"),
                 "--target-dir",
                 str(tmp_path / "target"),
             ],
@@ -103,12 +103,12 @@ class TestCompileYesFlag:
 
 
 class TestCompileFailure:
-    def test_missing_assets_dir(self, tmp_path: Path) -> None:
+    def test_missing_resources_dir(self, tmp_path: Path) -> None:
         runner = CliRunner()
         result = runner.invoke(
             compile,
             [
-                "--assets-dir",
+                "--resources-dir",
                 str(tmp_path / "nonexistent"),
                 "--target-dir",
                 str(tmp_path / "target"),
@@ -119,9 +119,9 @@ class TestCompileFailure:
         assert "error" in output
 
     def test_unresolved_source_ref(self, tmp_path: Path) -> None:
-        assets_dir = tmp_path / "assets"
-        assets_dir.mkdir()
-        (assets_dir / "asset.yaml").write_text(
+        resources_dir = tmp_path / "resources"
+        resources_dir.mkdir()
+        (resources_dir / "asset.yaml").write_text(
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Asset\n"
             "metadata:\n"
@@ -132,12 +132,17 @@ class TestCompileFailure:
             "  sync:\n"
             "    ref: dbt-sync\n"
         )
-        (assets_dir / "sync.yaml").write_text(SYNC_YAML)
+        (resources_dir / "sync.yaml").write_text(SYNC_YAML)
 
         runner = CliRunner()
         result = runner.invoke(
             compile,
-            ["--assets-dir", str(assets_dir), "--target-dir", str(tmp_path / "target")],
+            [
+                "--resources-dir",
+                str(resources_dir),
+                "--target-dir",
+                str(tmp_path / "target"),
+            ],
         )
         assert result.exit_code == 1
         output = json.loads(result.output)

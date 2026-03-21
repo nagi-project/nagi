@@ -56,13 +56,13 @@ pub fn evaluate_all(
     .map_err(to_py_err)
 }
 
-/// Compiles assets and returns a summary JSON.
+/// Compiles resources and returns a summary JSON.
 /// Returns: `{"nodes": N, "edges": N, "target": "..."}`
 #[pyfunction]
-pub fn compile_assets(assets_dir: &str, target_dir: &str) -> PyResult<String> {
-    let assets_path = std::path::Path::new(assets_dir);
+pub fn compile_assets(resources_dir: &str, target_dir: &str) -> PyResult<String> {
+    let resources_path = std::path::Path::new(resources_dir);
     let target_path = std::path::Path::new(target_dir);
-    let output = crate::compile::compile(assets_path, target_path).map_err(to_py_err)?;
+    let output = crate::compile::compile(resources_path, target_path).map_err(to_py_err)?;
     let summary = serde_json::json!({
         "nodes": output.graph.nodes.len(),
         "edges": output.graph.edges.len(),
@@ -71,12 +71,12 @@ pub fn compile_assets(assets_dir: &str, target_dir: &str) -> PyResult<String> {
     serde_json::to_string(&summary).map_err(to_py_err)
 }
 
-/// Lists dbt Origin project directories found in `assets_dir`.
+/// Lists dbt Origin project directories found in `resources_dir`.
 /// Returns a comma-separated string of directories, or empty string if none.
 #[pyfunction]
-pub fn list_dbt_origin_dirs(assets_dir: &str) -> PyResult<String> {
-    let assets_path = std::path::Path::new(assets_dir);
-    let origins = crate::compile::list_dbt_origin_dirs(assets_path).map_err(to_py_err)?;
+pub fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
+    let resources_path = std::path::Path::new(resources_dir);
+    let origins = crate::compile::list_dbt_origin_dirs(resources_path).map_err(to_py_err)?;
     let dirs: Vec<&str> = origins.iter().map(|(_, dir)| dir.as_str()).collect();
     Ok(dirs.join(", "))
 }
@@ -218,12 +218,12 @@ pub fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> 
 
 // ── Serve ───────────────────────────────────────────────────────────────────
 
-/// Compiles assets and starts the reconciliation loop.
+/// Compiles resources and starts the reconciliation loop.
 /// Blocks until Ctrl-C is received.
 #[pyfunction]
-#[pyo3(signature = (assets_dir, target_dir, selectors, cache_dir=None, project_dir=None))]
+#[pyo3(signature = (resources_dir, target_dir, selectors, cache_dir=None, project_dir=None))]
 pub fn serve(
-    assets_dir: &str,
+    resources_dir: &str,
     target_dir: &str,
     selectors: Vec<String>,
     cache_dir: Option<&str>,
@@ -232,7 +232,7 @@ pub fn serve(
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::serve::serve(
-        std::path::Path::new(assets_dir),
+        std::path::Path::new(resources_dir),
         std::path::Path::new(target_dir),
         &selector_refs,
         cache_dir.map(std::path::Path::new),
