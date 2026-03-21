@@ -10,14 +10,15 @@ import json
 import sys
 from pathlib import Path
 
-# Map schema file names to output doc file names and page titles
+# Map schema file names to (relative doc path from docs_root, page title)
 SCHEMA_MAP = {
-    "AssetSpec": ("asset.md", "kind: Asset"),
-    "SourceSpec": ("source.md", "kind: Source"),
-    "ConnectionSpec": ("connection.md", "kind: Connection"),
-    "SyncSpec": ("sync.md", "kind: Sync"),
-    "DesiredGroupSpec": ("desired-group.md", "kind: DesiredGroup"),
-    "OriginSpec": ("origin.md", "kind: Origin"),
+    "AssetSpec": ("configurations/resources/asset.md", "kind: Asset"),
+    "SourceSpec": ("configurations/resources/source.md", "kind: Source"),
+    "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection"),
+    "SyncSpec": ("configurations/resources/sync.md", "kind: Sync"),
+    "DesiredGroupSpec": ("configurations/resources/desired-group.md", "kind: DesiredGroup"),
+    "OriginSpec": ("configurations/resources/origin.md", "kind: Origin"),
+    "NagiConfig": ("configurations/project.md", "nagi.yaml"),
 }
 
 
@@ -99,16 +100,40 @@ def render_properties_table(
     lines = []
     lines.append("| Attribute | Type | Required | Default | Description |")
     lines.append("| --- | --- | --- | --- | --- |")
-    # Sort: required fields first, then optional
-    sorted_names = sorted(properties.keys(), key=lambda n: (n not in required, n))
-    for name in sorted_names:
-        prop = properties[name]
-        full_name = f"{prefix}{name}" if prefix else name
-        type_str = schema_to_type(prop, definitions)
-        req = is_required(name, required)
-        default = get_default(prop) or "-"
-        desc = prop.get("description", "") or "-"
-        lines.append(f"| `{full_name}` | {type_str} | {req} | {default} | {desc} |")
+
+    def _add_props(props: dict, req_list: list[str], pfx: str) -> None:
+        sorted_names = sorted(props.keys(), key=lambda n: (n not in req_list, n))
+        for name in sorted_names:
+            prop = props[name]
+            full_name = f"{pfx}{name}" if pfx else name
+
+            # If the property is a $ref to an object, flatten its fields
+            ref_to_resolve = None
+            if "$ref" in prop:
+                ref_to_resolve = prop["$ref"]
+            elif "anyOf" in prop:
+                # Option<T> generates anyOf with a $ref and null
+                for v in prop["anyOf"]:
+                    if "$ref" in v:
+                        ref_to_resolve = v["$ref"]
+                        break
+
+            if ref_to_resolve:
+                resolved = resolve_ref(ref_to_resolve, definitions)
+                if resolved.get("type") == "object" and "properties" in resolved:
+                    nested_req = resolved.get("required", [])
+                    _add_props(
+                        resolved["properties"], nested_req, f"{full_name}."
+                    )
+                    continue
+
+            type_str = schema_to_type(prop, definitions)
+            req = is_required(name, req_list)
+            default = get_default(prop) or "-"
+            desc = prop.get("description", "") or "-"
+            lines.append(f"| `{full_name}` | {type_str} | {req} | {default} | {desc} |")
+
+    _add_props(properties, required, prefix)
     return lines
 
 
@@ -229,13 +254,13 @@ def render_schema(schema: dict) -> list[str]:
 
 def main() -> None:
     if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <schemas_dir> <docs_output_dir>")
+        print(f"Usage: {sys.argv[0]} <schemas_dir> <docs_src_dir>")
         sys.exit(1)
 
     schemas_dir = Path(sys.argv[1])
-    docs_dir = Path(sys.argv[2])
+    docs_src_dir = Path(sys.argv[2])
 
-    for schema_name, (doc_file, title) in SCHEMA_MAP.items():
+    for schema_name, (doc_path, title) in SCHEMA_MAP.items():
         schema_path = schemas_dir / f"{schema_name}.json"
         if not schema_path.exists():
             print(f"warning: {schema_path} not found, skipping")
@@ -244,26 +269,38 @@ def main() -> None:
         schema = json.loads(schema_path.read_text())
         lines = render_schema(schema)
 
-        output_path = docs_dir / doc_file
+        output_path = docs_src_dir / doc_path
         # Read existing file to preserve hand-written content before "## Attributes"
         existing = ""
         if output_path.exists():
             existing = output_path.read_text()
 
-        # Find the marker where auto-generated content starts
-        marker = "<!-- schema:auto-generated -->"
+        # Replace content between start and end markers
+        start_marker = "<!-- schema:auto-generated:start -->"
+        end_marker = "<!-- schema:auto-generated:end -->"
         # Remove trailing empty lines from generated content
         while lines and lines[-1] == "":
             lines.pop()
         generated = "\n".join(lines) + "\n"
 
-        if marker in existing:
-            # Keep everything before the marker, replace everything after
-            before = existing[: existing.index(marker)]
-            content = before + marker + "\n\n" + generated
+        if start_marker in existing and end_marker in existing:
+            before = existing[: existing.index(start_marker)]
+            after = existing[existing.index(end_marker) + len(end_marker) :]
+            content = before + start_marker + "\n\n" + generated + "\n" + end_marker + after
+        elif start_marker in existing:
+            before = existing[: existing.index(start_marker)]
+            content = before + start_marker + "\n\n" + generated + "\n" + end_marker + "\n"
         else:
-            # Append marker and generated content to existing file
-            content = existing.rstrip() + "\n\n" + marker + "\n\n" + generated
+            content = (
+                existing.rstrip()
+                + "\n\n"
+                + start_marker
+                + "\n\n"
+                + generated
+                + "\n"
+                + end_marker
+                + "\n"
+            )
 
         output_path.write_text(content)
         print(f"  wrote {output_path}")

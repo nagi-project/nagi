@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 #[derive(Debug, thiserror::Error)]
@@ -10,7 +11,7 @@ pub enum ConfigError {
     Yaml(#[from] serde_yaml::Error),
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NagiConfig {
     #[serde(default)]
@@ -26,7 +27,7 @@ fn default_backend_type() -> String {
     "local".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct BackendConfig {
     #[serde(default = "default_backend_type")]
     pub r#type: String,
@@ -40,12 +41,12 @@ impl Default for BackendConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, JsonSchema)]
 pub struct NotifyConfig {
     pub slack: Option<SlackConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct SlackConfig {
     pub channel: String,
 }

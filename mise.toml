@@ -47,7 +47,7 @@ run = "cargo audit"
 description = "Generate JSON Schema and update resource docs"
 run = """
 cargo run -p nagi-schema-gen
-uv run python scripts/gen_schema_docs.py docs/schemas docs/src/configurations/resources
+uv run python scripts/gen_schema_docs.py docs/schemas docs/src
 """
 
 [tasks."docs:build"]

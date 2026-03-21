@@ -1,5 +1,6 @@
 use schemars::schema_for;
 
+use crate::config::NagiConfig;
 use crate::kind::{
     AssetSpec, ConnectionSpec, DesiredGroupSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
 };
@@ -36,6 +37,10 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
         (
             "OriginSpec",
             serde_json::to_value(schema_for!(OriginSpec)).unwrap(),
+        ),
+        (
+            "NagiConfig",
+            serde_json::to_value(schema_for!(NagiConfig)).unwrap(),
         ),
     ];
 
@@ -77,6 +82,7 @@ mod tests {
             "SyncSpec.json",
             "DesiredGroupSpec.json",
             "OriginSpec.json",
+            "NagiConfig.json",
         ];
         for name in expected {
             let path = dir.path().join(name);

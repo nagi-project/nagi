@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfig": {
+      "properties": {
+        "type": {
+          "default": "local",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NotifyConfig": {
+      "properties": {
+        "slack": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SlackConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SlackConfig": {
+      "properties": {
+        "channel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "backend": {
+      "$ref": "#/definitions/BackendConfig"
+    },
+    "notify": {
+      "$ref": "#/definitions/NotifyConfig"
+    },
+    "terminationGracePeriodSeconds": {
+      "description": "Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown. When omitted, waits indefinitely.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "NagiConfig",
+  "type": "object"
+}
