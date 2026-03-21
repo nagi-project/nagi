@@ -411,6 +411,17 @@ pub async fn serve(
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let inputs = build_controller_inputs(&graph, &asset_map)?;
 
+    if let Some(max) = config.max_controllers {
+        if inputs.len() > max {
+            return Err(ServeError::Parse(format!(
+                "dependency graph has {} connected components, but maxControllers is set to {}. \
+                 Reduce the number of independent asset groups or increase maxControllers in nagi.yaml.",
+                inputs.len(),
+                max
+            )));
+        }
+    }
+
     let (shutdown_tx, _) = watch::channel(false);
 
     let mut handles = Vec::new();

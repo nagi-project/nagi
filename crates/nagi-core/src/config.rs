@@ -23,6 +23,10 @@ pub struct NagiConfig {
     /// Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown.
     /// When omitted, waits indefinitely.
     pub termination_grace_period_seconds: Option<u64>,
+    /// Maximum number of Controllers to run in parallel during `nagi serve`.
+    /// When the number of connected components exceeds this limit, serve exits with an error.
+    /// When omitted, one Controller is created per connected component.
+    pub max_controllers: Option<usize>,
 }
 
 fn default_backend_type() -> String {
@@ -145,6 +149,21 @@ notify:
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(config.termination_grace_period_seconds.is_none());
+    }
+
+    #[test]
+    fn default_max_controllers_is_none() {
+        let config = NagiConfig::default();
+        assert!(config.max_controllers.is_none());
+    }
+
+    #[test]
+    fn load_max_controllers() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "maxControllers: 4";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.max_controllers, Some(4));
     }
 
     #[test]
