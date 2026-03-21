@@ -11,11 +11,15 @@ pub enum ConfigError {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct NagiConfig {
     #[serde(default)]
     pub backend: BackendConfig,
     #[serde(default)]
     pub notify: NotifyConfig,
+    /// Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown.
+    /// When omitted, waits indefinitely.
+    pub termination_grace_period_seconds: Option<u64>,
 }
 
 fn default_backend_type() -> String {
@@ -111,6 +115,30 @@ notify:
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.backend.r#type, "local");
         assert!(config.notify.slack.is_some());
+    }
+
+    #[test]
+    fn default_termination_grace_period_is_none() {
+        let config = NagiConfig::default();
+        assert!(config.termination_grace_period_seconds.is_none());
+    }
+
+    #[test]
+    fn load_termination_grace_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "terminationGracePeriodSeconds: 300";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.termination_grace_period_seconds, Some(300));
+    }
+
+    #[test]
+    fn load_without_termination_grace_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: local";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.termination_grace_period_seconds.is_none());
     }
 
     #[test]

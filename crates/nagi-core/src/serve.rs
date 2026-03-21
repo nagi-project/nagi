@@ -88,6 +88,32 @@ async fn drain_sync_tasks(
     }
 }
 
+/// Waits for all controller tasks to finish, optionally with a timeout.
+async fn await_controller_shutdown(
+    handles: Vec<tokio::task::JoinHandle<Result<(), ServeError>>>,
+    grace_period: Option<StdDuration>,
+) {
+    for h in handles {
+        let result = match grace_period {
+            Some(timeout) => match tokio::time::timeout(timeout, h).await {
+                Ok(r) => Some(r),
+                Err(_) => {
+                    eprintln!("[serve] controller did not shut down within {timeout:?}, aborting");
+                    None
+                }
+            },
+            None => Some(h.await),
+        };
+        if let Some(r) = result {
+            match r {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => eprintln!("[serve] controller error: {e}"),
+                Err(e) => eprintln!("[serve] controller task panicked: {e}"),
+            }
+        }
+    }
+}
+
 /// Sends a notification asynchronously without blocking the serve loop.
 fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
     let Some(n) = notifier.clone() else {
@@ -374,6 +400,9 @@ pub async fn serve(
     let graph: DependencyGraph =
         serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
 
+    let config = crate::config::load_config(project_dir.unwrap_or(Path::new(".")))
+        .map_err(|e| ServeError::Parse(format!("failed to load config: {e}")))?;
+
     let notifier = build_notifier(project_dir);
 
     let db_path = crate::init::default_db_path();
@@ -412,17 +441,11 @@ pub async fn serve(
     eprintln!("[serve] received Ctrl-C, shutting down...");
     shutdown_tx.send(true).ok();
 
-    let shutdown_timeout = StdDuration::from_secs(30);
-    for h in handles {
-        match tokio::time::timeout(shutdown_timeout, h).await {
-            Ok(Ok(Ok(()))) => {}
-            Ok(Ok(Err(e))) => eprintln!("[serve] controller error: {e}"),
-            Ok(Err(e)) => eprintln!("[serve] controller task panicked: {e}"),
-            Err(_) => eprintln!(
-                "[serve] controller did not shut down within {shutdown_timeout:?}, aborting"
-            ),
-        }
-    }
+    let grace_period = config
+        .termination_grace_period_seconds
+        .map(StdDuration::from_secs);
+
+    await_controller_shutdown(handles, grace_period).await;
 
     Ok(())
 }
@@ -770,5 +793,66 @@ mod tests {
 
         // Verify log files were written.
         assert!(logs_dir.join("a").exists());
+    }
+
+    // ── await_controller_shutdown tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn shutdown_no_timeout_waits_for_completion() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_clone = completed.clone();
+
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            completed_clone.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+
+        await_controller_shutdown(vec![handle], None).await;
+        assert!(completed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_sufficient_timeout_waits_for_completion() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_clone = completed.clone();
+
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            completed_clone.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let timeout = Some(StdDuration::from_secs(5));
+        await_controller_shutdown(vec![handle], timeout).await;
+        assert!(completed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_expired_timeout_aborts() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_clone = completed.clone();
+
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            completed_clone.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let timeout = Some(StdDuration::from_millis(10));
+        await_controller_shutdown(vec![handle], timeout).await;
+        assert!(!completed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn shutdown_empty_handles() {
+        await_controller_shutdown(vec![], None).await;
+        await_controller_shutdown(vec![], Some(StdDuration::from_secs(1))).await;
     }
 }
