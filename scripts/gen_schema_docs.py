@@ -10,15 +10,20 @@ import json
 import sys
 from pathlib import Path
 
-# Map schema file names to (relative doc path from docs_root, page title)
+# Map schema file names to (relative doc path from docs_root, page title, table_only)
+# table_only=True suppresses ## Attributes heading (for embedding in existing sections)
 SCHEMA_MAP = {
-    "AssetSpec": ("configurations/resources/asset.md", "kind: Asset"),
-    "SourceSpec": ("configurations/resources/source.md", "kind: Source"),
-    "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection"),
-    "SyncSpec": ("configurations/resources/sync.md", "kind: Sync"),
-    "DesiredGroupSpec": ("configurations/resources/desired-group.md", "kind: DesiredGroup"),
-    "OriginSpec": ("configurations/resources/origin.md", "kind: Origin"),
-    "NagiConfig": ("configurations/project.md", "nagi.yaml"),
+    "AssetSpec": ("configurations/resources/asset.md", "kind: Asset", False),
+    "SourceSpec": ("configurations/resources/source.md", "kind: Source", False),
+    "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection", False),
+    "SyncSpec": ("configurations/resources/sync.md", "kind: Sync", False),
+    "DesiredGroupSpec": ("configurations/resources/desired-group.md", "kind: DesiredGroup", False),
+    "OriginSpec": ("configurations/resources/origin.md", "kind: Origin", False),
+    "NagiConfig": ("configurations/project.md", "nagi.yaml", False),
+    "AssetEvalResult": ("architecture/storage.md", "Cache", True),
+    "LockInfo": ("architecture/storage.md", "Locks", True),
+    "SuspendedInfo": ("architecture/storage.md", "Suspended", True),
+    "SyncLogEntry": ("architecture/storage.md", "Logs", True),
 }
 
 
@@ -109,6 +114,7 @@ def render_properties_table(
 
             # If the property is a $ref to an object, flatten its fields
             ref_to_resolve = None
+            is_optional_ref = False
             if "$ref" in prop:
                 ref_to_resolve = prop["$ref"]
             elif "anyOf" in prop:
@@ -116,11 +122,17 @@ def render_properties_table(
                 for v in prop["anyOf"]:
                     if "$ref" in v:
                         ref_to_resolve = v["$ref"]
+                        is_optional_ref = True
                         break
 
             if ref_to_resolve:
                 resolved = resolve_ref(ref_to_resolve, definitions)
-                if resolved.get("type") == "object" and "properties" in resolved:
+                # Only flatten required $ref objects (not Option<T>)
+                if (
+                    not is_optional_ref
+                    and resolved.get("type") == "object"
+                    and "properties" in resolved
+                ):
                     nested_req = resolved.get("required", [])
                     _add_props(
                         resolved["properties"], nested_req, f"{full_name}."
@@ -197,7 +209,7 @@ def _find_referring_field(
     return None
 
 
-def render_schema(schema: dict) -> list[str]:
+def render_schema(schema: dict, table_only: bool = False) -> list[str]:
     definitions = schema.get("definitions", {})
     lines = []
 
@@ -205,23 +217,24 @@ def render_schema(schema: dict) -> list[str]:
     if schema.get("type") == "object":
         props = schema.get("properties", {})
         required = schema.get("required", [])
-        lines.append("## Attributes")
-        lines.append("")
+        if not table_only:
+            lines.append("## Attributes")
+            lines.append("")
         lines.extend(render_properties_table(props, required, definitions))
         lines.append("")
 
         # Render nested oneOf types (e.g., DesiredCondition variants)
-        for defn_name, defn in definitions.items():
-            if "oneOf" in defn:
-                # Find the parent field that references this definition
-                section = _find_referring_field(defn_name, props, definitions) or defn_name
-                lines.append(f"## {section}")
-                lines.append("")
-                desc = defn.get("description", "")
-                if desc:
-                    lines.append(desc)
+        if not table_only:
+            for defn_name, defn in definitions.items():
+                if "oneOf" in defn:
+                    section = _find_referring_field(defn_name, props, definitions) or defn_name
+                    lines.append(f"## {section}")
                     lines.append("")
-                lines.extend(render_oneof_variants(defn["oneOf"], definitions))
+                    desc = defn.get("description", "")
+                    if desc:
+                        lines.append(desc)
+                        lines.append("")
+                    lines.extend(render_oneof_variants(defn["oneOf"], definitions))
 
     # Top-level oneOf (e.g., OriginSpec)
     elif "oneOf" in schema:
@@ -260,14 +273,14 @@ def main() -> None:
     schemas_dir = Path(sys.argv[1])
     docs_src_dir = Path(sys.argv[2])
 
-    for schema_name, (doc_path, title) in SCHEMA_MAP.items():
+    for schema_name, (doc_path, title, table_only) in SCHEMA_MAP.items():
         schema_path = schemas_dir / f"{schema_name}.json"
         if not schema_path.exists():
             print(f"warning: {schema_path} not found, skipping")
             continue
 
         schema = json.loads(schema_path.read_text())
-        lines = render_schema(schema)
+        lines = render_schema(schema, table_only=table_only)
 
         output_path = docs_src_dir / doc_path
         # Read existing file to preserve hand-written content before "## Attributes"
@@ -275,9 +288,9 @@ def main() -> None:
         if output_path.exists():
             existing = output_path.read_text()
 
-        # Replace content between start and end markers
-        start_marker = "<!-- schema:auto-generated:start -->"
-        end_marker = "<!-- schema:auto-generated:end -->"
+        # Replace content between start and end markers (supports per-schema markers)
+        start_marker = f"<!-- schema:auto-generated:start:{schema_name} -->"
+        end_marker = f"<!-- schema:auto-generated:end:{schema_name} -->"
         # Remove trailing empty lines from generated content
         while lines and lines[-1] == "":
             lines.pop()
