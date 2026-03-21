@@ -4,6 +4,7 @@
     "SyncRef": {
       "properties": {
         "ref": {
+          "description": "Name of the Sync resource to reference.",
           "type": "string"
         },
         "with": {
@@ -11,6 +12,7 @@
             "type": "string"
           },
           "default": {},
+          "description": "Template variables passed to the Sync resource for argument interpolation.",
           "type": "object"
         }
       },

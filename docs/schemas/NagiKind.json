@@ -26,10 +26,11 @@
               "type": "null"
             }
           ],
-          "description": "Falls back to `sync` when omitted."
+          "description": "Reference to the Sync resource for recovery operations. Falls back to `sync` when omitted."
         },
         "sources": {
           "default": [],
+          "description": "References to upstream Source resources.",
           "items": {
             "$ref": "#/definitions/SourceRef"
           },
@@ -43,10 +44,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Reference to the Sync resource for convergence operations."
         },
         "tags": {
           "default": [],
+          "description": "Tags for filtering with `--select tag:X`.",
           "items": {
             "type": "string"
           },
@@ -105,6 +108,7 @@
       "description": "Reference to a profile defined in `~/.dbt/profiles.yml`.",
       "properties": {
         "profile": {
+          "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
           "type": "string"
         },
         "target": {
@@ -145,12 +149,23 @@
               ]
             },
             "interval": {
-              "$ref": "#/definitions/Duration"
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                }
+              ],
+              "description": "Polling interval for re-evaluating this condition."
             },
             "maxAge": {
-              "$ref": "#/definitions/Duration"
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                }
+              ],
+              "description": "Maximum acceptable age of the data before the condition becomes Not Ready."
             },
             "name": {
+              "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
             "type": {
@@ -181,12 +196,14 @@
                 }
               ],
               "default": null,
-              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
             },
             "name": {
+              "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
             "query": {
+              "description": "SQL query that must return a scalar boolean.",
               "type": "string"
             },
             "type": {
@@ -216,12 +233,14 @@
                 }
               ],
               "default": null,
-              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
             },
             "name": {
+              "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
             "run": {
+              "description": "Command and arguments in argv format.",
               "items": {
                 "type": "string"
               },
@@ -247,6 +266,7 @@
       "description": "A reference to a `kind: DesiredGroup` resource.",
       "properties": {
         "ref": {
+          "description": "Name of the DesiredGroup resource to reference.",
           "type": "string"
         }
       },
@@ -334,6 +354,7 @@
     "SourceRef": {
       "properties": {
         "ref": {
+          "description": "Name of the Source resource to reference.",
           "type": "string"
         }
       },
@@ -346,6 +367,7 @@
       "description": "Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.",
       "properties": {
         "connection": {
+          "description": "Name of the Connection resource this Source uses.",
           "type": "string"
         }
       },
@@ -364,6 +386,7 @@
     "SyncRef": {
       "properties": {
         "ref": {
+          "description": "Name of the Sync resource to reference.",
           "type": "string"
         },
         "with": {
@@ -371,6 +394,7 @@
             "type": "string"
           },
           "default": {},
+          "description": "Template variables passed to the Sync resource for argument interpolation.",
           "type": "object"
         }
       },
@@ -390,7 +414,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Optional step executed after the main sync command."
         },
         "pre": {
           "anyOf": [
@@ -400,10 +425,16 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Optional step executed before the main sync command."
         },
         "run": {
-          "$ref": "#/definitions/SyncStep"
+          "allOf": [
+            {
+              "$ref": "#/definitions/SyncStep"
+            }
+          ],
+          "description": "The main convergence step."
         }
       },
       "required": [
@@ -414,13 +445,19 @@
     "SyncStep": {
       "properties": {
         "args": {
+          "description": "Command and arguments in argv format.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "type": {
-          "$ref": "#/definitions/StepType"
+          "allOf": [
+            {
+              "$ref": "#/definitions/StepType"
+            }
+          ],
+          "description": "Execution type for this step (currently only `Command`)."
         }
       },
       "required": [

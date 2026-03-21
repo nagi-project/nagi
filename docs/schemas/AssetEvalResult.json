@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ConditionResult": {
+      "properties": {
+        "conditionName": {
+          "description": "Name of the evaluated condition.",
+          "type": "string"
+        },
+        "conditionType": {
+          "description": "Type discriminator of the condition (e.g. `Freshness`, `SQL`, `Command`).",
+          "type": "string"
+        },
+        "status": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionStatus"
+            }
+          ],
+          "description": "Evaluation outcome for this condition."
+        }
+      },
+      "required": [
+        "conditionName",
+        "conditionType",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ConditionStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "enum": [
+                "ready"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "description": "Human-readable explanation of why the condition is not satisfied.",
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "notReady"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "assetName": {
+      "description": "Name of the evaluated Asset resource.",
+      "type": "string"
+    },
+    "conditions": {
+      "description": "Per-condition evaluation results.",
+      "items": {
+        "$ref": "#/definitions/ConditionResult"
+      },
+      "type": "array"
+    },
+    "evaluationId": {
+      "description": "Set when the result was logged via `LogStore`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ready": {
+      "description": "true when all conditions are Ready.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "assetName",
+    "conditions",
+    "ready"
+  ],
+  "title": "AssetEvalResult",
+  "type": "object"
+}

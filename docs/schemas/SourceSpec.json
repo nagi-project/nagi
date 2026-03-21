@@ -3,6 +3,7 @@
   "description": "Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.",
   "properties": {
     "connection": {
+      "description": "Name of the Connection resource this Source uses.",
       "type": "string"
     }
   },

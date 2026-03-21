@@ -31,12 +31,23 @@
               ]
             },
             "interval": {
-              "$ref": "#/definitions/Duration"
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                }
+              ],
+              "description": "Polling interval for re-evaluating this condition."
             },
             "maxAge": {
-              "$ref": "#/definitions/Duration"
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                }
+              ],
+              "description": "Maximum acceptable age of the data before the condition becomes Not Ready."
             },
             "name": {
+              "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
             "type": {
@@ -67,12 +78,14 @@
                 }
               ],
               "default": null,
-              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
             },
             "name": {
+              "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
             "query": {
+              "description": "SQL query that must return a scalar boolean.",
               "type": "string"
             },
             "type": {
@@ -102,12 +115,14 @@
                 }
               ],
               "default": null,
-              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
             },
             "name": {
+              "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
             "run": {
+              "description": "Command and arguments in argv format.",
               "items": {
                 "type": "string"
               },

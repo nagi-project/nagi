@@ -18,6 +18,7 @@
       "description": "Reference to a profile defined in `~/.dbt/profiles.yml`.",
       "properties": {
         "profile": {
+          "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
           "type": "string"
         },
         "target": {

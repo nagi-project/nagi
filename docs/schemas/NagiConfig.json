@@ -5,6 +5,7 @@
       "properties": {
         "type": {
           "default": "local",
+          "description": "Backend type identifier (e.g. `local`, `gcs`). Defaults to `local`.",
           "type": "string"
         }
       },
@@ -20,7 +21,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Slack notification settings. When set, notifications are sent to the specified channel."
         }
       },
       "type": "object"
@@ -28,6 +30,7 @@
     "SlackConfig": {
       "properties": {
         "channel": {
+          "description": "Slack channel to send notifications to (e.g. `#nagi-alerts`).",
           "type": "string"
         }
       },
@@ -39,10 +42,20 @@
   },
   "properties": {
     "backend": {
-      "$ref": "#/definitions/BackendConfig"
+      "allOf": [
+        {
+          "$ref": "#/definitions/BackendConfig"
+        }
+      ],
+      "description": "State storage backend configuration."
     },
     "notify": {
-      "$ref": "#/definitions/NotifyConfig"
+      "allOf": [
+        {
+          "$ref": "#/definitions/NotifyConfig"
+        }
+      ],
+      "description": "Notification channel configuration."
     },
     "terminationGracePeriodSeconds": {
       "description": "Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown. When omitted, waits indefinitely.",

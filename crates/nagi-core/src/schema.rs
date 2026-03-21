@@ -1,9 +1,13 @@
 use schemars::schema_for;
 
 use crate::config::NagiConfig;
+use crate::evaluate::AssetEvalResult;
 use crate::kind::{
     AssetSpec, ConnectionSpec, DesiredGroupSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
 };
+use crate::log::SyncLogEntry;
+use crate::serve::SuspendedInfo;
+use crate::storage::lock::LockInfo;
 
 /// Generates JSON Schema for all Nagi resource kinds and writes them to the given directory.
 pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
@@ -41,6 +45,22 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
         (
             "NagiConfig",
             serde_json::to_value(schema_for!(NagiConfig)).unwrap(),
+        ),
+        (
+            "AssetEvalResult",
+            serde_json::to_value(schema_for!(AssetEvalResult)).unwrap(),
+        ),
+        (
+            "LockInfo",
+            serde_json::to_value(schema_for!(LockInfo)).unwrap(),
+        ),
+        (
+            "SuspendedInfo",
+            serde_json::to_value(schema_for!(SuspendedInfo)).unwrap(),
+        ),
+        (
+            "SyncLogEntry",
+            serde_json::to_value(schema_for!(SyncLogEntry)).unwrap(),
         ),
     ];
 
@@ -83,6 +103,10 @@ mod tests {
             "DesiredGroupSpec.json",
             "OriginSpec.json",
             "NagiConfig.json",
+            "AssetEvalResult.json",
+            "LockInfo.json",
+            "SuspendedInfo.json",
+            "SyncLogEntry.json",
         ];
         for name in expected {
             let path = dir.path().join(name);

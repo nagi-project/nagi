@@ -11,13 +11,19 @@
     "SyncStep": {
       "properties": {
         "args": {
+          "description": "Command and arguments in argv format.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "type": {
-          "$ref": "#/definitions/StepType"
+          "allOf": [
+            {
+              "$ref": "#/definitions/StepType"
+            }
+          ],
+          "description": "Execution type for this step (currently only `Command`)."
         }
       },
       "required": [
@@ -37,7 +43,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "Optional step executed after the main sync command."
     },
     "pre": {
       "anyOf": [
@@ -47,10 +54,16 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "Optional step executed before the main sync command."
     },
     "run": {
-      "$ref": "#/definitions/SyncStep"
+      "allOf": [
+        {
+          "$ref": "#/definitions/SyncStep"
+        }
+      ],
+      "description": "The main convergence step."
     }
   },
   "required": [

@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Lock metadata written to the lock file.",
+  "properties": {
+    "acquired_at_epoch_secs": {
+      "description": "Unix epoch seconds when the lock was acquired.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "pid": {
+      "description": "Process ID of the lock holder.",
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "ttl_secs": {
+      "description": "Time-to-live in seconds; the lock expires after this duration.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "acquired_at_epoch_secs",
+    "pid",
+    "ttl_secs"
+  ],
+  "title": "LockInfo",
+  "type": "object"
+}

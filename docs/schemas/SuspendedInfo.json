@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Metadata persisted when an asset is suspended from automatic sync.\n\nEach suspended asset gets a JSON file at `{suspended_dir}/{asset_name}.json`. The serve loop reads these flags to skip sync for suspended assets; `nagi serve resume` deletes them to re-enable sync.",
+  "properties": {
+    "asset_name": {
+      "description": "Name of the suspended Asset resource.",
+      "type": "string"
+    },
+    "execution_id": {
+      "description": "The sync execution_id that triggered the suspension, if available.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "description": "Human-readable reason for the suspension.",
+      "type": "string"
+    },
+    "suspended_at": {
+      "description": "RFC 3339 timestamp when the asset was suspended.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "asset_name",
+    "reason",
+    "suspended_at"
+  ],
+  "title": "SuspendedInfo",
+  "type": "object"
+}
