@@ -1,0 +1,273 @@
+"""Generate Markdown attribute tables from JSON Schema files.
+
+Usage:
+    python scripts/gen_schema_docs.py docs/schemas docs/src/configurations/resources
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+# Map schema file names to output doc file names and page titles
+SCHEMA_MAP = {
+    "AssetSpec": ("asset.md", "kind: Asset"),
+    "SourceSpec": ("source.md", "kind: Source"),
+    "ConnectionSpec": ("connection.md", "kind: Connection"),
+    "SyncSpec": ("sync.md", "kind: Sync"),
+    "DesiredGroupSpec": ("desired-group.md", "kind: DesiredGroup"),
+    "OriginSpec": ("origin.md", "kind: Origin"),
+}
+
+
+def resolve_ref(ref: str, definitions: dict) -> dict:
+    name = ref.split("/")[-1]
+    return definitions.get(name, {})
+
+
+def schema_to_type(prop: dict, definitions: dict) -> str:
+    if "$ref" in prop:
+        resolved = resolve_ref(prop["$ref"], definitions)
+        fmt = resolved.get("format", "")
+        if fmt == "duration":
+            return "Duration"
+        if fmt == "cron":
+            return "CronSchedule"
+        return prop["$ref"].split("/")[-1]
+
+    if "anyOf" in prop:
+        types = []
+        for variant in prop["anyOf"]:
+            if variant.get("type") == "null":
+                continue
+            types.append(schema_to_type(variant, definitions))
+        return " | ".join(types) if types else "any"
+
+    if "oneOf" in prop:
+        return "oneOf (see below)"
+
+    t = prop.get("type", "any")
+    if isinstance(t, list):
+        t = [x for x in t if x != "null"]
+        return t[0] if len(t) == 1 else " | ".join(t)
+
+    if t == "array":
+        items = prop.get("items", {})
+        item_type = schema_to_type(items, definitions)
+        return f"list[{item_type}]"
+
+    if t == "object":
+        additional = prop.get("additionalProperties", {})
+        if additional:
+            val_type = schema_to_type(additional, definitions)
+            return f"map[string, {val_type}]"
+        return "object"
+
+    return t
+
+
+def is_required(name: str, required: list[str]) -> str:
+    return "Yes" if name in required else "—"
+
+
+def is_nullable(prop: dict) -> bool:
+    if "anyOf" in prop:
+        return any(v.get("type") == "null" for v in prop["anyOf"])
+    t = prop.get("type", "")
+    if isinstance(t, list):
+        return "null" in t
+    return False
+
+
+def get_default(prop: dict) -> str:
+    if "default" in prop:
+        val = prop["default"]
+        if val is None:
+            return ""
+        if isinstance(val, bool):
+            return str(val).lower()
+        if isinstance(val, list):
+            return "[]"
+        return str(val)
+    return ""
+
+
+def render_properties_table(
+    properties: dict, required: list[str], definitions: dict, prefix: str = ""
+) -> list[str]:
+    lines = []
+    lines.append("| Attribute | Type | Required | Default | Description |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    # Sort: required fields first, then optional
+    sorted_names = sorted(properties.keys(), key=lambda n: (n not in required, n))
+    for name in sorted_names:
+        prop = properties[name]
+        full_name = f"{prefix}{name}" if prefix else name
+        type_str = schema_to_type(prop, definitions)
+        req = is_required(name, required)
+        default = get_default(prop) or "-"
+        desc = prop.get("description", "") or "-"
+        lines.append(f"| `{full_name}` | {type_str} | {req} | {default} | {desc} |")
+    return lines
+
+
+def render_oneof_variants(
+    variants: list[dict], definitions: dict
+) -> list[str]:
+    lines = []
+    for variant in variants:
+        props = variant.get("properties", {})
+        required = variant.get("required", [])
+        desc = variant.get("description", "")
+        type_field = props.get("type", {})
+        type_name = ""
+        if "enum" in type_field:
+            type_name = type_field["enum"][0]
+
+        if type_name:
+            lines.append(f"### type: {type_name}")
+            lines.append("")
+        if desc:
+            lines.append(desc)
+            lines.append("")
+
+        # Filter out the 'type' discriminator field
+        filtered_props = {k: v for k, v in props.items() if k != "type"}
+        filtered_required = [r for r in required if r != "type"]
+        lines.extend(render_properties_table(filtered_props, filtered_required, definitions))
+        lines.append("")
+    return lines
+
+
+def _find_referring_field(
+    defn_name: str, properties: dict, definitions: dict
+) -> str | None:
+    """Find the field name in properties that references a given definition (directly or via items)."""
+    ref_suffix = f"#/definitions/{defn_name}"
+    for field_name, prop in properties.items():
+        # Direct $ref
+        if prop.get("$ref") == ref_suffix:
+            return field_name
+        # Array whose items reference the definition
+        items = prop.get("items", {})
+        if items.get("$ref") == ref_suffix:
+            return field_name
+        # anyOf containing the ref
+        for variant in prop.get("anyOf", []):
+            if variant.get("$ref") == ref_suffix:
+                return field_name
+            if variant.get("items", {}).get("$ref") == ref_suffix:
+                return field_name
+    # Check if any intermediate definition references it (e.g., DesiredSetEntry -> DesiredCondition)
+    for other_name, other_defn in definitions.items():
+        if other_name == defn_name:
+            continue
+        for variant in other_defn.get("anyOf", []):
+            if variant.get("$ref") == ref_suffix:
+                # Found: other_name references defn_name. Now find who references other_name.
+                parent = _find_referring_field(other_name, properties, definitions)
+                if parent:
+                    return parent
+    return None
+
+
+def render_schema(schema: dict) -> list[str]:
+    definitions = schema.get("definitions", {})
+    lines = []
+
+    # Top-level object
+    if schema.get("type") == "object":
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+        lines.append("## Attributes")
+        lines.append("")
+        lines.extend(render_properties_table(props, required, definitions))
+        lines.append("")
+
+        # Render nested oneOf types (e.g., DesiredCondition variants)
+        for defn_name, defn in definitions.items():
+            if "oneOf" in defn:
+                # Find the parent field that references this definition
+                section = _find_referring_field(defn_name, props, definitions) or defn_name
+                lines.append(f"## {section}")
+                lines.append("")
+                desc = defn.get("description", "")
+                if desc:
+                    lines.append(desc)
+                    lines.append("")
+                lines.extend(render_oneof_variants(defn["oneOf"], definitions))
+
+    # Top-level oneOf (e.g., OriginSpec)
+    elif "oneOf" in schema:
+        lines.append("## Variants")
+        lines.append("")
+        lines.extend(render_oneof_variants(schema["oneOf"], definitions))
+
+    # Newtype wrapper (e.g., DesiredGroupSpec wrapping a list)
+    elif "items" in schema or schema.get("type") == "array":
+        items = schema.get("items", {})
+        if "oneOf" in items:
+            lines.append("## spec")
+            lines.append("")
+            lines.append("`spec` is a list of conditions.")
+            lines.append("")
+            lines.extend(render_oneof_variants(items["oneOf"], definitions))
+        elif "$ref" in items:
+            resolved = resolve_ref(items["$ref"], definitions)
+            if "oneOf" in resolved:
+                lines.append("## spec")
+                lines.append("")
+                desc = resolved.get("description", "")
+                if desc:
+                    lines.append(desc)
+                    lines.append("")
+                lines.extend(render_oneof_variants(resolved["oneOf"], definitions))
+
+    return lines
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <schemas_dir> <docs_output_dir>")
+        sys.exit(1)
+
+    schemas_dir = Path(sys.argv[1])
+    docs_dir = Path(sys.argv[2])
+
+    for schema_name, (doc_file, title) in SCHEMA_MAP.items():
+        schema_path = schemas_dir / f"{schema_name}.json"
+        if not schema_path.exists():
+            print(f"warning: {schema_path} not found, skipping")
+            continue
+
+        schema = json.loads(schema_path.read_text())
+        lines = render_schema(schema)
+
+        output_path = docs_dir / doc_file
+        # Read existing file to preserve hand-written content before "## Attributes"
+        existing = ""
+        if output_path.exists():
+            existing = output_path.read_text()
+
+        # Find the marker where auto-generated content starts
+        marker = "<!-- schema:auto-generated -->"
+        # Remove trailing empty lines from generated content
+        while lines and lines[-1] == "":
+            lines.pop()
+        generated = "\n".join(lines) + "\n"
+
+        if marker in existing:
+            # Keep everything before the marker, replace everything after
+            before = existing[: existing.index(marker)]
+            content = before + marker + "\n\n" + generated
+        else:
+            # Append marker and generated content to existing file
+            content = existing.rstrip() + "\n\n" + marker + "\n\n" + generated
+
+        output_path.write_text(content)
+        print(f"  wrote {output_path}")
+
+
+if __name__ == "__main__":
+    main()

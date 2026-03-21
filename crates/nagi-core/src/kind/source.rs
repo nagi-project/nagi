@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::KindError;
@@ -5,7 +6,7 @@ use super::KindError;
 pub const KIND: &str = "Source";
 
 /// Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceSpec {
     pub connection: String,
 }

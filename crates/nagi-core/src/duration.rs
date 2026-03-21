@@ -1,5 +1,8 @@
 use std::time::Duration as StdDuration;
 
+use schemars::gen::SchemaGenerator;
+use schemars::schema::{InstanceType, Schema, SchemaObject};
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A duration parsed from a human-readable string (e.g. "24h", "30m", "1h30m").
@@ -27,6 +30,28 @@ impl<'de> Deserialize<'de> for Duration {
         let s = String::deserialize(deserializer)?;
         let inner = humantime::parse_duration(&s).map_err(serde::de::Error::custom)?;
         Ok(Duration { inner, raw: s })
+    }
+}
+
+impl JsonSchema for Duration {
+    fn schema_name() -> String {
+        "Duration".to_string()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            format: Some("duration".to_string()),
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                description: Some(
+                    "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\")."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 

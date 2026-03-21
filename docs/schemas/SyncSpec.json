@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "StepType": {
+      "description": "Currently only `Command` (subprocess execution) is supported.",
+      "enum": [
+        "Command"
+      ],
+      "type": "string"
+    },
+    "SyncStep": {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "$ref": "#/definitions/StepType"
+        }
+      },
+      "required": [
+        "args",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps. Reusable across multiple Assets via `ref`.",
+  "properties": {
+    "post": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SyncStep"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pre": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SyncStep"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "run": {
+      "$ref": "#/definitions/SyncStep"
+    }
+  },
+  "required": [
+    "run"
+  ],
+  "title": "SyncSpec",
+  "type": "object"
+}

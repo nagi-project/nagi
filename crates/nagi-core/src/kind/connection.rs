@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::KindError;
@@ -5,7 +6,7 @@ use super::KindError;
 pub const KIND: &str = "Connection";
 
 /// Spec for `kind: Connection`. Holds external data connection info referenced by Sources.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSpec {
     /// Required in MVP because profiles.yml is the only supported connection resolution mechanism.
@@ -18,7 +19,7 @@ pub struct ConnectionSpec {
 }
 
 /// Reference to a profile defined in `~/.dbt/profiles.yml`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DbtProfile {
     pub profile: String,
     /// If omitted, the default target in profiles.yml is used.
@@ -26,7 +27,7 @@ pub struct DbtProfile {
 }
 
 /// dbt Cloud configuration for pre-sync running-job checks.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DbtCloudSpec {
     /// Path to the dbt Cloud credentials file. Defaults to `~/.dbt/dbt_cloud.yml`.

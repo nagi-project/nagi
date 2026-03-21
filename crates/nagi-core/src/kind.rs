@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -30,14 +31,14 @@ pub enum KindError {
 }
 
 /// Common metadata shared by all resource kinds.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Metadata {
     pub name: String,
 }
 
 /// A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention.
 /// Includes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind")]
 pub enum NagiKind {
     Connection {

@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::asset::SyncRef;
@@ -6,7 +7,7 @@ use super::KindError;
 pub const KIND: &str = "Origin";
 
 /// Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum OriginSpec {
     #[serde(rename_all = "camelCase")]

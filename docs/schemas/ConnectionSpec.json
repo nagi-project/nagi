@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "DbtCloudSpec": {
+      "description": "dbt Cloud configuration for pre-sync running-job checks.",
+      "properties": {
+        "credentialsFile": {
+          "description": "Path to the dbt Cloud credentials file. Defaults to `~/.dbt/dbt_cloud.yml`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DbtProfile": {
+      "description": "Reference to a profile defined in `~/.dbt/profiles.yml`.",
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "target": {
+          "description": "If omitted, the default target in profiles.yml is used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Sources.",
+  "properties": {
+    "dbtCloud": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DbtCloudSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional dbt Cloud configuration for running-job checks before sync."
+    },
+    "dbtProfile": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/DbtProfile"
+        }
+      ],
+      "description": "Required in MVP because profiles.yml is the only supported connection resolution mechanism. SQL-based conditions (Freshness, SQL) rely on it to resolve the adapter config. When direct connection configuration (host/port/credentials etc.) is added, this should become `Option<DbtProfile>` alongside alternative connection variants."
+    }
+  },
+  "required": [
+    "dbtProfile"
+  ],
+  "title": "ConnectionSpec",
+  "type": "object"
+}

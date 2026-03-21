@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CronSchedule": {
+      "description": "A cron expression in standard 5-field format (e.g. \"0 3 * * *\").",
+      "format": "cron",
+      "type": "string"
+    },
+    "DesiredCondition": {
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion) and used as a key in execution logs.",
+      "oneOf": [
+        {
+          "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
+          "properties": {
+            "checkAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CronSchedule"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cron expression for additional evaluation at a specific time."
+            },
+            "column": {
+              "description": "If omitted, freshness is determined from table metadata instead of a column value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "interval": {
+              "$ref": "#/definitions/Duration"
+            },
+            "maxAge": {
+              "$ref": "#/definitions/Duration"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "Freshness"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "interval",
+            "maxAge",
+            "name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Query must return a scalar boolean. Ready when the result is true.",
+          "properties": {
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+            },
+            "name": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "SQL"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "query",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Runs an external command. Ready when the process exits with code 0. `run` is argv: the first element is the program, the rest are arguments.",
+          "properties": {
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+            },
+            "name": {
+              "type": "string"
+            },
+            "run": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "Command"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "run",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    }
+  },
+  "description": "Spec for `kind: DesiredGroup`. A reusable set of desired conditions referenced from Asset `desiredSets` via `ref:`.",
+  "items": {
+    "$ref": "#/definitions/DesiredCondition"
+  },
+  "title": "DesiredGroupSpec",
+  "type": "array"
+}

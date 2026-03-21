@@ -1,0 +1,12 @@
+[package]
+name = "nagi-schema-gen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "nagi-schema-gen"
+path = "src/main.rs"
+
+[dependencies]
+nagi-core = { path = "../nagi-core" }

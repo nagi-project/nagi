@@ -9,6 +9,7 @@ pub mod init;
 pub mod kind;
 pub mod log;
 pub mod notify;
+pub mod schema;
 pub mod select;
 pub mod serve;
 pub mod status;

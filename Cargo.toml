@@ -1,4 +1,4 @@
 [workspace]
-members = ["crates/nagi-core"]
+members = ["crates/nagi-core", "crates/nagi-schema-gen"]
 resolver = "2"
 

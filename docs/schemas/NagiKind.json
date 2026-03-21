@@ -1,0 +1,593 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AssetSpec": {
+      "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. The reconciliation loop continuously evaluates `desiredSets` and runs `sync` until all conditions are met.",
+      "properties": {
+        "autoSync": {
+          "default": true,
+          "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
+          "type": "boolean"
+        },
+        "desiredSets": {
+          "default": [],
+          "description": "All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.",
+          "items": {
+            "$ref": "#/definitions/DesiredSetEntry"
+          },
+          "type": "array"
+        },
+        "resync": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SyncRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Falls back to `sync` when omitted."
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/SourceRef"
+          },
+          "type": "array"
+        },
+        "sync": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SyncRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectionSpec": {
+      "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Sources.",
+      "properties": {
+        "dbtCloud": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DbtCloudSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional dbt Cloud configuration for running-job checks before sync."
+        },
+        "dbtProfile": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DbtProfile"
+            }
+          ],
+          "description": "Required in MVP because profiles.yml is the only supported connection resolution mechanism. SQL-based conditions (Freshness, SQL) rely on it to resolve the adapter config. When direct connection configuration (host/port/credentials etc.) is added, this should become `Option<DbtProfile>` alongside alternative connection variants."
+        }
+      },
+      "required": [
+        "dbtProfile"
+      ],
+      "type": "object"
+    },
+    "CronSchedule": {
+      "description": "A cron expression in standard 5-field format (e.g. \"0 3 * * *\").",
+      "format": "cron",
+      "type": "string"
+    },
+    "DbtCloudSpec": {
+      "description": "dbt Cloud configuration for pre-sync running-job checks.",
+      "properties": {
+        "credentialsFile": {
+          "description": "Path to the dbt Cloud credentials file. Defaults to `~/.dbt/dbt_cloud.yml`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DbtProfile": {
+      "description": "Reference to a profile defined in `~/.dbt/profiles.yml`.",
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "target": {
+          "description": "If omitted, the default target in profiles.yml is used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "type": "object"
+    },
+    "DesiredCondition": {
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion) and used as a key in execution logs.",
+      "oneOf": [
+        {
+          "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
+          "properties": {
+            "checkAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CronSchedule"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cron expression for additional evaluation at a specific time."
+            },
+            "column": {
+              "description": "If omitted, freshness is determined from table metadata instead of a column value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "interval": {
+              "$ref": "#/definitions/Duration"
+            },
+            "maxAge": {
+              "$ref": "#/definitions/Duration"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "Freshness"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "interval",
+            "maxAge",
+            "name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Query must return a scalar boolean. Ready when the result is true.",
+          "properties": {
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+            },
+            "name": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "SQL"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "query",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Runs an external command. Ready when the process exits with code 0. `run` is argv: the first element is the program, the rest are arguments.",
+          "properties": {
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated via upstream propagation."
+            },
+            "name": {
+              "type": "string"
+            },
+            "run": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "Command"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "run",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DesiredGroupRef": {
+      "description": "A reference to a `kind: DesiredGroup` resource.",
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "DesiredGroupSpec": {
+      "description": "Spec for `kind: DesiredGroup`. A reusable set of desired conditions referenced from Asset `desiredSets` via `ref:`.",
+      "items": {
+        "$ref": "#/definitions/DesiredCondition"
+      },
+      "type": "array"
+    },
+    "DesiredSetEntry": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DesiredGroupRef"
+        },
+        {
+          "$ref": "#/definitions/DesiredCondition"
+        }
+      ],
+      "description": "An entry in `desiredSets`. Either a reference to a `kind: DesiredGroup` or an inline condition."
+    },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
+    "Metadata": {
+      "description": "Common metadata shared by all resource kinds.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "OriginSpec": {
+      "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
+      "oneOf": [
+        {
+          "properties": {
+            "connection": {
+              "description": "Connection resource name for auto-generated Sources.",
+              "type": "string"
+            },
+            "defaultSync": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SyncRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Applied to all auto-generated Assets unless overridden."
+            },
+            "projectDir": {
+              "description": "Local path to the dbt project directory (relative or absolute).",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "DBT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "connection",
+            "projectDir",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SourceRef": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "SourceSpec": {
+      "description": "Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.",
+      "properties": {
+        "connection": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection"
+      ],
+      "type": "object"
+    },
+    "StepType": {
+      "description": "Currently only `Command` (subprocess execution) is supported.",
+      "enum": [
+        "Command"
+      ],
+      "type": "string"
+    },
+    "SyncRef": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "SyncSpec": {
+      "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps. Reusable across multiple Assets via `ref`.",
+      "properties": {
+        "post": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SyncStep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pre": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SyncStep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "$ref": "#/definitions/SyncStep"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "type": "object"
+    },
+    "SyncStep": {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "$ref": "#/definitions/StepType"
+        }
+      },
+      "required": [
+        "args",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention. Includes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.",
+  "oneOf": [
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "Connection"
+          ],
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata"
+        },
+        "spec": {
+          "$ref": "#/definitions/ConnectionSpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "Source"
+          ],
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata"
+        },
+        "spec": {
+          "$ref": "#/definitions/SourceSpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "Asset"
+          ],
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata"
+        },
+        "spec": {
+          "$ref": "#/definitions/AssetSpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "DesiredGroup"
+          ],
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata"
+        },
+        "spec": {
+          "$ref": "#/definitions/DesiredGroupSpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "Sync"
+          ],
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata"
+        },
+        "spec": {
+          "$ref": "#/definitions/SyncSpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "Origin"
+          ],
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata"
+        },
+        "spec": {
+          "$ref": "#/definitions/OriginSpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "NagiKind"
+}

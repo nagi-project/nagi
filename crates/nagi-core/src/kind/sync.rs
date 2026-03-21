@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::KindError;
@@ -6,14 +7,14 @@ pub const KIND: &str = "Sync";
 
 /// Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps.
 /// Reusable across multiple Assets via `ref`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncSpec {
     pub pre: Option<SyncStep>,
     pub run: SyncStep,
     pub post: Option<SyncStep>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncStep {
     #[serde(rename = "type")]
     pub step_type: StepType,
@@ -21,7 +22,7 @@ pub struct SyncStep {
 }
 
 /// Currently only `Command` (subprocess execution) is supported.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum StepType {
     Command,
 }

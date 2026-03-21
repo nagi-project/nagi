@@ -2,6 +2,8 @@
 uv = "0.6"
 "cargo:cargo-audit" = "0.22"
 "cargo:cargo-llvm-cov" = "0.8"
+"cargo:mdbook" = "0.5"
+"cargo:mdbook-mermaid" = "0.17"
 
 [tasks.build]
 description = "Build Python package with maturin (creates .venv, installs dependencies, builds nagi CLI)"
@@ -40,3 +42,19 @@ run = "cargo llvm-cov --no-default-features"
 [tasks.audit]
 description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
 run = "cargo audit"
+
+[tasks."docs:gen-schema"]
+description = "Generate JSON Schema and update resource docs"
+run = """
+cargo run -p nagi-schema-gen
+uv run python scripts/gen_schema_docs.py docs/schemas docs/src/configurations/resources
+"""
+
+[tasks."docs:build"]
+description = "Build documentation site"
+depends = ["docs:gen-schema"]
+run = "mdbook build docs"
+
+[tasks."docs:serve"]
+description = "Serve documentation site locally with live reload"
+run = "mdbook serve docs --open"

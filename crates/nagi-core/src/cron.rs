@@ -1,9 +1,34 @@
+use schemars::gen::SchemaGenerator;
+use schemars::schema::{InstanceType, Schema, SchemaObject};
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A validated cron expression in standard 5-field format (e.g. "0 3 * * *").
 /// Fails at deserialization time if the expression is invalid.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CronSchedule(String);
+
+impl JsonSchema for CronSchedule {
+    fn schema_name() -> String {
+        "CronSchedule".to_string()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            format: Some("cron".to_string()),
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                description: Some(
+                    "A cron expression in standard 5-field format (e.g. \"0 3 * * *\")."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
 
 impl CronSchedule {
     pub fn as_str(&self) -> &str {

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cron::CronSchedule;
@@ -11,7 +12,7 @@ pub const KIND: &str = "Asset";
 
 /// Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.
 /// The reconciliation loop continuously evaluates `desiredSets` and runs `sync` until all conditions are met.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSpec {
     #[serde(default)]
@@ -33,13 +34,13 @@ fn default_auto_sync() -> bool {
     true
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceRef {
     #[serde(rename = "ref")]
     pub ref_name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncRef {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -48,7 +49,7 @@ pub struct SyncRef {
 }
 
 /// An entry in `desiredSets`. Either a reference to a `kind: DesiredGroup` or an inline condition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum DesiredSetEntry {
     Ref(DesiredGroupRef),
@@ -56,7 +57,7 @@ pub enum DesiredSetEntry {
 }
 
 /// A reference to a `kind: DesiredGroup` resource.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DesiredGroupRef {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -65,7 +66,7 @@ pub struct DesiredGroupRef {
 /// A single desired state condition. The Asset is Ready only when all conditions are satisfied.
 /// Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion)
 /// and used as a key in execution logs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum DesiredCondition {
     /// Can transition to Not Ready as time passes beyond `maxAge`.

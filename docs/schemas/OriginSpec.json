@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SyncRef": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
+  "oneOf": [
+    {
+      "properties": {
+        "connection": {
+          "description": "Connection resource name for auto-generated Sources.",
+          "type": "string"
+        },
+        "defaultSync": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SyncRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Applied to all auto-generated Assets unless overridden."
+        },
+        "projectDir": {
+          "description": "Local path to the dbt project directory (relative or absolute).",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "DBT"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection",
+        "projectDir",
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "OriginSpec"
+}

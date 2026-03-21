@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::asset::DesiredCondition;
@@ -6,7 +7,7 @@ use super::KindError;
 pub const KIND: &str = "DesiredGroup";
 
 /// Spec for `kind: DesiredGroup`. A reusable set of desired conditions referenced from Asset `desiredSets` via `ref:`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DesiredGroupSpec(pub Vec<DesiredCondition>);
 
 impl DesiredGroupSpec {

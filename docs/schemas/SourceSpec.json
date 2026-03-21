@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.",
+  "properties": {
+    "connection": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "connection"
+  ],
+  "title": "SourceSpec",
+  "type": "object"
+}
