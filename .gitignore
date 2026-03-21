@@ -43,3 +43,6 @@ dist/
 # Project docs (kept locally, excluded from repo)
 project_spec.md
 milestones.md
+
+# mdBook build output
+docs/book/
