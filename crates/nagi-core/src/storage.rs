@@ -1,5 +1,6 @@
 pub mod local;
 pub mod lock;
+pub mod remote;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -45,7 +46,7 @@ pub trait Cache: Send + Sync {
 }
 
 /// Manages per-asset suspension flags.
-pub trait SuspendedStore: Send + Sync {
+pub trait SuspendedStore: Send + Sync + std::fmt::Debug {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError>;
     fn read(&self, asset_name: &str) -> Result<Option<SuspendedInfo>, StorageError>;
     fn remove(&self, asset_name: &str) -> Result<(), StorageError>;
@@ -63,7 +64,13 @@ pub trait SourceStatsCache: Send + Sync {
 pub trait SyncLock: Send + Sync {
     /// Attempts to acquire the lock. Returns `true` if acquired.
     /// If the lock is held but its TTL has expired, it is stolen.
-    fn acquire(&self, sync_ref: &str, ttl: Duration) -> Result<bool, StorageError>;
+    /// `execution_id` is recorded in the lock file for correlation with sync logs.
+    fn acquire(
+        &self,
+        sync_ref: &str,
+        ttl: Duration,
+        execution_id: &str,
+    ) -> Result<bool, StorageError>;
     /// Releases the lock. No-op if not held.
     fn release(&self, sync_ref: &str) -> Result<(), StorageError>;
 }

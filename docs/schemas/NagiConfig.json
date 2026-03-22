@@ -3,6 +3,13 @@
   "definitions": {
     "BackendConfig": {
       "properties": {
+        "prefix": {
+          "description": "Path prefix for remote storage (e.g. `my-project/nagi`). When set, all remote paths are prefixed with this value. Ignored for the local backend.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "type": {
           "default": "local",
           "description": "Backend type identifier (e.g. `local`, `gcs`). Defaults to `local`.",
@@ -48,6 +55,36 @@
         }
       ],
       "description": "State storage backend configuration."
+    },
+    "lockRetryIntervalSeconds": {
+      "default": 900,
+      "description": "Interval in seconds between lock acquisition retry attempts. Defaults to 10.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "lockRetryMaxAttempts": {
+      "default": 3,
+      "description": "Maximum number of lock acquisition retry attempts before skipping. Defaults to 30.",
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "lockTtlSeconds": {
+      "default": 3600,
+      "description": "Time-to-live in seconds for sync lock files. Locks expire after this duration, preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "maxControllers": {
+      "description": "Maximum number of Controllers to run in parallel during `nagi serve`. When the number of connected components exceeds this limit, serve exits with an error. When omitted, one Controller is created per connected component.",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "notify": {
       "allOf": [

@@ -71,12 +71,16 @@ fn default_backend_type() -> String {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct BackendConfig {
-    /// Backend type identifier (e.g. `local`, `gcs`). Defaults to `local`.
+    /// Backend type identifier. One of `local`, `gcs`, `s3`. Defaults to `local`.
     #[serde(default = "default_backend_type")]
     pub r#type: String,
     /// Path prefix for remote storage (e.g. `my-project/nagi`). When set, all
     /// remote paths are prefixed with this value. Ignored for the local backend.
     pub prefix: Option<String>,
+    /// Bucket name for GCS or S3 backend. Required when type is `gcs` or `s3`.
+    pub bucket: Option<String>,
+    /// AWS region for S3 backend (e.g. `us-east-1`). Required when type is `s3`.
+    pub region: Option<String>,
 }
 
 impl Default for BackendConfig {
@@ -84,6 +88,8 @@ impl Default for BackendConfig {
         Self {
             r#type: default_backend_type(),
             prefix: None,
+            bucket: None,
+            region: None,
         }
     }
 }
@@ -149,8 +155,40 @@ notify:
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.backend.r#type, "gcs");
+        assert_eq!(config.backend.bucket.as_deref(), Some("my-nagi-state"));
         let slack = config.notify.slack.unwrap();
         assert_eq!(slack.channel, "#nagi-alerts");
+    }
+
+    #[test]
+    fn load_gcs_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: gcs\n  bucket: my-bucket\n  prefix: proj/nagi";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.backend.r#type, "gcs");
+        assert_eq!(config.backend.bucket.as_deref(), Some("my-bucket"));
+        assert_eq!(config.backend.prefix.as_deref(), Some("proj/nagi"));
+        assert!(config.backend.region.is_none());
+    }
+
+    #[test]
+    fn load_s3_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: s3\n  bucket: my-bucket\n  region: us-east-1\n  prefix: nagi";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.backend.r#type, "s3");
+        assert_eq!(config.backend.bucket.as_deref(), Some("my-bucket"));
+        assert_eq!(config.backend.region.as_deref(), Some("us-east-1"));
+        assert_eq!(config.backend.prefix.as_deref(), Some("nagi"));
+    }
+
+    #[test]
+    fn default_backend_bucket_and_region_are_none() {
+        let config = NagiConfig::default();
+        assert!(config.backend.bucket.is_none());
+        assert!(config.backend.region.is_none());
     }
 
     #[test]
