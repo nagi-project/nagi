@@ -15,9 +15,12 @@
       "type": "string"
     },
     "exitCode": {
-      "description": "Process exit code of the stage command.",
+      "description": "Process exit code of the stage command. None for non-execution stages (e.g. lock_retry).",
       "format": "int32",
-      "type": "integer"
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "finishedAt": {
       "description": "RFC 3339 timestamp when the stage finished.",
@@ -32,12 +35,18 @@
       "type": "string"
     },
     "stderrPath": {
-      "description": "File path where stderr output is stored.",
-      "type": "string"
+      "description": "File path where stderr output is stored. None for non-execution stages.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "stdoutPath": {
-      "description": "File path where stdout output is stored.",
-      "type": "string"
+      "description": "File path where stdout output is stored. None for non-execution stages.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "syncType": {
       "description": "Whether this was a `sync` or `resync` operation.",
@@ -48,12 +57,9 @@
     "assetName",
     "date",
     "executionId",
-    "exitCode",
     "finishedAt",
     "stage",
     "startedAt",
-    "stderrPath",
-    "stdoutPath",
     "syncType"
   ],
   "title": "SyncLogEntry",

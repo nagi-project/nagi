@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "description": "Lock metadata written to the lock file.",
+  "description": "Lock metadata written to the lock file. Shared across local and remote backends.",
   "properties": {
     "acquired_at_epoch_secs": {
       "description": "Unix epoch seconds when the lock was acquired.",

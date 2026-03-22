@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 /// Lock metadata written to the lock file. Shared across local and remote backends.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LockInfo {
-    /// Process ID of the lock holder.
-    pub pid: u32,
+    /// Execution ID of the sync run that acquired the lock.
+    /// Correlates with the execution_id in sync logs.
+    pub execution_id: String,
     /// Unix epoch seconds when the lock was acquired.
     pub acquired_at_epoch_secs: u64,
     /// Time-to-live in seconds; the lock expires after this duration.
