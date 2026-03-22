@@ -47,14 +47,14 @@ run = "cargo audit"
 description = "Generate JSON Schema and update resource docs"
 run = """
 cargo run -p nagi-schema-gen
-uv run python scripts/gen_schema_docs.py docs/schemas docs/src
+uv run python scripts/gen_schema_docs.py docs/schemas docs
 """
 
 [tasks."docs:build"]
 description = "Build documentation site"
 depends = ["docs:gen-schema"]
-run = "mdbook build docs"
+run = "uv run mkdocs build --strict"
 
 [tasks."docs:serve"]
 description = "Serve documentation site locally with live reload"
-run = "mdbook serve docs --open"
+run = "uv run mkdocs serve"

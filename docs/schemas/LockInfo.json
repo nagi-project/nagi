@@ -8,11 +8,9 @@
       "minimum": 0.0,
       "type": "integer"
     },
-    "pid": {
-      "description": "Process ID of the lock holder.",
-      "format": "uint32",
-      "minimum": 0.0,
-      "type": "integer"
+    "execution_id": {
+      "description": "Execution ID of the sync run that acquired the lock. Correlates with the execution_id in sync logs.",
+      "type": "string"
     },
     "ttl_secs": {
       "description": "Time-to-live in seconds; the lock expires after this duration.",
@@ -23,7 +21,7 @@
   },
   "required": [
     "acquired_at_epoch_secs",
-    "pid",
+    "execution_id",
     "ttl_secs"
   ],
   "title": "LockInfo",

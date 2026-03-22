@@ -1,7 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::asset::SyncRef;
 use super::KindError;
 
 pub const KIND: &str = "Origin";
@@ -16,9 +15,9 @@ pub enum OriginSpec {
         connection: String,
         /// Local path to the dbt project directory (relative or absolute).
         project_dir: String,
-        /// Applied to all auto-generated Assets unless overridden.
+        /// Name of the Sync resource applied to all auto-generated Assets unless overridden.
         #[serde(default)]
-        default_sync: Option<SyncRef>,
+        default_sync: Option<String>,
     },
 }
 
@@ -72,38 +71,13 @@ projectDir: ../dbt-project
 type: DBT
 connection: my-bigquery
 projectDir: ../dbt-project
-defaultSync:
-  ref: dbt-default
+defaultSync: dbt-default
 "#;
         let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(
-            matches!(&spec, OriginSpec::DBT { default_sync: Some(sync_ref), .. }
-            if sync_ref.ref_name == "dbt-default")
+            matches!(&spec, OriginSpec::DBT { default_sync: Some(name), .. }
+            if name == "dbt-default")
         );
-    }
-
-    #[test]
-    fn parse_origin_spec_with_default_sync_and_with() {
-        let yaml = r#"
-type: DBT
-connection: my-bigquery
-projectDir: ../dbt-project
-defaultSync:
-  ref: dbt-default
-  with:
-    selector: "+{{ asset.name }}"
-"#;
-        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
-        if let OriginSpec::DBT {
-            default_sync: Some(sync_ref),
-            ..
-        } = &spec
-        {
-            assert_eq!(sync_ref.ref_name, "dbt-default");
-            assert_eq!(sync_ref.with.get("selector").unwrap(), "+{{ asset.name }}");
-        } else {
-            panic!("expected DBT with default_sync");
-        }
     }
 
     #[test]

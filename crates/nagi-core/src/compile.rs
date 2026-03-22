@@ -463,7 +463,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
     let mut resolved_assets = Vec::new();
     for (metadata, spec) in assets {
         for source_ref in &spec.sources {
-            require_ref(&sources, "Source", &source_ref.ref_name)?;
+            require_ref(&sources, "Source", source_ref)?;
         }
 
         // Resolve each on_drift entry: validate conditions ref + sync ref, expand templates.
@@ -479,16 +479,16 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             })?;
 
             // Resolve sync ref and expand templates.
-            require_sync_ref(&syncs, &entry.sync.ref_name)?;
-            let sync_spec = &syncs[&entry.sync.ref_name];
-            let resolved_sync = expand_sync_templates(sync_spec, &metadata.name, &entry.sync.with);
+            require_sync_ref(&syncs, &entry.sync)?;
+            let sync_spec = &syncs[&entry.sync];
+            let resolved_sync = expand_sync_templates(sync_spec, &metadata.name, &entry.with);
 
             all_conditions.extend(conditions.iter().cloned());
             resolved_on_drift.push(ResolvedOnDriftEntry {
                 conditions: conditions.clone(),
                 conditions_ref: entry.conditions.clone(),
                 sync: resolved_sync,
-                sync_ref_name: entry.sync.ref_name.clone(),
+                sync_ref_name: entry.sync.clone(),
             });
         }
 
@@ -499,7 +499,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         let connection = spec
             .sources
             .first()
-            .and_then(|s| source_connections.get(&s.ref_name))
+            .and_then(|s| source_connections.get(s))
             .and_then(|conn_name| connections.get(conn_name))
             .map(|conn_spec| ResolvedConnection::DbtProfile {
                 profile: conn_spec.dbt_profile.profile.clone(),
@@ -551,7 +551,7 @@ fn build_graph(
         });
         for source_ref in &asset.spec.sources {
             edges.push(GraphEdge {
-                from: source_ref.ref_name.clone(),
+                from: source_ref.clone(),
                 to: asset.metadata.name.clone(),
             });
         }
@@ -635,7 +635,7 @@ struct CompiledAssetSpecYaml<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tags: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    sources: &'a Vec<crate::kind::asset::SourceRef>,
+    sources: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     on_drift: &'a Vec<ResolvedOnDriftEntry>,
     auto_sync: bool,
@@ -658,7 +658,7 @@ pub struct CompiledAssetSpec {
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
-    pub sources: Vec<crate::kind::asset::SourceRef>,
+    pub sources: Vec<String>,
     #[serde(default)]
     pub on_drift: Vec<ResolvedOnDriftEntry>,
     #[serde(default = "default_true")]
@@ -800,8 +800,7 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run",
+      sync: dbt-run",
         ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.assets[0].resolved_on_drift.len(), 1);
@@ -822,7 +821,7 @@ metadata:
   name: daily-sales
 spec:
   sources:
-    - ref: nonexistent-source",
+    - nonexistent-source",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
@@ -841,8 +840,7 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: nonexistent-sync",
+      sync: nonexistent-sync",
         ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
@@ -861,8 +859,7 @@ metadata:
 spec:
   onDrift:
     - conditions: nonexistent-group
-      sync:
-        ref: dbt-run",
+      sync: dbt-run",
         ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
@@ -892,8 +889,7 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run
+      sync: dbt-run
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
@@ -902,8 +898,7 @@ metadata:
 spec:
   onDrift:
     - conditions: quality-checks
-      sync:
-        ref: dbt-full",
+      sync: dbt-full",
         ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.assets.len(), 1);
@@ -935,8 +930,7 @@ spec:
   tags: [finance]
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run
+      sync: dbt-run
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
@@ -946,8 +940,7 @@ spec:
   tags: [other]
   onDrift:
     - conditions: quality-checks
-      sync:
-        ref: dbt-full",
+      sync: dbt-full",
         ]));
         let output = resolve(resources).unwrap();
         let asset = &output.assets[0];
@@ -995,7 +988,7 @@ metadata:
 spec:
   tags: [finance]
   sources:
-    - ref: raw-sales",
+    - raw-sales",
         ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.graph.nodes.len(), 2);
@@ -1044,11 +1037,9 @@ metadata:
 spec:
   onDrift:
     - conditions: checks-a
-      sync:
-        ref: dbt-run
+      sync: dbt-run
     - conditions: checks-b
-      sync:
-        ref: dbt-full",
+      sync: dbt-full",
         ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::Kind(_)));
@@ -1067,8 +1058,7 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run",
+      sync: dbt-run",
         ]));
         let output = resolve(resources).unwrap();
         let resolved = &output.assets[0];
@@ -1101,10 +1091,9 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run
-        with:
-          selector: \"+daily_sales\"",
+      sync: dbt-run
+      with:
+        selector: \"+daily_sales\"",
         ]));
         let output = resolve(resources).unwrap();
         let resolved = &output.assets[0];
@@ -1141,8 +1130,7 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: full-sync",
+      sync: full-sync",
         ]));
         let output = resolve(resources).unwrap();
         let sync = &output.assets[0].resolved_on_drift[0].sync;
@@ -1180,11 +1168,9 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run
+      sync: dbt-run
     - conditions: quality-checks
-      sync:
-        ref: dbt-full",
+      sync: dbt-full",
         ]));
         let output = resolve(resources).unwrap();
         let resolved = &output.assets[0];
@@ -1234,10 +1220,9 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run
-        with:
-          selector: \"+daily_sales\"",
+      sync: dbt-run
+      with:
+        selector: \"+daily_sales\"",
         ]));
         let output = resolve(resources).unwrap();
         let args = &output.assets[0].resolved_on_drift[0].sync.run.args;
@@ -1288,7 +1273,7 @@ metadata:
   name: daily-sales
 spec:
   sources:
-    - ref: raw-sales",
+    - raw-sales",
         ]));
         let output = resolve(resources).unwrap();
         write_output(&output, &target).unwrap();
@@ -1317,8 +1302,7 @@ metadata:
 spec:
   onDrift:
     - conditions: daily-sla
-      sync:
-        ref: dbt-run",
+      sync: dbt-run",
         ]));
         let output = resolve(resources).unwrap();
         write_output(&output, &target).unwrap();
@@ -1439,8 +1423,7 @@ spec:
   type: DBT
   connection: my-bq
   projectDir: ../dbt-project
-  defaultSync:
-    ref: dbt-run";
+  defaultSync: dbt-run";
 
     fn manifests_for(origin_name: &str) -> HashMap<String, String> {
         HashMap::from([(origin_name.to_string(), MANIFEST_JSON.to_string())])

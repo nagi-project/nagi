@@ -1,0 +1,64 @@
+site_name: Nagi Documentation
+site_url: https://tosh2230.github.io/nagi/
+repo_url: https://github.com/tosh2230/nagi
+repo_name: tosh2230/nagi
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - def_list
+  - attr_list
+
+nav:
+  - Introduction: index.md
+  - Overview:
+    - Concepts: concepts.md
+    - Get Started: get-started.md
+    - Quickstart: quickstart.md
+  - Configurations:
+    - Project: configurations/project.md
+    - Resources:
+      - Overview: configurations/resources/index.md
+      - "kind: Asset": configurations/resources/asset.md
+      - "kind: Source": configurations/resources/source.md
+      - "kind: Connection": configurations/resources/connection.md
+      - "kind: Sync": configurations/resources/sync.md
+      - "kind: Conditions": configurations/resources/conditions.md
+      - "kind: Origin": configurations/resources/origin.md
+  - Architecture:
+    - Serve: architecture/serve.md
+    - Storage: architecture/storage.md
+    - Notifications: architecture/notifications.md
+    - MCP Server: architecture/mcp.md
+  - Integrations:
+    - dbt Core: integrations/dbt-core.md
+  - Reference:
+    - CLI: cli.md
+    - Glossary: glossary.md

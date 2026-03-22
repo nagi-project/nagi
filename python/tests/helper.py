@@ -51,11 +51,10 @@ ASSET_YAML = (
     f"  name: {ASSET_NAME}\n"
     "spec:\n"
     "  sources:\n"
-    f"    - ref: {SOURCE_NAME}\n"
+    f"    - {SOURCE_NAME}\n"
     "  onDrift:\n"
     f"    - conditions: {CONDITIONS_NAME}\n"
-    "      sync:\n"
-    f"        ref: {SYNC_NAME}\n"
+    f"      sync: {SYNC_NAME}\n"
 )
 
 SYNC_YAML = (

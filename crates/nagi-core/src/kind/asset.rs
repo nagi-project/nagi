@@ -18,9 +18,9 @@ pub struct AssetSpec {
     /// Tags for filtering with `--select tag:X`.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// References to upstream Source resources.
+    /// Names of upstream Source resources.
     #[serde(default)]
-    pub sources: Vec<SourceRef>,
+    pub sources: Vec<String>,
     /// Condition-sync pairs evaluated in order. First entry whose conditions detect drift
     /// determines which sync to run. When omitted, the Asset is always Ready.
     #[serde(default)]
@@ -34,28 +34,14 @@ fn default_auto_sync() -> bool {
     true
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct SourceRef {
-    /// Name of the Source resource to reference.
-    #[serde(rename = "ref")]
-    pub ref_name: String,
-}
-
 /// An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.
 /// The conditions are evaluated as a group (all must pass for no drift).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OnDriftEntry {
     /// Name of the `kind: Conditions` resource whose conditions define drift.
     pub conditions: String,
-    /// Reference to the Sync resource to execute when drift is detected.
-    pub sync: SyncRef,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct SyncRef {
-    /// Name of the Sync resource to reference.
-    #[serde(rename = "ref")]
-    pub ref_name: String,
+    /// Name of the Sync resource to execute when drift is detected.
+    pub sync: String,
     /// Template variables passed to the Sync resource for argument interpolation.
     #[serde(default)]
     pub with: HashMap<String, String>,
@@ -122,7 +108,7 @@ impl OnDriftEntry {
                 message: "on_drift conditions ref must not be empty".to_string(),
             });
         }
-        if self.sync.ref_name.is_empty() {
+        if self.sync.is_empty() {
             return Err(KindError::InvalidSpec {
                 kind: KIND.to_string(),
                 message: "on_drift sync ref must not be empty".to_string(),
@@ -209,34 +195,32 @@ mod tests {
     fn parse_full_asset_spec() {
         let yaml = r#"
 sources:
-  - ref: raw-sales
-  - ref: customer-master
+  - raw-sales
+  - customer-master
 onDrift:
   - conditions: daily-sla
-    sync:
-      ref: dbt-default
-      with:
-        selector: "+daily_sales"
+    sync: dbt-default
+    with:
+      selector: "+daily_sales"
   - conditions: sales-quality
-    sync:
-      ref: sales-full-reload
+    sync: sales-full-reload
 autoSync: true
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
         assert_eq!(spec.sources.len(), 2);
-        assert_eq!(spec.sources[0].ref_name, "raw-sales");
-        assert_eq!(spec.sources[1].ref_name, "customer-master");
+        assert_eq!(spec.sources[0], "raw-sales");
+        assert_eq!(spec.sources[1], "customer-master");
 
         assert_eq!(spec.on_drift.len(), 2);
         assert_eq!(spec.on_drift[0].conditions, "daily-sla");
-        assert_eq!(spec.on_drift[0].sync.ref_name, "dbt-default");
+        assert_eq!(spec.on_drift[0].sync, "dbt-default");
         assert_eq!(
-            spec.on_drift[0].sync.with.get("selector").unwrap(),
+            spec.on_drift[0].with.get("selector").unwrap(),
             "+daily_sales"
         );
         assert_eq!(spec.on_drift[1].conditions, "sales-quality");
-        assert_eq!(spec.on_drift[1].sync.ref_name, "sales-full-reload");
+        assert_eq!(spec.on_drift[1].sync, "sales-full-reload");
 
         assert!(spec.auto_sync);
     }
@@ -246,8 +230,7 @@ autoSync: true
         let yaml = r#"
 onDrift:
   - conditions: freshness-check
-    sync:
-      ref: dbt-run
+    sync: dbt-run
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
@@ -260,7 +243,7 @@ onDrift:
     fn parse_asset_without_on_drift() {
         let yaml = r#"
 sources:
-  - ref: raw-sales
+  - raw-sales
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(
@@ -274,8 +257,7 @@ sources:
         let yaml = r#"
 onDrift:
   - conditions: check
-    sync:
-      ref: dbt-run
+    sync: dbt-run
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(spec.auto_sync);
@@ -286,8 +268,7 @@ onDrift:
         let yaml = r#"
 onDrift:
   - conditions: check
-    sync:
-      ref: dbt-run
+    sync: dbt-run
 autoSync: false
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
@@ -312,10 +293,8 @@ autoSync: false
             sources: vec![],
             on_drift: vec![OnDriftEntry {
                 conditions: "daily-sla".to_string(),
-                sync: SyncRef {
-                    ref_name: "dbt-run".to_string(),
-                    with: HashMap::new(),
-                },
+                sync: "dbt-run".to_string(),
+                with: HashMap::new(),
             }],
             auto_sync: true,
         };
@@ -329,10 +308,8 @@ autoSync: false
             sources: vec![],
             on_drift: vec![OnDriftEntry {
                 conditions: "".to_string(),
-                sync: SyncRef {
-                    ref_name: "dbt-run".to_string(),
-                    with: HashMap::new(),
-                },
+                sync: "dbt-run".to_string(),
+                with: HashMap::new(),
             }],
             auto_sync: true,
         };
@@ -347,10 +324,8 @@ autoSync: false
             sources: vec![],
             on_drift: vec![OnDriftEntry {
                 conditions: "daily-sla".to_string(),
-                sync: SyncRef {
-                    ref_name: "".to_string(),
-                    with: HashMap::new(),
-                },
+                sync: "".to_string(),
+                with: HashMap::new(),
             }],
             auto_sync: true,
         };
@@ -532,17 +507,15 @@ run: [dbt, test, --select, my_model]
         let yaml = r#"
 onDrift:
   - conditions: daily-sla
-    sync:
-      ref: dbt-incremental
+    sync: dbt-incremental
   - conditions: sales-quality
-    sync:
-      ref: dbt-full-refresh
+    sync: dbt-full-refresh
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(spec.on_drift.len(), 2);
         assert_eq!(spec.on_drift[0].conditions, "daily-sla");
-        assert_eq!(spec.on_drift[0].sync.ref_name, "dbt-incremental");
+        assert_eq!(spec.on_drift[0].sync, "dbt-incremental");
         assert_eq!(spec.on_drift[1].conditions, "sales-quality");
-        assert_eq!(spec.on_drift[1].sync.ref_name, "dbt-full-refresh");
+        assert_eq!(spec.on_drift[1].sync, "dbt-full-refresh");
     }
 }

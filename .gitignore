@@ -44,5 +44,5 @@ dist/
 project_spec.md
 milestones.md
 
-# mdBook build output
-docs/book/
+# MkDocs build output
+site/

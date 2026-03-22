@@ -7,7 +7,7 @@
       "type": "string"
     },
     "DesiredCondition": {
-      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion) and used as a key in execution logs.",
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after Conditions expansion) and used as a key in execution logs.",
       "oneOf": [
         {
           "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
@@ -150,10 +150,10 @@
       "type": "string"
     }
   },
-  "description": "Spec for `kind: DesiredGroup`. A reusable set of desired conditions referenced from Asset `desiredSets` via `ref:`.",
+  "description": "Spec for `kind: Conditions`. A reusable set of conditions referenced from Asset `onDrift` entries.",
   "items": {
     "$ref": "#/definitions/DesiredCondition"
   },
-  "title": "DesiredGroupSpec",
+  "title": "ConditionsSpec",
   "type": "array"
 }

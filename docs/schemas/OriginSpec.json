@@ -1,27 +1,5 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
-    "SyncRef": {
-      "properties": {
-        "ref": {
-          "description": "Name of the Sync resource to reference.",
-          "type": "string"
-        },
-        "with": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "description": "Template variables passed to the Sync resource for argument interpolation.",
-          "type": "object"
-        }
-      },
-      "required": [
-        "ref"
-      ],
-      "type": "object"
-    }
-  },
   "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
   "oneOf": [
     {
@@ -31,16 +9,12 @@
           "type": "string"
         },
         "defaultSync": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SyncRef"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": null,
-          "description": "Applied to all auto-generated Assets unless overridden."
+          "description": "Name of the Sync resource applied to all auto-generated Assets unless overridden.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "projectDir": {
           "description": "Local path to the dbt project directory (relative or absolute).",

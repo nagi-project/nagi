@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
-use crate::kind::asset::{AssetSpec, DesiredCondition, OnDriftEntry, SourceRef};
+use crate::kind::asset::{AssetSpec, DesiredCondition, OnDriftEntry};
 use crate::kind::origin::OriginSpec;
 use crate::kind::source::SourceSpec;
 use crate::kind::sync::{StepType, SyncSpec, SyncStep};
@@ -111,9 +111,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
 
         for dep_id in &model.depends_on.nodes {
             if let Some(source_name) = source_map.get(dep_id) {
-                sources_refs.push(SourceRef {
-                    ref_name: source_name.clone(),
-                });
+                sources_refs.push(source_name.clone());
             } else if let Some(model_name) = model_names.get(dep_id) {
                 model_deps.push(model_name.clone());
             }
@@ -131,10 +129,11 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
                     },
                     spec: crate::kind::condition::ConditionsSpec(conditions),
                 });
-                if let Some(sync_ref) = &default_sync {
+                if let Some(sync_name) = &default_sync {
                     vec![OnDriftEntry {
                         conditions: group_name,
-                        sync: sync_ref.clone(),
+                        sync: sync_name.clone(),
+                        with: HashMap::new(),
                     }]
                 } else {
                     vec![]
@@ -262,7 +261,6 @@ fn make_tag_sync(name: &str, selector: &str) -> NagiKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kind::asset::SyncRef;
 
     /// A simplified jaffle_shop manifest for testing.
     fn jaffle_shop_manifest_json() -> &'static str {
@@ -394,10 +392,7 @@ mod tests {
         OriginSpec::DBT {
             connection: "my-bigquery".to_string(),
             project_dir: "../dbt-project".to_string(),
-            default_sync: Some(SyncRef {
-                ref_name: "dbt-default".to_string(),
-                with: HashMap::new(),
-            }),
+            default_sync: Some("dbt-default".to_string()),
         }
     }
 
@@ -469,7 +464,7 @@ mod tests {
             .unwrap();
         if let NagiKind::Asset { spec, .. } = stg_customers {
             assert_eq!(spec.sources.len(), 1);
-            assert_eq!(spec.sources[0].ref_name, "raw.customers");
+            assert_eq!(spec.sources[0], "raw.customers");
         } else {
             panic!("stg_customers should be an Asset");
         }
@@ -486,7 +481,7 @@ mod tests {
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
             assert_eq!(spec.on_drift.len(), 1);
-            assert_eq!(spec.on_drift[0].sync.ref_name, "dbt-default");
+            assert_eq!(spec.on_drift[0].sync, "dbt-default");
             assert_eq!(spec.on_drift[0].conditions, "dbt-tests-customers");
         } else {
             panic!("customers should be an Asset");

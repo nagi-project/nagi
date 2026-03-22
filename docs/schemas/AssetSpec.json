@@ -1,194 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "CronSchedule": {
-      "description": "A cron expression in standard 5-field format (e.g. \"0 3 * * *\").",
-      "format": "cron",
-      "type": "string"
-    },
-    "DesiredCondition": {
-      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion) and used as a key in execution logs.",
-      "oneOf": [
-        {
-          "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
-          "properties": {
-            "checkAt": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/CronSchedule"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional cron expression for additional evaluation at a specific time."
-            },
-            "column": {
-              "description": "If omitted, freshness is determined from table metadata instead of a column value.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "interval": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Duration"
-                }
-              ],
-              "description": "Polling interval for re-evaluating this condition."
-            },
-            "maxAge": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Duration"
-                }
-              ],
-              "description": "Maximum acceptable age of the data before the condition becomes Not Ready."
-            },
-            "name": {
-              "description": "Unique identifier for this condition within the Asset.",
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "Freshness"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "interval",
-            "maxAge",
-            "name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Query must return a scalar boolean. Ready when the result is true.",
-          "properties": {
-            "interval": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Duration"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
-            },
-            "name": {
-              "description": "Unique identifier for this condition within the Asset.",
-              "type": "string"
-            },
-            "query": {
-              "description": "SQL query that must return a scalar boolean.",
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "SQL"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "query",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Runs an external command. Ready when the process exits with code 0. `run` is argv: the first element is the program, the rest are arguments.",
-          "properties": {
-            "interval": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Duration"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
-            },
-            "name": {
-              "description": "Unique identifier for this condition within the Asset.",
-              "type": "string"
-            },
-            "run": {
-              "description": "Command and arguments in argv format.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "type": {
-              "enum": [
-                "Command"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "run",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DesiredGroupRef": {
-      "description": "A reference to a `kind: DesiredGroup` resource.",
+    "OnDriftEntry": {
+      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference. The conditions are evaluated as a group (all must pass for no drift).",
       "properties": {
-        "ref": {
-          "description": "Name of the DesiredGroup resource to reference.",
+        "conditions": {
+          "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
           "type": "string"
-        }
-      },
-      "required": [
-        "ref"
-      ],
-      "type": "object"
-    },
-    "DesiredSetEntry": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/DesiredGroupRef"
         },
-        {
-          "$ref": "#/definitions/DesiredCondition"
-        }
-      ],
-      "description": "An entry in `desiredSets`. Either a reference to a `kind: DesiredGroup` or an inline condition."
-    },
-    "Duration": {
-      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
-      "format": "duration",
-      "type": "string"
-    },
-    "SourceRef": {
-      "properties": {
-        "ref": {
-          "description": "Name of the Source resource to reference.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ref"
-      ],
-      "type": "object"
-    },
-    "SyncRef": {
-      "properties": {
-        "ref": {
-          "description": "Name of the Sync resource to reference.",
+        "sync": {
+          "description": "Name of the Sync resource to execute when drift is detected.",
           "type": "string"
         },
         "with": {
@@ -201,55 +22,34 @@
         }
       },
       "required": [
-        "ref"
+        "conditions",
+        "sync"
       ],
       "type": "object"
     }
   },
-  "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. The reconciliation loop continuously evaluates `desiredSets` and runs `sync` until all conditions are met.",
+  "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. `on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
   "properties": {
     "autoSync": {
       "default": true,
       "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
       "type": "boolean"
     },
-    "desiredSets": {
+    "onDrift": {
       "default": [],
-      "description": "All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.",
+      "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready.",
       "items": {
-        "$ref": "#/definitions/DesiredSetEntry"
+        "$ref": "#/definitions/OnDriftEntry"
       },
       "type": "array"
-    },
-    "resync": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/SyncRef"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Reference to the Sync resource for recovery operations. Falls back to `sync` when omitted."
     },
     "sources": {
       "default": [],
-      "description": "References to upstream Source resources.",
+      "description": "Names of upstream Source resources.",
       "items": {
-        "$ref": "#/definitions/SourceRef"
+        "type": "string"
       },
       "type": "array"
-    },
-    "sync": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/SyncRef"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Reference to the Sync resource for convergence operations."
     },
     "tags": {
       "default": [],

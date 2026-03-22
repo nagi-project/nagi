@@ -85,11 +85,11 @@ async fn check_sources_unchanged(
     eval_cache: &dyn Cache,
 ) -> Option<AssetEvalResult> {
     for source in &compiled.spec.sources {
-        let current = match conn.table_stats(&source.ref_name).await {
+        let current = match conn.table_stats(source).await {
             Ok(s) => s,
             Err(_) => return None,
         };
-        let cached = match stats_cache.read(&source.ref_name) {
+        let cached = match stats_cache.read(source) {
             Ok(Some(s)) => s,
             _ => return None,
         };
@@ -108,12 +108,9 @@ async fn update_source_stats(
     stats_cache: &dyn SourceStatsCache,
 ) {
     for source in &compiled.spec.sources {
-        if let Ok(stats) = conn.table_stats(&source.ref_name).await {
-            if let Err(e) = stats_cache.write(&source.ref_name, &stats) {
-                eprintln!(
-                    "warning: failed to cache source stats for {}: {e}",
-                    source.ref_name
-                );
+        if let Ok(stats) = conn.table_stats(source).await {
+            if let Err(e) = stats_cache.write(source, &stats) {
+                eprintln!("warning: failed to cache source stats for {}: {e}", source);
             }
         }
     }
@@ -321,7 +318,6 @@ mod tests {
     use crate::compile::CompiledAssetSpec;
     use crate::db::{ConnectionError, TableStats};
     use crate::evaluate::{AssetEvalResult, ConditionResult, ConditionStatus};
-    use crate::kind::asset::SourceRef;
     use crate::kind::Metadata;
     use crate::storage::StorageError;
     use async_trait::async_trait;
@@ -425,12 +421,7 @@ mod tests {
             },
             spec: CompiledAssetSpec {
                 tags: vec![],
-                sources: sources
-                    .into_iter()
-                    .map(|s| SourceRef {
-                        ref_name: s.to_string(),
-                    })
-                    .collect(),
+                sources: sources.into_iter().map(|s| s.to_string()).collect(),
                 on_drift: vec![],
                 auto_sync: true,
             },

@@ -222,7 +222,7 @@ metadata:
   name: daily-sales
 spec:
   sources:
-    - ref: raw-sales
+    - raw-sales
 "#;
         let resource = parse_kind(yaml).unwrap();
         assert_eq!(resource.kind(), asset::KIND);
@@ -397,8 +397,7 @@ spec:
   type: DBT
   connection: my-bigquery
   projectDir: ../dbt-project
-  defaultSync:
-    ref: dbt-default
+  defaultSync: dbt-default
 "#;
         let resource = parse_kind(yaml).unwrap();
         assert_eq!(resource.kind(), origin::KIND);

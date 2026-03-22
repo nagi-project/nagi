@@ -2,50 +2,28 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "AssetSpec": {
-      "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. The reconciliation loop continuously evaluates `desiredSets` and runs `sync` until all conditions are met.",
+      "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. `on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
       "properties": {
         "autoSync": {
           "default": true,
           "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
           "type": "boolean"
         },
-        "desiredSets": {
+        "onDrift": {
           "default": [],
-          "description": "All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.",
+          "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready.",
           "items": {
-            "$ref": "#/definitions/DesiredSetEntry"
+            "$ref": "#/definitions/OnDriftEntry"
           },
           "type": "array"
-        },
-        "resync": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SyncRef"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Reference to the Sync resource for recovery operations. Falls back to `sync` when omitted."
         },
         "sources": {
           "default": [],
-          "description": "References to upstream Source resources.",
+          "description": "Names of upstream Source resources.",
           "items": {
-            "$ref": "#/definitions/SourceRef"
+            "type": "string"
           },
           "type": "array"
-        },
-        "sync": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SyncRef"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Reference to the Sync resource for convergence operations."
         },
         "tags": {
           "default": [],
@@ -57,6 +35,13 @@
         }
       },
       "type": "object"
+    },
+    "ConditionsSpec": {
+      "description": "Spec for `kind: Conditions`. A reusable set of conditions referenced from Asset `onDrift` entries.",
+      "items": {
+        "$ref": "#/definitions/DesiredCondition"
+      },
+      "type": "array"
     },
     "ConnectionSpec": {
       "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Sources.",
@@ -125,7 +110,7 @@
       "type": "object"
     },
     "DesiredCondition": {
-      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion) and used as a key in execution logs.",
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after Conditions expansion) and used as a key in execution logs.",
       "oneOf": [
         {
           "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
@@ -262,37 +247,6 @@
         }
       ]
     },
-    "DesiredGroupRef": {
-      "description": "A reference to a `kind: DesiredGroup` resource.",
-      "properties": {
-        "ref": {
-          "description": "Name of the DesiredGroup resource to reference.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ref"
-      ],
-      "type": "object"
-    },
-    "DesiredGroupSpec": {
-      "description": "Spec for `kind: DesiredGroup`. A reusable set of desired conditions referenced from Asset `desiredSets` via `ref:`.",
-      "items": {
-        "$ref": "#/definitions/DesiredCondition"
-      },
-      "type": "array"
-    },
-    "DesiredSetEntry": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/DesiredGroupRef"
-        },
-        {
-          "$ref": "#/definitions/DesiredCondition"
-        }
-      ],
-      "description": "An entry in `desiredSets`. Either a reference to a `kind: DesiredGroup` or an inline condition."
-    },
     "Duration": {
       "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
       "format": "duration",
@@ -310,6 +264,32 @@
       ],
       "type": "object"
     },
+    "OnDriftEntry": {
+      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference. The conditions are evaluated as a group (all must pass for no drift).",
+      "properties": {
+        "conditions": {
+          "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
+          "type": "string"
+        },
+        "sync": {
+          "description": "Name of the Sync resource to execute when drift is detected.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync resource for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "conditions",
+        "sync"
+      ],
+      "type": "object"
+    },
     "OriginSpec": {
       "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
       "oneOf": [
@@ -320,16 +300,12 @@
               "type": "string"
             },
             "defaultSync": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/SyncRef"
-                },
-                {
-                  "type": "null"
-                }
-              ],
               "default": null,
-              "description": "Applied to all auto-generated Assets unless overridden."
+              "description": "Name of the Sync resource applied to all auto-generated Assets unless overridden.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "projectDir": {
               "description": "Local path to the dbt project directory (relative or absolute).",
@@ -351,18 +327,6 @@
         }
       ]
     },
-    "SourceRef": {
-      "properties": {
-        "ref": {
-          "description": "Name of the Source resource to reference.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ref"
-      ],
-      "type": "object"
-    },
     "SourceSpec": {
       "description": "Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.",
       "properties": {
@@ -382,26 +346,6 @@
         "Command"
       ],
       "type": "string"
-    },
-    "SyncRef": {
-      "properties": {
-        "ref": {
-          "description": "Name of the Sync resource to reference.",
-          "type": "string"
-        },
-        "with": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "description": "Template variables passed to the Sync resource for argument interpolation.",
-          "type": "object"
-        }
-      },
-      "required": [
-        "ref"
-      ],
-      "type": "object"
     },
     "SyncSpec": {
       "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps. Reusable across multiple Assets via `ref`.",
@@ -554,7 +498,7 @@
         },
         "kind": {
           "enum": [
-            "DesiredGroup"
+            "Conditions"
           ],
           "type": "string"
         },
@@ -562,7 +506,7 @@
           "$ref": "#/definitions/Metadata"
         },
         "spec": {
-          "$ref": "#/definitions/DesiredGroupSpec"
+          "$ref": "#/definitions/ConditionsSpec"
         }
       },
       "required": [

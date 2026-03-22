@@ -1,7 +1,7 @@
 """Generate Markdown attribute tables from JSON Schema files.
 
 Usage:
-    python scripts/gen_schema_docs.py docs/schemas docs/src/configurations/resources
+    python scripts/gen_schema_docs.py docs/schemas docs/configurations/resources
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ SCHEMA_MAP = {
     "SourceSpec": ("configurations/resources/source.md", "kind: Source", False),
     "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection", False),
     "SyncSpec": ("configurations/resources/sync.md", "kind: Sync", False),
-    "DesiredGroupSpec": ("configurations/resources/desired-group.md", "kind: DesiredGroup", False),
+    "ConditionsSpec": ("configurations/resources/conditions.md", "kind: Conditions", False),
     "OriginSpec": ("configurations/resources/origin.md", "kind: Origin", False),
     "NagiConfig": ("configurations/project.md", "nagi.yaml", False),
     "AssetEvalResult": ("architecture/storage.md", "Cache", True),
