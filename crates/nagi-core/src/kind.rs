@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod asset;
-pub mod conditions;
+pub mod condition;
 pub mod connection;
 pub mod origin;
 pub mod source;
 pub mod sync;
 
 pub use asset::AssetSpec;
-pub use conditions::ConditionsSpec;
+pub use condition::ConditionsSpec;
 pub use connection::ConnectionSpec;
 pub use origin::OriginSpec;
 pub use source::SourceSpec;
@@ -107,7 +107,7 @@ impl NagiKind {
             NagiKind::Connection { .. } => connection::KIND,
             NagiKind::Source { .. } => source::KIND,
             NagiKind::Asset { .. } => asset::KIND,
-            NagiKind::Conditions { .. } => conditions::KIND,
+            NagiKind::Conditions { .. } => condition::KIND,
             NagiKind::Sync { .. } => sync::KIND,
             NagiKind::Origin { .. } => origin::KIND,
         }

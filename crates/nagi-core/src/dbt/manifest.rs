@@ -129,7 +129,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
                     metadata: Metadata {
                         name: group_name.clone(),
                     },
-                    spec: crate::kind::conditions::ConditionsSpec(conditions),
+                    spec: crate::kind::condition::ConditionsSpec(conditions),
                 });
                 if let Some(sync_ref) = &default_sync {
                     vec![OnDriftEntry {
