@@ -294,14 +294,16 @@ fn parse_sync_type(s: &str) -> Result<SyncType, SyncError> {
     }
 }
 
-fn resolve_sync_spec(compiled: &CompiledAsset, st: SyncType) -> Result<SyncSpec, SyncError> {
-    let spec = match st {
-        SyncType::Sync => compiled.spec.sync.clone(),
-        SyncType::Resync => compiled.spec.resync.clone().or(compiled.spec.sync.clone()),
-    };
-    spec.ok_or_else(|| SyncError::NoSyncSpec {
-        asset_name: compiled.metadata.name.clone(),
-    })
+/// Resolves the sync spec from the first on_drift entry (first-match).
+fn resolve_sync_spec(compiled: &CompiledAsset) -> Result<SyncSpec, SyncError> {
+    compiled
+        .spec
+        .on_drift
+        .first()
+        .map(|entry| entry.sync.clone())
+        .ok_or_else(|| SyncError::NoSyncSpec {
+            asset_name: compiled.metadata.name.clone(),
+        })
 }
 
 /// Builds sync proposals for all compiled assets matching the selectors.
@@ -331,7 +333,7 @@ pub async fn propose_sync_all(
 
         let compiled: CompiledAsset =
             serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
-        let dry_run_stages = match resolve_sync_spec(&compiled, st) {
+        let dry_run_stages = match resolve_sync_spec(&compiled) {
             Ok(sync_spec) => {
                 let parsed_stages = stages.map(Stage::parse_list).transpose()?;
                 let dr = dry_run_sync(name, &sync_spec, st, parsed_stages.as_deref());
@@ -437,7 +439,7 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
     let compiled: CompiledAsset =
         serde_yaml::from_str(params.yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
     let st = parse_sync_type(params.sync_type)?;
-    let sync_spec = resolve_sync_spec(&compiled, st)?;
+    let sync_spec = resolve_sync_spec(&compiled)?;
     let parsed_stages = params.stages.map(Stage::parse_list).transpose()?;
 
     if params.dry_run {

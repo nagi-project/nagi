@@ -11,7 +11,7 @@ use super::KindError;
 pub const KIND: &str = "Asset";
 
 /// Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.
-/// The reconciliation loop continuously evaluates `desiredSets` and runs `sync` until all conditions are met.
+/// `on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSpec {
@@ -21,16 +21,13 @@ pub struct AssetSpec {
     /// References to upstream Source resources.
     #[serde(default)]
     pub sources: Vec<SourceRef>,
-    /// All entries are AND-evaluated. All true → Ready. When omitted, the Asset is always Ready.
+    /// Condition-sync pairs evaluated in order. First entry whose conditions detect drift
+    /// determines which sync to run. When omitted, the Asset is always Ready.
     #[serde(default)]
-    pub desired_sets: Vec<DesiredSetEntry>,
+    pub on_drift: Vec<OnDriftEntry>,
     /// Controls automatic sync execution in `nagi serve`. Defaults to `true`.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
-    /// Reference to the Sync resource for convergence operations.
-    pub sync: Option<SyncRef>,
-    /// Reference to the Sync resource for recovery operations. Falls back to `sync` when omitted.
-    pub resync: Option<SyncRef>,
 }
 
 fn default_auto_sync() -> bool {
@@ -44,6 +41,16 @@ pub struct SourceRef {
     pub ref_name: String,
 }
 
+/// An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.
+/// The conditions are evaluated as a group (all must pass for no drift).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OnDriftEntry {
+    /// Name of the `kind: DesiredGroup` resource whose conditions define drift.
+    pub conditions: String,
+    /// Reference to the Sync resource to execute when drift is detected.
+    pub sync: SyncRef,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncRef {
     /// Name of the Sync resource to reference.
@@ -52,22 +59,6 @@ pub struct SyncRef {
     /// Template variables passed to the Sync resource for argument interpolation.
     #[serde(default)]
     pub with: HashMap<String, String>,
-}
-
-/// An entry in `desiredSets`. Either a reference to a `kind: DesiredGroup` or an inline condition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum DesiredSetEntry {
-    Ref(DesiredGroupRef),
-    Inline(DesiredCondition),
-}
-
-/// A reference to a `kind: DesiredGroup` resource.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct DesiredGroupRef {
-    /// Name of the DesiredGroup resource to reference.
-    #[serde(rename = "ref")]
-    pub ref_name: String,
 }
 
 /// A single desired state condition. The Asset is Ready only when all conditions are satisfied.
@@ -116,32 +107,33 @@ pub enum DesiredCondition {
 
 impl AssetSpec {
     pub fn validate(&self) -> Result<(), KindError> {
-        for entry in &self.desired_sets {
+        for entry in &self.on_drift {
             entry.validate()?;
         }
         Ok(())
     }
 }
 
-impl DesiredSetEntry {
+impl OnDriftEntry {
     fn validate(&self) -> Result<(), KindError> {
-        match self {
-            DesiredSetEntry::Ref(r) => {
-                if r.ref_name.is_empty() {
-                    return Err(KindError::InvalidSpec {
-                        kind: KIND.to_string(),
-                        message: "desiredSets ref must not be empty".to_string(),
-                    });
-                }
-                Ok(())
-            }
-            DesiredSetEntry::Inline(condition) => condition.validate(),
+        if self.conditions.is_empty() {
+            return Err(KindError::InvalidSpec {
+                kind: KIND.to_string(),
+                message: "on_drift conditions ref must not be empty".to_string(),
+            });
         }
+        if self.sync.ref_name.is_empty() {
+            return Err(KindError::InvalidSpec {
+                kind: KIND.to_string(),
+                message: "on_drift sync ref must not be empty".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
 /// Checks that a resolved (flattened) list of conditions has unique names.
-/// Called after compile resolves all `Ref` entries into inline conditions.
+/// Called after compile resolves all conditions references.
 pub fn validate_no_duplicate_condition_names(
     conditions: &[DesiredCondition],
 ) -> Result<(), KindError> {
@@ -151,7 +143,7 @@ pub fn validate_no_duplicate_condition_names(
             return Err(KindError::InvalidSpec {
                 kind: KIND.to_string(),
                 message: format!(
-                    "desiredSets contains duplicate condition name '{}'",
+                    "on_drift contains duplicate condition name '{}'",
                     condition.name()
                 ),
             });
@@ -219,27 +211,16 @@ mod tests {
 sources:
   - ref: raw-sales
   - ref: customer-master
-desiredSets:
-  - ref: daily-sla
-  - name: data-freshness
-    type: Freshness
-    maxAge: 24h
-    interval: 6h
-    checkAt: "0 3 * * *"
-    column: updated_at
-  - name: no-negative-amount
-    type: SQL
-    query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
-  - name: dbt-test-sales
-    type: Command
-    run: [dbt, test, --select, daily_sales]
+onDrift:
+  - conditions: daily-sla
+    sync:
+      ref: dbt-default
+      with:
+        selector: "+daily_sales"
+  - conditions: sales-quality
+    sync:
+      ref: sales-full-reload
 autoSync: true
-sync:
-  ref: dbt-default
-  with:
-    selector: "+daily_sales"
-resync:
-  ref: sales-full-reload
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
@@ -247,128 +228,54 @@ resync:
         assert_eq!(spec.sources[0].ref_name, "raw-sales");
         assert_eq!(spec.sources[1].ref_name, "customer-master");
 
-        assert_eq!(spec.desired_sets.len(), 4);
-        assert!(matches!(
-            &spec.desired_sets[0],
-            DesiredSetEntry::Ref(r) if r.ref_name == "daily-sla"
-        ));
-        assert!(matches!(
-            &spec.desired_sets[1],
-            DesiredSetEntry::Inline(DesiredCondition::Freshness {
-                name,
-                max_age,
-                interval,
-                check_at: Some(check_at),
-                column: Some(column),
-            }) if name == "data-freshness"
-                && max_age.as_std() == StdDuration::from_secs(24 * 3600)
-                && interval.as_std() == StdDuration::from_secs(6 * 3600)
-                && check_at.as_str() == "0 3 * * *"
-                && column == "updated_at"
-        ));
-        assert!(matches!(
-            &spec.desired_sets[2],
-            DesiredSetEntry::Inline(DesiredCondition::SQL { name, query, .. }) if name == "no-negative-amount" && query == "SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0"
-        ));
-        assert!(matches!(
-            &spec.desired_sets[3],
-            DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. }) if name == "dbt-test-sales" && run == &["dbt", "test", "--select", "daily_sales"]
-        ));
+        assert_eq!(spec.on_drift.len(), 2);
+        assert_eq!(spec.on_drift[0].conditions, "daily-sla");
+        assert_eq!(spec.on_drift[0].sync.ref_name, "dbt-default");
+        assert_eq!(
+            spec.on_drift[0].sync.with.get("selector").unwrap(),
+            "+daily_sales"
+        );
+        assert_eq!(spec.on_drift[1].conditions, "sales-quality");
+        assert_eq!(spec.on_drift[1].sync.ref_name, "sales-full-reload");
 
         assert!(spec.auto_sync);
-
-        let sync = spec.sync.as_ref().unwrap();
-        assert_eq!(sync.ref_name, "dbt-default");
-        assert_eq!(sync.with.get("selector").unwrap(), "+daily_sales");
-
-        assert_eq!(spec.resync.as_ref().unwrap().ref_name, "sales-full-reload");
     }
 
     #[test]
     fn parse_minimal_asset_spec() {
         let yaml = r#"
-desiredSets:
-  - name: freshness
-    type: Freshness
-    maxAge: 24h
-    interval: 6h
+onDrift:
+  - conditions: freshness-check
+    sync:
+      ref: dbt-run
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
         assert!(spec.sources.is_empty());
-        assert_eq!(spec.desired_sets.len(), 1);
+        assert_eq!(spec.on_drift.len(), 1);
         assert!(spec.auto_sync, "autoSync should default to true");
-        assert!(spec.sync.is_none());
-        assert!(spec.resync.is_none());
     }
 
     #[test]
-    fn parse_asset_without_desired_sets() {
+    fn parse_asset_without_on_drift() {
         let yaml = r#"
 sources:
   - ref: raw-sales
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(
-            spec.desired_sets.is_empty(),
-            "omitted desiredSets should default to empty (always Ready)"
+            spec.on_drift.is_empty(),
+            "omitted onDrift should default to empty (always Ready)"
         );
-    }
-
-    #[test]
-    fn parse_freshness_without_optional_fields() {
-        let yaml = r#"
-desiredSets:
-  - name: freshness
-    type: Freshness
-    maxAge: 24h
-    interval: 6h
-"#;
-        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
-        assert!(matches!(
-            &spec.desired_sets[0],
-            DesiredSetEntry::Inline(DesiredCondition::Freshness {
-                check_at: None,
-                column: None,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn rejects_invalid_cron_in_freshness() {
-        let yaml = r#"
-desiredSets:
-  - name: freshness
-    type: Freshness
-    maxAge: 24h
-    interval: 6h
-    checkAt: "not-a-cron"
-"#;
-        let result: Result<AssetSpec, _> = serde_yaml::from_str(yaml);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn rejects_invalid_duration_in_freshness() {
-        let yaml = r#"
-desiredSets:
-  - name: freshness
-    type: Freshness
-    maxAge: not-a-duration
-    interval: 6h
-"#;
-        let result: Result<AssetSpec, _> = serde_yaml::from_str(yaml);
-        assert!(result.is_err());
     }
 
     #[test]
     fn auto_sync_defaults_to_true() {
         let yaml = r#"
-desiredSets:
-  - name: check
-    type: SQL
-    query: "SELECT true"
+onDrift:
+  - conditions: check
+    sync:
+      ref: dbt-run
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(spec.auto_sync);
@@ -377,10 +284,10 @@ desiredSets:
     #[test]
     fn auto_sync_can_be_set_to_false() {
         let yaml = r#"
-desiredSets:
-  - name: check
-    type: SQL
-    query: "SELECT true"
+onDrift:
+  - conditions: check
+    sync:
+      ref: dbt-run
 autoSync: false
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
@@ -388,19 +295,14 @@ autoSync: false
     }
 
     #[test]
-    fn validate_accepts_empty_desired_sets() {
+    fn validate_accepts_empty_on_drift() {
         let spec = AssetSpec {
             tags: vec![],
             sources: vec![],
-            desired_sets: vec![],
+            on_drift: vec![],
             auto_sync: true,
-            sync: None,
-            resync: None,
         };
-        assert!(
-            spec.validate().is_ok(),
-            "empty desiredSets means always Ready"
-        );
+        assert!(spec.validate().is_ok(), "empty onDrift means always Ready");
     }
 
     #[test]
@@ -408,122 +310,52 @@ autoSync: false
         let spec = AssetSpec {
             tags: vec![],
             sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
-                name: "check".to_string(),
-                query: "SELECT true".to_string(),
-                interval: None,
-            })],
+            on_drift: vec![OnDriftEntry {
+                conditions: "daily-sla".to_string(),
+                sync: SyncRef {
+                    ref_name: "dbt-run".to_string(),
+                    with: HashMap::new(),
+                },
+            }],
             auto_sync: true,
-            sync: None,
-            resync: None,
         };
         assert!(spec.validate().is_ok());
     }
 
     #[test]
-    fn validate_accepts_ref_entry() {
+    fn validate_rejects_empty_conditions_ref() {
         let spec = AssetSpec {
             tags: vec![],
             sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Ref(DesiredGroupRef {
-                ref_name: "daily-sla".to_string(),
-            })],
+            on_drift: vec![OnDriftEntry {
+                conditions: "".to_string(),
+                sync: SyncRef {
+                    ref_name: "dbt-run".to_string(),
+                    with: HashMap::new(),
+                },
+            }],
             auto_sync: true,
-            sync: None,
-            resync: None,
-        };
-        assert!(spec.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_rejects_empty_ref_name() {
-        let spec = AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Ref(DesiredGroupRef {
-                ref_name: "".to_string(),
-            })],
-            auto_sync: true,
-            sync: None,
-            resync: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
     }
 
     #[test]
-    fn parse_command_condition() {
-        let yaml = r#"
-desiredSets:
-  - name: dbt-test
-    type: Command
-    run: [dbt, test, --select, my_model]
-"#;
-        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
-        assert!(matches!(
-            &spec.desired_sets[0],
-            DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. }) if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
-        ));
-    }
-
-    #[test]
-    fn validate_rejects_empty_command_run() {
+    fn validate_rejects_empty_sync_ref() {
         let spec = AssetSpec {
             tags: vec![],
             sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
-                name: "check".to_string(),
-                run: vec![],
-                interval: None,
-            })],
+            on_drift: vec![OnDriftEntry {
+                conditions: "daily-sla".to_string(),
+                sync: SyncRef {
+                    ref_name: "".to_string(),
+                    with: HashMap::new(),
+                },
+            }],
             auto_sync: true,
-            sync: None,
-            resync: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
-    }
-
-    #[test]
-    fn validate_rejects_blank_command_program() {
-        let spec = AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::Command {
-                name: "check".to_string(),
-                run: vec!["".to_string()],
-                interval: None,
-            })],
-            auto_sync: true,
-            sync: None,
-            resync: None,
-        };
-        let err = spec.validate().unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
-    }
-
-    #[test]
-    fn parse_mixed_ref_and_inline() {
-        let yaml = r#"
-desiredSets:
-  - ref: daily-sla
-  - ref: sales-quality-checks
-  - name: no-null-region
-    type: SQL
-    query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE region IS NULL"
-"#;
-        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(spec.desired_sets.len(), 3);
-        assert!(
-            matches!(&spec.desired_sets[0], DesiredSetEntry::Ref(r) if r.ref_name == "daily-sla")
-        );
-        assert!(
-            matches!(&spec.desired_sets[1], DesiredSetEntry::Ref(r) if r.ref_name == "sales-quality-checks")
-        );
-        assert!(matches!(
-            &spec.desired_sets[2],
-            DesiredSetEntry::Inline(DesiredCondition::SQL { .. })
-        ));
     }
 
     #[test]
@@ -579,19 +411,138 @@ desiredSets:
 
     #[test]
     fn validate_rejects_empty_condition_name() {
-        let spec = AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Inline(DesiredCondition::SQL {
-                name: "".to_string(),
-                query: "SELECT true".to_string(),
-                interval: None,
-            })],
-            auto_sync: true,
-            sync: None,
-            resync: None,
+        let condition = DesiredCondition::SQL {
+            name: "".to_string(),
+            query: "SELECT true".to_string(),
+            interval: None,
         };
-        let err = spec.validate().unwrap_err();
+        let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
+    }
+
+    #[test]
+    fn parse_freshness_condition() {
+        let yaml = r#"
+name: data-freshness
+type: Freshness
+maxAge: 24h
+interval: 6h
+checkAt: "0 3 * * *"
+column: updated_at
+"#;
+        let condition: DesiredCondition = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            &condition,
+            DesiredCondition::Freshness {
+                name,
+                max_age,
+                interval,
+                check_at: Some(check_at),
+                column: Some(column),
+            } if name == "data-freshness"
+                && max_age.as_std() == StdDuration::from_secs(24 * 3600)
+                && interval.as_std() == StdDuration::from_secs(6 * 3600)
+                && check_at.as_str() == "0 3 * * *"
+                && column == "updated_at"
+        ));
+    }
+
+    #[test]
+    fn parse_freshness_without_optional_fields() {
+        let yaml = r#"
+name: freshness
+type: Freshness
+maxAge: 24h
+interval: 6h
+"#;
+        let condition: DesiredCondition = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            &condition,
+            DesiredCondition::Freshness {
+                check_at: None,
+                column: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_cron_in_freshness() {
+        let yaml = r#"
+name: freshness
+type: Freshness
+maxAge: 24h
+interval: 6h
+checkAt: "not-a-cron"
+"#;
+        let result: Result<DesiredCondition, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_duration_in_freshness() {
+        let yaml = r#"
+name: freshness
+type: Freshness
+maxAge: not-a-duration
+interval: 6h
+"#;
+        let result: Result<DesiredCondition, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_command_condition() {
+        let yaml = r#"
+name: dbt-test
+type: Command
+run: [dbt, test, --select, my_model]
+"#;
+        let condition: DesiredCondition = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            &condition,
+            DesiredCondition::Command { name, run, .. } if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_empty_command_run() {
+        let condition = DesiredCondition::Command {
+            name: "check".to_string(),
+            run: vec![],
+            interval: None,
+        };
+        let err = condition.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
+    }
+
+    #[test]
+    fn validate_rejects_blank_command_program() {
+        let condition = DesiredCondition::Command {
+            name: "check".to_string(),
+            run: vec!["".to_string()],
+            interval: None,
+        };
+        let err = condition.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
+    }
+
+    #[test]
+    fn parse_multiple_on_drift_entries() {
+        let yaml = r#"
+onDrift:
+  - conditions: daily-sla
+    sync:
+      ref: dbt-incremental
+  - conditions: sales-quality
+    sync:
+      ref: dbt-full-refresh
+"#;
+        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.on_drift.len(), 2);
+        assert_eq!(spec.on_drift[0].conditions, "daily-sla");
+        assert_eq!(spec.on_drift[0].sync.ref_name, "dbt-incremental");
+        assert_eq!(spec.on_drift[1].conditions, "sales-quality");
+        assert_eq!(spec.on_drift[1].sync.ref_name, "dbt-full-refresh");
     }
 }

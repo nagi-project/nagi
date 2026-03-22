@@ -8,9 +8,9 @@ use std::time::Duration as StdDuration;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
+use crate::compile::ResolvedOnDriftEntry;
 use crate::compile::{CompiledAsset, DependencyGraph, GraphEdge};
 use crate::evaluate::EvaluateError;
-use crate::kind::asset::DesiredSetEntry;
 use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
 use crate::sync::SyncError;
@@ -134,16 +134,12 @@ fn log_sync_result(name: &str, result: &crate::sync::SyncExecutionResult, log_st
     }
 }
 
-/// Computes the minimum interval across all inline conditions of a compiled asset.
-fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
-    compiled
-        .spec
-        .desired_sets
+/// Computes the minimum interval across all conditions of a compiled asset.
+fn compute_min_interval(on_drift: &[ResolvedOnDriftEntry]) -> Option<StdDuration> {
+    on_drift
         .iter()
-        .filter_map(|entry| match entry {
-            DesiredSetEntry::Inline(cond) => cond.interval().map(|d| d.as_std()),
-            _ => None,
-        })
+        .flat_map(|entry| &entry.conditions)
+        .filter_map(|cond| cond.interval().map(|d| d.as_std()))
         .min()
 }
 
@@ -315,14 +311,15 @@ pub(super) fn build_controller_inputs(
                         return None;
                     }
                 };
-                let min_interval = compute_min_interval(&compiled);
+                let min_interval = compute_min_interval(&compiled.spec.on_drift);
+                let first_on_drift = compiled.spec.on_drift.first();
                 Some(AssetEntry {
                     name: name.clone(),
                     yaml: yaml.clone(),
                     min_interval,
                     auto_sync: compiled.spec.auto_sync,
-                    has_sync: compiled.spec.sync.is_some(),
-                    sync_ref_name: compiled.spec.sync_ref_name,
+                    has_sync: first_on_drift.is_some(),
+                    sync_ref_name: first_on_drift.map(|e| e.sync_ref_name.clone()),
                 })
             })
             .collect();

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
-use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry, SourceRef};
+use crate::kind::asset::{AssetSpec, DesiredCondition, OnDriftEntry, SourceRef};
 use crate::kind::origin::OriginSpec;
 use crate::kind::source::SourceSpec;
 use crate::kind::sync::{StepType, SyncSpec, SyncStep};
@@ -119,11 +119,31 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
             }
         }
 
-        // Convert dbt tests to desiredSets.
-        let desired_sets = if let Some(tests) = model_tests.get(&model.unique_id) {
-            tests_to_desired_sets(tests)
+        // Convert dbt tests to a DesiredGroup and on_drift entry.
+        let on_drift = if let Some(tests) = model_tests.get(&model.unique_id) {
+            let conditions = tests_to_conditions(tests);
+            if !conditions.is_empty() {
+                let group_name = format!("dbt-tests-{}", model.name);
+                resources.push(NagiKind::DesiredGroup {
+                    api_version: API_VERSION.to_string(),
+                    metadata: Metadata {
+                        name: group_name.clone(),
+                    },
+                    spec: crate::kind::desired_group::DesiredGroupSpec(conditions),
+                });
+                if let Some(sync_ref) = &default_sync {
+                    vec![OnDriftEntry {
+                        conditions: group_name,
+                        sync: sync_ref.clone(),
+                    }]
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
         } else {
-            Vec::new()
+            vec![]
         };
 
         // Collect tags for Sync generation.
@@ -141,10 +161,8 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
             spec: AssetSpec {
                 tags: model.tags.clone(),
                 sources: sources_refs,
-                desired_sets,
+                on_drift,
                 auto_sync: true,
-                sync: default_sync.clone(),
-                resync: None,
             },
         });
     }
@@ -159,11 +177,11 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
 /// Converts dbt tests into Nagi DesiredCondition entries.
 /// All tests are executed via `dbt test --select` to ensure behavior matches
 /// dbt's own test implementation exactly.
-fn tests_to_desired_sets(tests: &[&DbtNode]) -> Vec<DesiredSetEntry> {
+fn tests_to_conditions(tests: &[&DbtNode]) -> Vec<DesiredCondition> {
     let mut entries = Vec::new();
     for test in tests {
         if test.test_metadata.is_some() {
-            entries.push(DesiredSetEntry::Inline(DesiredCondition::Command {
+            entries.push(DesiredCondition::Command {
                 name: format!("dbt-test-{}", test.name),
                 run: vec![
                     "dbt".to_string(),
@@ -172,7 +190,7 @@ fn tests_to_desired_sets(tests: &[&DbtNode]) -> Vec<DesiredSetEntry> {
                     test.name.clone(),
                 ],
                 interval: None,
-            }));
+            });
         }
     }
     entries
@@ -458,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_to_resources_applies_default_sync() {
+    fn manifest_to_resources_applies_default_sync_via_on_drift() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
 
@@ -467,57 +485,39 @@ mod tests {
             .find(|r| r.metadata().name == "customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
-            assert_eq!(spec.sync.as_ref().unwrap().ref_name, "dbt-default");
+            assert_eq!(spec.on_drift.len(), 1);
+            assert_eq!(spec.on_drift[0].sync.ref_name, "dbt-default");
+            assert_eq!(spec.on_drift[0].conditions, "dbt-tests-customers");
         } else {
             panic!("customers should be an Asset");
         }
     }
 
     #[test]
-    fn manifest_to_resources_maps_not_null_test() {
+    fn manifest_to_resources_generates_desired_group_for_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
 
-        let customers = resources
+        let group = resources
             .iter()
-            .find(|r| r.metadata().name == "customers")
+            .find(|r| r.metadata().name == "dbt-tests-customers")
             .unwrap();
-        if let NagiKind::Asset { spec, .. } = customers {
-            let has_not_null = spec.desired_sets.iter().any(|e| {
-                matches!(e, DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. })
+        if let NagiKind::DesiredGroup { spec, .. } = group {
+            let has_not_null = spec.0.iter().any(|c| {
+                matches!(c, DesiredCondition::Command { name, run, .. }
                     if name == "dbt-test-not_null_customers_customer_id"
                     && run == &["dbt", "test", "--select", "not_null_customers_customer_id"])
             });
-            assert!(
-                has_not_null,
-                "customers should have a not_null Command condition"
-            );
-        } else {
-            panic!("customers should be an Asset");
-        }
-    }
+            assert!(has_not_null, "should have a not_null Command condition");
 
-    #[test]
-    fn manifest_to_resources_maps_unique_test() {
-        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
-
-        let customers = resources
-            .iter()
-            .find(|r| r.metadata().name == "customers")
-            .unwrap();
-        if let NagiKind::Asset { spec, .. } = customers {
-            let has_unique = spec.desired_sets.iter().any(|e| {
-                matches!(e, DesiredSetEntry::Inline(DesiredCondition::Command { name, run, .. })
+            let has_unique = spec.0.iter().any(|c| {
+                matches!(c, DesiredCondition::Command { name, run, .. }
                     if name == "dbt-test-unique_customers_customer_id"
                     && run == &["dbt", "test", "--select", "unique_customers_customer_id"])
             });
-            assert!(
-                has_unique,
-                "customers should have a unique Command condition"
-            );
+            assert!(has_unique, "should have a unique Command condition");
         } else {
-            panic!("customers should be an Asset");
+            panic!("expected DesiredGroup");
         }
     }
 
@@ -526,13 +526,13 @@ mod tests {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
 
-        let orders = resources
+        let group = resources
             .iter()
-            .find(|r| r.metadata().name == "orders")
+            .find(|r| r.metadata().name == "dbt-tests-orders")
             .unwrap();
-        if let NagiKind::Asset { spec, .. } = orders {
-            let has_command = spec.desired_sets.iter().any(|e| {
-                matches!(e, DesiredSetEntry::Inline(DesiredCondition::Command { run, .. })
+        if let NagiKind::DesiredGroup { spec, .. } = group {
+            let has_command = spec.0.iter().any(|c| {
+                matches!(c, DesiredCondition::Command { run, .. }
                     if run.contains(&"dbt".to_string()))
             });
             assert!(
@@ -540,7 +540,7 @@ mod tests {
                 "orders should have a dbt test Command condition"
             );
         } else {
-            panic!("orders should be an Asset");
+            panic!("expected DesiredGroup");
         }
     }
 
@@ -591,7 +591,7 @@ mod tests {
             .find(|r| r.metadata().name == "customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
-            assert!(spec.sync.is_none());
+            assert!(spec.on_drift.is_empty());
         } else {
             panic!("customers should be an Asset");
         }

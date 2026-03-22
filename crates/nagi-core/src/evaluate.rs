@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::compile::CompiledAsset;
+use crate::compile::{CompiledAsset, ResolvedOnDriftEntry};
 use crate::db::{Connection, ConnectionError};
 use crate::dbt::profile::DbtProfilesFile;
-use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
+use crate::kind::asset::DesiredCondition;
 use crate::log::{LogError, LogStore};
 use crate::storage::local::LocalCache;
 use crate::storage::Cache;
@@ -77,7 +77,7 @@ pub enum EvaluateError {
     Serialize(String),
 }
 
-/// Evaluates all desired conditions of `spec`.
+/// Evaluates all conditions across all on_drift entries.
 ///
 /// `conn` is required only for SQL-based conditions (Freshness, SQL).
 /// Passing `None` for an Asset that only uses `Command` conditions is valid.
@@ -85,25 +85,20 @@ pub enum EvaluateError {
 /// When `log_store` is `Some`, automatically writes evaluate logs after evaluation.
 pub async fn evaluate_asset(
     asset_name: &str,
-    spec: &AssetSpec,
+    on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
     log_store: Option<&LogStore>,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let started_at = Utc::now();
 
     let mut results = Vec::new();
-    for (i, entry) in spec.desired_sets.iter().enumerate() {
-        match entry {
-            DesiredSetEntry::Ref(_) => {
-                // DesiredGroup refs are resolved at compile time; skip during evaluation.
-                continue;
-            }
-            DesiredSetEntry::Inline(condition) => {
-                let result =
-                    condition::evaluate_condition(condition.name(), i, asset_name, condition, conn)
-                        .await?;
-                results.push(result);
-            }
+    let mut i = 0;
+    for entry in on_drift {
+        for cond in &entry.conditions {
+            let result =
+                condition::evaluate_condition(cond.name(), i, asset_name, cond, conn).await?;
+            results.push(result);
+            i += 1;
         }
     }
     let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
@@ -127,23 +122,21 @@ pub async fn evaluate_asset(
     Ok(result)
 }
 
-/// Evaluates all desired conditions without logging.
+/// Evaluates all conditions without logging.
 /// Produces a `Send` future (unlike `evaluate_asset` which takes `&LogStore`).
 pub(crate) async fn evaluate_asset_no_log(
     asset_name: &str,
-    spec: &AssetSpec,
+    on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let mut results = Vec::new();
-    for (i, entry) in spec.desired_sets.iter().enumerate() {
-        match entry {
-            DesiredSetEntry::Ref(_) => continue,
-            DesiredSetEntry::Inline(condition) => {
-                let result =
-                    condition::evaluate_condition(condition.name(), i, asset_name, condition, conn)
-                        .await?;
-                results.push(result);
-            }
+    let mut i = 0;
+    for entry in on_drift {
+        for cond in &entry.conditions {
+            let result =
+                condition::evaluate_condition(cond.name(), i, asset_name, cond, conn).await?;
+            results.push(result);
+            i += 1;
         }
     }
     let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
@@ -155,7 +148,7 @@ pub(crate) async fn evaluate_asset_no_log(
     })
 }
 
-/// A single condition from an asset's desiredSets, with its name.
+/// A single condition from an asset's on_drift entries, with its name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DryRunCondition {
     /// Name of the condition.
@@ -176,33 +169,19 @@ pub struct DryRunResult {
 
 /// Produces a dry-run summary of what `evaluate_asset` would execute.
 /// No DB connection or command execution is performed.
-pub fn dry_run_asset(asset_name: &str, spec: &AssetSpec) -> DryRunResult {
+pub fn dry_run_asset(asset_name: &str, on_drift: &[ResolvedOnDriftEntry]) -> DryRunResult {
     let mut conditions = Vec::new();
-    for entry in spec.desired_sets.iter() {
-        match entry {
-            DesiredSetEntry::Ref(_) => continue,
-            DesiredSetEntry::Inline(condition) => {
-                conditions.push(DryRunCondition {
-                    name: condition.name().to_string(),
-                    condition: condition.clone(),
-                });
-            }
+    for entry in on_drift {
+        for cond in &entry.conditions {
+            conditions.push(DryRunCondition {
+                name: cond.name().to_string(),
+                condition: cond.clone(),
+            });
         }
     }
     DryRunResult {
         asset_name: asset_name.to_string(),
         conditions,
-    }
-}
-
-pub(crate) fn compiled_to_asset_spec(compiled: &CompiledAsset) -> AssetSpec {
-    AssetSpec {
-        tags: compiled.spec.tags.clone(),
-        sources: compiled.spec.sources.clone(),
-        desired_sets: compiled.spec.desired_sets.clone(),
-        auto_sync: compiled.spec.auto_sync,
-        sync: None,
-        resync: None,
     }
 }
 
@@ -235,7 +214,6 @@ pub async fn evaluate_from_compiled(
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
     let asset_name = &compiled.metadata.name;
-    let spec = compiled_to_asset_spec(&compiled);
 
     let log_store = match (db_path, logs_dir) {
         (Some(db), Some(logs)) => Some(LogStore::open(db, logs)?),
@@ -249,7 +227,13 @@ pub async fn evaluate_from_compiled(
         .transpose()?;
 
     let conn_ref = conn.as_deref();
-    let result = evaluate_asset(asset_name, &spec, conn_ref, log_store.as_ref()).await?;
+    let result = evaluate_asset(
+        asset_name,
+        &compiled.spec.on_drift,
+        conn_ref,
+        log_store.as_ref(),
+    )
+    .await?;
 
     let cache_path = cache_dir
         .map(PathBuf::from)
@@ -294,8 +278,7 @@ pub async fn evaluate_all(
 pub fn dry_run_from_compiled(yaml: &str) -> Result<String, EvaluateError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
-    let spec = compiled_to_asset_spec(&compiled);
-    let result = dry_run_asset(&compiled.metadata.name, &spec);
+    let result = dry_run_asset(&compiled.metadata.name, &compiled.spec.on_drift);
     serde_json::to_string(&result).map_err(|e| EvaluateError::Serialize(e.to_string()))
 }
 
@@ -305,9 +288,11 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+    use crate::compile::ResolvedOnDriftEntry;
     use crate::db::ConnectionError;
     use crate::duration::Duration;
-    use crate::kind::asset::{AssetSpec, DesiredCondition, DesiredSetEntry};
+    use crate::kind::asset::DesiredCondition;
+    use crate::kind::sync::{SyncSpec, SyncStep};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -347,15 +332,24 @@ mod tests {
         }
     }
 
-    fn asset_spec_with(condition: DesiredCondition) -> AssetSpec {
-        AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![DesiredSetEntry::Inline(condition)],
-            auto_sync: true,
-            sync: None,
-            resync: None,
+    fn dummy_sync_spec() -> SyncSpec {
+        SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: crate::kind::sync::StepType::Command,
+                args: vec!["true".to_string()],
+            },
+            post: None,
         }
+    }
+
+    fn on_drift_with(conditions: Vec<DesiredCondition>) -> Vec<ResolvedOnDriftEntry> {
+        vec![ResolvedOnDriftEntry {
+            conditions,
+            conditions_ref: "test-conditions".to_string(),
+            sync: dummy_sync_spec(),
+            sync_ref_name: "test-sync".to_string(),
+        }]
     }
 
     fn duration(secs: u64) -> Duration {
@@ -384,12 +378,11 @@ mod tests {
 
     #[tokio::test]
     async fn freshness_ready_when_within_max_age() {
-        // last updated 1 hour ago, max age 2 hours
         let conn = MockConnection {
             response: epoch_secs_ago(3600.0),
         };
-        let spec = asset_spec_with(freshness_condition(7200, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn), None)
+        let on_drift = on_drift_with(vec![freshness_condition(7200, None)]);
+        let result = evaluate_asset("my_dataset.my_table", &on_drift, Some(&conn), None)
             .await
             .unwrap();
         assert!(result.ready);
@@ -398,12 +391,11 @@ mod tests {
 
     #[tokio::test]
     async fn freshness_not_ready_when_exceeds_max_age() {
-        // last updated 25 hours ago, max age 24 hours
         let conn = MockConnection {
             response: epoch_secs_ago(25.0 * 3600.0),
         };
-        let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_dataset.my_table", &spec, Some(&conn), None)
+        let on_drift = on_drift_with(vec![freshness_condition(86400, None)]);
+        let result = evaluate_asset("my_dataset.my_table", &on_drift, Some(&conn), None)
             .await
             .unwrap();
         assert!(!result.ready);
@@ -418,8 +410,8 @@ mod tests {
         let conn = MockConnection {
             response: Value::String("2099-01-01T00:00:00Z".to_string()),
         };
-        let spec = asset_spec_with(freshness_condition(86400, Some("updated_at")));
-        let result = evaluate_asset("my_table", &spec, Some(&conn), None)
+        let on_drift = on_drift_with(vec![freshness_condition(86400, Some("updated_at"))]);
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
             .await
             .unwrap();
         assert!(result.ready);
@@ -430,8 +422,8 @@ mod tests {
         let conn = MockConnection {
             response: Value::Null,
         };
-        let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
+        let on_drift = on_drift_with(vec![freshness_condition(86400, None)]);
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
         assert!(matches!(result, Err(EvaluateError::UnexpectedResult(_))));
     }
 
@@ -442,12 +434,12 @@ mod tests {
         let conn = MockConnection {
             response: Value::Bool(true),
         };
-        let spec = asset_spec_with(DesiredCondition::SQL {
+        let on_drift = on_drift_with(vec![DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT true".to_string(),
             interval: None,
-        });
-        let result = evaluate_asset("my_table", &spec, Some(&conn), None)
+        }]);
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
             .await
             .unwrap();
         assert!(result.ready);
@@ -458,12 +450,12 @@ mod tests {
         let conn = MockConnection {
             response: Value::Bool(false),
         };
-        let spec = asset_spec_with(DesiredCondition::SQL {
+        let on_drift = on_drift_with(vec![DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT false".to_string(),
             interval: None,
-        });
-        let result = evaluate_asset("my_table", &spec, Some(&conn), None)
+        }]);
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
             .await
             .unwrap();
         assert!(!result.ready);
@@ -473,7 +465,6 @@ mod tests {
 
     #[tokio::test]
     async fn all_conditions_must_pass() {
-        // First SQL returns true, second returns false → not ready overall
         let call_count = std::sync::atomic::AtomicU32::new(0);
         struct CountingConnection<'a>(&'a std::sync::atomic::AtomicU32);
         #[async_trait]
@@ -505,28 +496,21 @@ mod tests {
                 })
             }
         }
-        let spec = AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![
-                DesiredSetEntry::Inline(DesiredCondition::SQL {
-                    name: "check-a".to_string(),
-                    query: "SELECT true".to_string(),
-                    interval: None,
-                }),
-                DesiredSetEntry::Inline(DesiredCondition::SQL {
-                    name: "check-b".to_string(),
-                    query: "SELECT false".to_string(),
-                    interval: None,
-                }),
-            ],
-            auto_sync: true,
-            sync: None,
-            resync: None,
-        };
+        let on_drift = on_drift_with(vec![
+            DesiredCondition::SQL {
+                name: "check-a".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+            },
+            DesiredCondition::SQL {
+                name: "check-b".to_string(),
+                query: "SELECT false".to_string(),
+                interval: None,
+            },
+        ]);
         let result = evaluate_asset(
             "my_table",
-            &spec,
+            &on_drift,
             Some(&CountingConnection(&call_count)),
             None,
         )
@@ -545,8 +529,8 @@ mod tests {
     #[test]
     fn dry_run_freshness_with_column() {
         let condition = freshness_condition(86400, Some("updated_at"));
-        let spec = asset_spec_with(condition.clone());
-        let result = dry_run_asset("my_table", &spec);
+        let on_drift = on_drift_with(vec![condition.clone()]);
+        let result = dry_run_asset("my_table", &on_drift);
         assert_eq!(result.conditions.len(), 1);
         assert_eq!(result.conditions[0].condition, condition);
     }
@@ -554,8 +538,8 @@ mod tests {
     #[test]
     fn dry_run_freshness_without_column() {
         let condition = freshness_condition(86400, None);
-        let spec = asset_spec_with(condition.clone());
-        let result = dry_run_asset("my_table", &spec);
+        let on_drift = on_drift_with(vec![condition.clone()]);
+        let result = dry_run_asset("my_table", &on_drift);
         assert_eq!(result.conditions[0].condition, condition);
     }
 
@@ -566,8 +550,8 @@ mod tests {
             query: "SELECT COUNT(*) > 0 FROM orders".to_string(),
             interval: None,
         };
-        let spec = asset_spec_with(condition.clone());
-        let result = dry_run_asset("my_table", &spec);
+        let on_drift = on_drift_with(vec![condition.clone()]);
+        let result = dry_run_asset("my_table", &on_drift);
         assert_eq!(result.conditions[0].condition, condition);
     }
 
@@ -578,46 +562,15 @@ mod tests {
             run: vec!["dbt".to_string(), "test".to_string()],
             interval: None,
         };
-        let spec = asset_spec_with(condition.clone());
-        let result = dry_run_asset("my_table", &spec);
+        let on_drift = on_drift_with(vec![condition.clone()]);
+        let result = dry_run_asset("my_table", &on_drift);
         assert_eq!(result.conditions[0].condition, condition);
     }
 
     #[test]
-    fn dry_run_skips_refs() {
-        let spec = AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![
-                DesiredSetEntry::Ref(crate::kind::asset::DesiredGroupRef {
-                    ref_name: "group-a".to_string(),
-                }),
-                DesiredSetEntry::Inline(DesiredCondition::SQL {
-                    name: "check".to_string(),
-                    query: "SELECT 1".to_string(),
-                    interval: None,
-                }),
-            ],
-            auto_sync: true,
-            sync: None,
-            resync: None,
-        };
-        let result = dry_run_asset("my_table", &spec);
-        assert_eq!(result.conditions.len(), 1);
-        assert_eq!(result.conditions[0].name, "check");
-    }
-
-    #[test]
     fn dry_run_no_conditions() {
-        let spec = AssetSpec {
-            tags: vec![],
-            sources: vec![],
-            desired_sets: vec![],
-            auto_sync: true,
-            sync: None,
-            resync: None,
-        };
-        let result = dry_run_asset("my_table", &spec);
+        let on_drift: Vec<ResolvedOnDriftEntry> = vec![];
+        let result = dry_run_asset("my_table", &on_drift);
         assert!(result.conditions.is_empty());
     }
 
@@ -625,24 +578,25 @@ mod tests {
 
     #[tokio::test]
     async fn command_condition_does_not_need_connection() {
-        // Assets with only Command conditions can be evaluated without a DB connection.
-        let spec = asset_spec_with(DesiredCondition::Command {
+        let on_drift = on_drift_with(vec![DesiredCondition::Command {
             name: "always-true".to_string(),
             run: vec!["true".to_string()],
             interval: None,
-        });
-        let result = evaluate_asset("my_table", &spec, None, None).await.unwrap();
+        }]);
+        let result = evaluate_asset("my_table", &on_drift, None, None)
+            .await
+            .unwrap();
         assert!(result.ready);
     }
 
     #[tokio::test]
     async fn sql_condition_without_connection_returns_error() {
-        let spec = asset_spec_with(DesiredCondition::SQL {
+        let on_drift = on_drift_with(vec![DesiredCondition::SQL {
             name: "check".to_string(),
             query: "SELECT 1".to_string(),
             interval: None,
-        });
-        let result = evaluate_asset("my_table", &spec, None, None).await;
+        }]);
+        let result = evaluate_asset("my_table", &on_drift, None, None).await;
         assert!(matches!(
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "check"
@@ -665,12 +619,12 @@ mod tests {
             "SELECT 1; DROP TABLE t",
         ];
         for query in forbidden_queries {
-            let spec = asset_spec_with(DesiredCondition::SQL {
+            let on_drift = on_drift_with(vec![DesiredCondition::SQL {
                 name: "bad".to_string(),
                 query: query.to_string(),
                 interval: None,
-            });
-            let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
+            }]);
+            let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
             assert!(
                 matches!(&result, Err(EvaluateError::ReadOnlyViolation(_))),
                 "expected ReadOnlyViolation for query: {query}, got: {result:?}"
@@ -690,12 +644,12 @@ mod tests {
             "WITH cte AS (SELECT 1) SELECT * FROM cte",
         ];
         for query in valid_queries {
-            let spec = asset_spec_with(DesiredCondition::SQL {
+            let on_drift = on_drift_with(vec![DesiredCondition::SQL {
                 name: "check".to_string(),
                 query: query.to_string(),
                 interval: None,
-            });
-            let result = evaluate_asset("my_table", &spec, Some(&conn), None).await;
+            }]);
+            let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
             assert!(
                 result.is_ok(),
                 "expected success for query: {query}, got: {result:?}"
@@ -705,8 +659,8 @@ mod tests {
 
     #[tokio::test]
     async fn freshness_condition_without_connection_returns_error() {
-        let spec = asset_spec_with(freshness_condition(86400, None));
-        let result = evaluate_asset("my_table", &spec, None, None).await;
+        let on_drift = on_drift_with(vec![freshness_condition(86400, None)]);
+        let result = evaluate_asset("my_table", &on_drift, None, None).await;
         assert!(matches!(
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "freshness"

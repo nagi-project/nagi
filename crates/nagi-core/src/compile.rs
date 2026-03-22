@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::dbt::manifest::{self, DbtManifest};
-use crate::kind::asset::{
-    validate_no_duplicate_condition_names, AssetSpec, DesiredCondition, DesiredSetEntry,
-};
+use crate::kind::asset::{validate_no_duplicate_condition_names, AssetSpec, DesiredCondition};
 use crate::kind::origin::OriginSpec;
 use crate::kind::sync::SyncSpec;
 use crate::kind::{self, KindError, Metadata, NagiKind};
@@ -66,10 +64,23 @@ pub struct CompileOutput {
 pub struct ResolvedAsset {
     pub metadata: Metadata,
     pub spec: AssetSpec,
-    pub sync: Option<SyncSpec>,
-    pub sync_ref_name: Option<String>,
-    pub resync: Option<SyncSpec>,
+    /// Resolved on_drift entries: conditions expanded + sync specs resolved.
+    pub resolved_on_drift: Vec<ResolvedOnDriftEntry>,
     pub connection: Option<ResolvedConnection>,
+}
+
+/// A compiled on_drift entry with resolved conditions and sync spec.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedOnDriftEntry {
+    /// Resolved conditions from the referenced DesiredGroup.
+    pub conditions: Vec<DesiredCondition>,
+    /// Name of the conditions group (for display/logging).
+    pub conditions_ref: String,
+    /// Resolved and template-expanded sync spec.
+    pub sync: SyncSpec,
+    /// Name of the sync ref (for lock coordination).
+    pub sync_ref_name: String,
 }
 
 /// Connection info resolved from Asset → Source → Connection chain.
@@ -344,12 +355,12 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         match resource {
             NagiKind::Asset { metadata, spec, .. } => {
                 if let Some(&idx) = asset_indices.get(&name) {
-                    // Second occurrence: merge desiredSets into the first.
+                    // Second occurrence: merge on_drift into the first.
                     if !seen.insert((kind.clone(), name.clone())) {
                         // Third or more: error.
                         return Err(CompileError::DuplicateName { kind, name });
                     }
-                    result.assets[idx].1.desired_sets.extend(spec.desired_sets);
+                    result.assets[idx].1.on_drift.extend(spec.on_drift);
                 } else {
                     asset_indices.insert(name, result.assets.len());
                     result.assets.push((metadata, spec));
@@ -448,67 +459,40 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         assets,
     } = categorize(resources)?;
 
-    // Validate cross-kind references and resolve DesiredGroup refs.
+    // Validate cross-kind references and resolve on_drift entries.
     let mut resolved_assets = Vec::new();
-    for (metadata, mut spec) in assets {
+    for (metadata, spec) in assets {
         for source_ref in &spec.sources {
             require_ref(&sources, "Source", &source_ref.ref_name)?;
         }
-        // Resolve sync and resync: validate refs and expand templates.
-        let resolved_sync = if let Some(sync_ref) = &spec.sync {
-            require_sync_ref(&syncs, &sync_ref.ref_name)?;
-            let sync_spec = &syncs[&sync_ref.ref_name];
-            Some(expand_sync_templates(
-                sync_spec,
-                &metadata.name,
-                &sync_ref.with,
-            ))
-        } else {
-            None
-        };
-        let resolved_resync = if let Some(resync_ref) = &spec.resync {
-            require_sync_ref(&syncs, &resync_ref.ref_name)?;
-            let sync_spec = &syncs[&resync_ref.ref_name];
-            Some(expand_sync_templates(
-                sync_spec,
-                &metadata.name,
-                &resync_ref.with,
-            ))
-        } else {
-            None
-        };
 
-        // Expand DesiredGroup refs to inline conditions.
-        let mut resolved_entries = Vec::new();
-        for entry in &spec.desired_sets {
-            match entry {
-                DesiredSetEntry::Ref(group_ref) => {
-                    let conditions = desired_groups.get(&group_ref.ref_name).ok_or_else(|| {
-                        CompileError::UnresolvedRef {
-                            kind: "DesiredGroup".to_string(),
-                            name: group_ref.ref_name.clone(),
-                        }
-                    })?;
-                    for condition in conditions {
-                        resolved_entries.push(DesiredSetEntry::Inline(condition.clone()));
-                    }
+        // Resolve each on_drift entry: validate conditions ref + sync ref, expand templates.
+        let mut resolved_on_drift = Vec::new();
+        let mut all_conditions: Vec<DesiredCondition> = Vec::new();
+        for entry in &spec.on_drift {
+            // Resolve conditions ref to DesiredGroup.
+            let conditions = desired_groups.get(&entry.conditions).ok_or_else(|| {
+                CompileError::UnresolvedRef {
+                    kind: "DesiredGroup".to_string(),
+                    name: entry.conditions.clone(),
                 }
-                DesiredSetEntry::Inline(c) => {
-                    resolved_entries.push(DesiredSetEntry::Inline(c.clone()));
-                }
-            }
+            })?;
+
+            // Resolve sync ref and expand templates.
+            require_sync_ref(&syncs, &entry.sync.ref_name)?;
+            let sync_spec = &syncs[&entry.sync.ref_name];
+            let resolved_sync = expand_sync_templates(sync_spec, &metadata.name, &entry.sync.with);
+
+            all_conditions.extend(conditions.iter().cloned());
+            resolved_on_drift.push(ResolvedOnDriftEntry {
+                conditions: conditions.clone(),
+                conditions_ref: entry.conditions.clone(),
+                sync: resolved_sync,
+                sync_ref_name: entry.sync.ref_name.clone(),
+            });
         }
-        spec.desired_sets = resolved_entries;
 
-        // All refs have been expanded to inline; extract conditions for duplicate check.
-        let all_conditions: Vec<DesiredCondition> = spec
-            .desired_sets
-            .iter()
-            .map(|e| match e {
-                DesiredSetEntry::Inline(c) => c.clone(),
-                DesiredSetEntry::Ref(_) => unreachable!("refs are expanded above"),
-            })
-            .collect();
+        // Check for duplicate condition names across all on_drift entries.
         validate_no_duplicate_condition_names(&all_conditions)?;
 
         // Resolve connection from the first source's connection chain.
@@ -527,13 +511,10 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
                 }),
             });
 
-        let sync_ref_name = spec.sync.as_ref().map(|s| s.ref_name.clone());
         resolved_assets.push(ResolvedAsset {
             metadata,
             spec,
-            sync: resolved_sync,
-            sync_ref_name,
-            resync: resolved_resync,
+            resolved_on_drift,
             connection,
         });
     }
@@ -656,14 +637,8 @@ struct CompiledAssetSpecYaml<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sources: &'a Vec<crate::kind::asset::SourceRef>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    desired_sets: &'a Vec<DesiredSetEntry>,
+    on_drift: &'a Vec<ResolvedOnDriftEntry>,
     auto_sync: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sync_ref_name: &'a Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sync: &'a Option<SyncSpec>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    resync: &'a Option<SyncSpec>,
 }
 
 /// Deserialization struct for reading compiled asset YAML from `target/`.
@@ -685,13 +660,9 @@ pub struct CompiledAssetSpec {
     #[serde(default)]
     pub sources: Vec<crate::kind::asset::SourceRef>,
     #[serde(default)]
-    pub desired_sets: Vec<DesiredSetEntry>,
+    pub on_drift: Vec<ResolvedOnDriftEntry>,
     #[serde(default = "default_true")]
     pub auto_sync: bool,
-    #[serde(default)]
-    pub sync_ref_name: Option<String>,
-    pub sync: Option<SyncSpec>,
-    pub resync: Option<SyncSpec>,
 }
 
 fn default_true() -> bool {
@@ -710,11 +681,8 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
             spec: CompiledAssetSpecYaml {
                 tags: &asset.spec.tags,
                 sources: &asset.spec.sources,
-                desired_sets: &asset.spec.desired_sets,
+                on_drift: &asset.resolved_on_drift,
                 auto_sync: asset.spec.auto_sync,
-                sync_ref_name: &asset.sync_ref_name,
-                sync: &asset.sync,
-                resync: &asset.resync,
             },
             connection: &asset.connection,
         };
@@ -810,11 +778,7 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  desiredSets:
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+spec: {}",
         );
         let output = resolve(resources).unwrap();
         assert_eq!(output.assets.len(), 1);
@@ -824,30 +788,27 @@ spec:
     }
 
     #[test]
-    fn resolve_expands_desired_group_ref() {
+    fn resolve_expands_on_drift_conditions_ref() {
         let resources = parse(&yaml_docs(&[
             DESIRED_GROUP_DAILY_SLA,
+            SYNC_DBT_RUN,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  desiredSets:
-    - ref: daily-sla
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run",
         ]));
         let output = resolve(resources).unwrap();
-        assert_eq!(output.assets[0].spec.desired_sets.len(), 2);
+        assert_eq!(output.assets[0].resolved_on_drift.len(), 1);
+        assert_eq!(output.assets[0].resolved_on_drift[0].conditions.len(), 1);
         assert!(matches!(
-            &output.assets[0].spec.desired_sets[0],
-            DesiredSetEntry::Inline(DesiredCondition::Freshness { .. })
-        ));
-        assert!(matches!(
-            &output.assets[0].spec.desired_sets[1],
-            DesiredSetEntry::Inline(DesiredCondition::SQL { .. })
+            &output.assets[0].resolved_on_drift[0].conditions[0],
+            DesiredCondition::Freshness { .. }
         ));
     }
 
@@ -869,17 +830,20 @@ spec:
     }
 
     #[test]
-    fn resolve_rejects_unresolved_sync_ref() {
-        let resources = parse(
+    fn resolve_rejects_unresolved_sync_ref_in_on_drift() {
+        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: nonexistent-sync",
-        );
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: nonexistent-sync",
+        ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
             if kind == "Sync" && name == "nonexistent-sync"));
@@ -887,55 +851,81 @@ spec:
 
     #[test]
     fn resolve_rejects_unresolved_desired_group_ref() {
-        let resources = parse(
+        let resources = parse(&yaml_docs(&[
+            SYNC_DBT_RUN,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  desiredSets:
-    - ref: nonexistent-group",
-        );
+  onDrift:
+    - conditions: nonexistent-group
+      sync:
+        ref: dbt-run",
+        ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
             if kind == "DesiredGroup" && name == "nonexistent-group"));
     }
 
     #[test]
-    fn resolve_merges_duplicate_asset_desired_sets() {
-        let resources = parse(
+    fn resolve_merges_duplicate_asset_on_drift() {
+        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: DesiredGroup
+metadata:
+  name: quality-checks
+spec:
+  - name: check-b
+    type: SQL
+    query: \"SELECT true\"",
+            SYNC_DBT_RUN,
+            SYNC_DBT_FULL,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  desiredSets:
-    - name: check-a
-      type: SQL
-      query: \"SELECT 1\"
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  desiredSets:
-    - name: check-b
-      type: SQL
-      query: \"SELECT 2\"",
-        );
+  onDrift:
+    - conditions: quality-checks
+      sync:
+        ref: dbt-full",
+        ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.assets.len(), 1);
         assert_eq!(output.assets[0].metadata.name, "daily-sales");
-        // Both conditions are merged.
-        assert_eq!(output.assets[0].spec.desired_sets.len(), 2);
+        assert_eq!(output.assets[0].resolved_on_drift.len(), 2);
     }
 
     #[test]
     fn resolve_merge_preserves_first_asset_fields() {
-        let resources = parse(
+        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: DesiredGroup
+metadata:
+  name: quality-checks
+spec:
+  - name: check-b
+    type: SQL
+    query: \"SELECT true\"",
+            SYNC_DBT_RUN,
+            SYNC_DBT_FULL,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
@@ -943,10 +933,10 @@ metadata:
   name: daily-sales
 spec:
   tags: [finance]
-  desiredSets:
-    - name: check-a
-      type: SQL
-      query: \"SELECT 1\"
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
@@ -954,16 +944,15 @@ metadata:
   name: daily-sales
 spec:
   tags: [other]
-  desiredSets:
-    - name: check-b
-      type: SQL
-      query: \"SELECT 2\"",
-        );
+  onDrift:
+    - conditions: quality-checks
+      sync:
+        ref: dbt-full",
+        ]));
         let output = resolve(resources).unwrap();
         let asset = &output.assets[0];
-        // First Asset's tags are preserved.
         assert_eq!(asset.spec.tags, vec!["finance".to_string()]);
-        assert_eq!(asset.spec.desired_sets.len(), 2);
+        assert_eq!(asset.resolved_on_drift.len(), 2);
     }
 
     #[test]
@@ -974,22 +963,19 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  desiredSets: []
+spec: {}
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  desiredSets: []
+spec: {}
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  desiredSets: []",
+spec: {}",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::DuplicateName { kind, name }
@@ -1009,11 +995,7 @@ metadata:
 spec:
   tags: [finance]
   sources:
-    - ref: raw-sales
-  desiredSets:
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+    - ref: raw-sales",
         ]));
         let output = resolve(resources).unwrap();
         assert_eq!(output.graph.nodes.len(), 2);
@@ -1032,95 +1014,50 @@ spec:
     }
 
     #[test]
-    fn resolve_rejects_duplicate_conditions_after_expansion() {
+    fn resolve_rejects_duplicate_conditions_across_on_drift_entries() {
         let resources = parse(&yaml_docs(&[
             "\
 apiVersion: nagi.io/v1alpha1
 kind: DesiredGroup
 metadata:
-  name: my-checks
+  name: checks-a
 spec:
   - name: check
     type: SQL
     query: \"SELECT true\"",
             "\
 apiVersion: nagi.io/v1alpha1
+kind: DesiredGroup
+metadata:
+  name: checks-b
+spec:
+  - name: check
+    type: SQL
+    query: \"SELECT true\"",
+            SYNC_DBT_RUN,
+            SYNC_DBT_FULL,
+            "\
+apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  desiredSets:
-    - ref: my-checks
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+  onDrift:
+    - conditions: checks-a
+      sync:
+        ref: dbt-run
+    - conditions: checks-b
+      sync:
+        ref: dbt-full",
         ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::Kind(_)));
     }
 
     #[test]
-    fn resolve_validates_sync_and_resync_refs() {
+    fn resolve_on_drift_with_sync_template_expansion() {
         let resources = parse(&yaml_docs(&[
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: dbt-default
-spec:
-  run:
-    type: Command
-    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]",
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  sync:
-    ref: dbt-default
-  resync:
-    ref: dbt-default",
-        ]));
-        let output = resolve(resources).unwrap();
-        assert_eq!(output.assets.len(), 1);
-        assert_eq!(
-            output.assets[0].spec.sync.as_ref().unwrap().ref_name,
-            "dbt-default"
-        );
-        let resolved = &output.assets[0];
-        assert_eq!(
-            resolved.sync.as_ref().unwrap().run.args,
-            vec!["dbt", "run", "--select", "daily-sales"]
-        );
-        assert_eq!(
-            resolved.resync.as_ref().unwrap().run.args,
-            vec!["dbt", "run", "--select", "daily-sales"]
-        );
-    }
-
-    #[test]
-    fn resolve_rejects_unresolved_resync_ref() {
-        let resources = parse(
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  resync:
-    ref: nonexistent-sync",
-        );
-        let err = resolve(resources).unwrap_err();
-        assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
-            if kind == "Sync" && name == "nonexistent-sync"));
-    }
-
-    // ── sync template expansion tests ──────────────────────────────────────
-
-    #[test]
-    fn resolve_expands_asset_name_in_sync() {
-        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
             SYNC_DBT_RUN,
             "\
 apiVersion: nagi.io/v1alpha1
@@ -1128,20 +1065,25 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: dbt-run",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run",
         ]));
         let output = resolve(resources).unwrap();
         let resolved = &output.assets[0];
         assert_eq!(
-            resolved.sync.as_ref().unwrap().run.args,
+            resolved.resolved_on_drift[0].sync.run.args,
             vec!["dbt", "run", "--select", "daily-sales"]
         );
     }
 
+    // ── sync template expansion tests ──────────────────────────────────────
+
     #[test]
-    fn resolve_expands_with_variables_in_sync() {
+    fn resolve_expands_with_variables_in_on_drift_sync() {
         let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Sync
@@ -1157,15 +1099,17 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: dbt-run
-    with:
-      selector: \"+daily_sales\"",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run
+        with:
+          selector: \"+daily_sales\"",
         ]));
         let output = resolve(resources).unwrap();
         let resolved = &output.assets[0];
         assert_eq!(
-            resolved.sync.as_ref().unwrap().run.args,
+            resolved.resolved_on_drift[0].sync.run.args,
             vec!["dbt", "run", "--select", "+daily_sales"]
         );
     }
@@ -1173,6 +1117,7 @@ spec:
     #[test]
     fn resolve_expands_templates_in_all_steps() {
         let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Sync
@@ -1194,12 +1139,13 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: full-sync",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: full-sync",
         ]));
         let output = resolve(resources).unwrap();
-        let resolved = &output.assets[0];
-        let sync = resolved.sync.as_ref().unwrap();
+        let sync = &output.assets[0].resolved_on_drift[0].sync;
         assert_eq!(
             sync.pre.as_ref().unwrap().args,
             vec!["echo", "pre-daily-sales"]
@@ -1212,8 +1158,18 @@ spec:
     }
 
     #[test]
-    fn resolve_expands_resync_separately() {
+    fn resolve_multiple_on_drift_with_different_syncs() {
         let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: DesiredGroup
+metadata:
+  name: quality-checks
+spec:
+  - name: no-negative-amount
+    type: SQL
+    query: \"SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0\"",
             SYNC_DBT_RUN,
             SYNC_DBT_FULL,
             "\
@@ -1222,45 +1178,45 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: dbt-run
-  resync:
-    ref: dbt-full",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run
+    - conditions: quality-checks
+      sync:
+        ref: dbt-full",
         ]));
         let output = resolve(resources).unwrap();
         let resolved = &output.assets[0];
+        assert_eq!(resolved.resolved_on_drift.len(), 2);
         assert_eq!(
-            resolved.sync.as_ref().unwrap().run.args,
+            resolved.resolved_on_drift[0].sync.run.args,
             vec!["dbt", "run", "--select", "daily-sales"]
         );
         assert_eq!(
-            resolved.resync.as_ref().unwrap().run.args,
+            resolved.resolved_on_drift[1].sync.run.args,
             vec!["dbt", "run", "--full-refresh", "--select", "daily-sales"]
         );
     }
 
     #[test]
-    fn resolve_no_sync_no_resolved_syncs() {
+    fn resolve_no_on_drift_no_resolved_syncs() {
         let resources = parse(
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  desiredSets:
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+spec: {}",
         );
         let output = resolve(resources).unwrap();
-        assert!(output.assets[0].sync.is_none());
-        assert!(output.assets[0].resync.is_none());
+        assert!(output.assets[0].resolved_on_drift.is_empty());
     }
 
     #[test]
     fn resolve_combines_asset_name_and_with_variables() {
         let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Sync
@@ -1276,13 +1232,15 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: dbt-run
-    with:
-      selector: \"+daily_sales\"",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run
+        with:
+          selector: \"+daily_sales\"",
         ]));
         let output = resolve(resources).unwrap();
-        let args = &output.assets[0].sync.as_ref().unwrap().run.args;
+        let args = &output.assets[0].resolved_on_drift[0].sync.run.args;
         assert_eq!(args[3], "+daily_sales");
         assert_eq!(args[5], "name=daily-sales");
     }
@@ -1300,11 +1258,7 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  desiredSets:
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+spec: {}",
         );
         let output = resolve(resources).unwrap();
         write_output(&output, &target).unwrap();
@@ -1348,11 +1302,12 @@ spec:
     }
 
     #[test]
-    fn write_output_embeds_resolved_sync_in_asset_yaml() {
+    fn write_output_embeds_resolved_on_drift_sync() {
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("target");
 
         let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
             SYNC_DBT_RUN,
             "\
 apiVersion: nagi.io/v1alpha1
@@ -1360,18 +1315,19 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sync:
-    ref: dbt-run",
+  onDrift:
+    - conditions: daily-sla
+      sync:
+        ref: dbt-run",
         ]));
         let output = resolve(resources).unwrap();
         write_output(&output, &target).unwrap();
 
         let content = std::fs::read_to_string(target.join("assets/daily-sales.yaml")).unwrap();
         let value: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
-        let sync_args = &value["spec"]["sync"]["run"]["args"];
+        let sync_args = &value["spec"]["onDrift"][0]["sync"]["run"]["args"];
         let args: Vec<String> = serde_yaml::from_value(sync_args.clone()).unwrap();
         assert_eq!(args, vec!["dbt", "run", "--select", "daily-sales"]);
-        // No separate syncs/ directory.
         assert!(!target.join("syncs").exists());
     }
 
@@ -1392,11 +1348,7 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: nested-asset
-spec:
-  desiredSets:
-    - name: check
-      type: SQL
-      query: \"SELECT true\"",
+spec: {}",
         );
 
         let resources = load_resources(&resources_dir).unwrap();
@@ -1427,8 +1379,7 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-asset
-spec:
-  desiredSets: []",
+spec: {}",
         );
 
         #[cfg(unix)]
@@ -1540,8 +1491,7 @@ spec:
             .iter()
             .find(|a| a.metadata.name == "customers")
             .unwrap();
-        assert!(customer_asset.sync.is_some());
-        assert!(!customer_asset.spec.desired_sets.is_empty());
+        assert!(!customer_asset.resolved_on_drift.is_empty());
     }
 
     #[test]

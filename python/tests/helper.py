@@ -5,6 +5,7 @@ CONNECTION_NAME = "my-bq"
 SOURCE_NAME = "raw-sales"
 ASSET_NAME = "daily-sales"
 SYNC_NAME = "dbt-sync"
+CONDITIONS_NAME = "freshness-check"
 
 # Asset spec values
 FRESHNESS_MAX_AGE = "24h"
@@ -30,6 +31,19 @@ SOURCE_YAML = (
     f"  connection: {CONNECTION_NAME}\n"
 )
 
+CONDITIONS_YAML = (
+    "apiVersion: nagi.io/v1alpha1\n"
+    "kind: DesiredGroup\n"
+    "metadata:\n"
+    f"  name: {CONDITIONS_NAME}\n"
+    "spec:\n"
+    "  - name: data-freshness\n"
+    "    type: Freshness\n"
+    f"    maxAge: {FRESHNESS_MAX_AGE}\n"
+    f"    interval: {FRESHNESS_INTERVAL}\n"
+    f"    column: {FRESHNESS_COLUMN}\n"
+)
+
 ASSET_YAML = (
     "apiVersion: nagi.io/v1alpha1\n"
     "kind: Asset\n"
@@ -38,14 +52,10 @@ ASSET_YAML = (
     "spec:\n"
     "  sources:\n"
     f"    - ref: {SOURCE_NAME}\n"
-    "  desiredSets:\n"
-    "    - name: data-freshness\n"
-    "      type: Freshness\n"
-    f"      maxAge: {FRESHNESS_MAX_AGE}\n"
-    f"      interval: {FRESHNESS_INTERVAL}\n"
-    f"      column: {FRESHNESS_COLUMN}\n"
-    "  sync:\n"
-    f"    ref: {SYNC_NAME}\n"
+    "  onDrift:\n"
+    f"    - conditions: {CONDITIONS_NAME}\n"
+    "      sync:\n"
+    f"        ref: {SYNC_NAME}\n"
 )
 
 SYNC_YAML = (
@@ -65,5 +75,6 @@ def write_valid_resources(resources_dir: Path) -> None:
     resources_dir.mkdir()
     (resources_dir / "connection.yaml").write_text(CONNECTION_YAML)
     (resources_dir / "source.yaml").write_text(SOURCE_YAML)
+    (resources_dir / "conditions.yaml").write_text(CONDITIONS_YAML)
     (resources_dir / "asset.yaml").write_text(ASSET_YAML)
     (resources_dir / "sync.yaml").write_text(SYNC_YAML)

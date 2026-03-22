@@ -58,10 +58,12 @@ pub async fn evaluate_and_cache(
         }
     }
 
-    let spec = crate::evaluate::compiled_to_asset_spec(&compiled);
-    let result =
-        crate::evaluate::evaluate_asset_no_log(&compiled.metadata.name, &spec, conn.as_deref())
-            .await?;
+    let result = crate::evaluate::evaluate_asset_no_log(
+        &compiled.metadata.name,
+        &compiled.spec.on_drift,
+        conn.as_deref(),
+    )
+    .await?;
 
     eval_cache
         .write(&result)
@@ -179,20 +181,19 @@ async fn resolve_and_sync(
 ) -> Result<crate::sync::SyncExecutionResult, SyncError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
-    let sync_spec = compiled
+
+    // Use the first on_drift entry's sync for serve (first-match).
+    let first_entry = compiled
         .spec
-        .sync
-        .as_ref()
+        .on_drift
+        .first()
         .ok_or_else(|| SyncError::NoSyncSpec {
             asset_name: compiled.metadata.name.clone(),
         })?;
+    let sync_spec = &first_entry.sync;
 
     let execution_id = crate::sync::generate_uuid();
-    let sync_ref = compiled
-        .spec
-        .sync_ref_name
-        .as_deref()
-        .unwrap_or(&compiled.metadata.name);
+    let sync_ref = &first_entry.sync_ref_name;
     let ttl = std::time::Duration::from_secs(lock_config.ttl_seconds);
 
     if !acquire_with_retry(
@@ -430,11 +431,8 @@ mod tests {
                         ref_name: s.to_string(),
                     })
                     .collect(),
-                desired_sets: vec![],
+                on_drift: vec![],
                 auto_sync: true,
-                sync_ref_name: None,
-                sync: None,
-                resync: None,
             },
             connection: None,
         }
