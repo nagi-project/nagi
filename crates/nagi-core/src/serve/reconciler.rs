@@ -424,6 +424,7 @@ mod tests {
                 sources: sources.into_iter().map(|s| s.to_string()).collect(),
                 on_drift: vec![],
                 auto_sync: true,
+                dbt_cloud_job_ids: None,
             },
             connection: None,
         }

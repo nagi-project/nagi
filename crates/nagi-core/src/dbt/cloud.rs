@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -103,11 +104,138 @@ fn parse_credentials_str(content: &str) -> Result<DbtCloudCredentials, DbtCloudE
     })
 }
 
+/// Reads token from credentials file just-in-time for an API call.
+fn read_token(credentials_path: &Path) -> Result<(DbtCloudCredentials, String), DbtCloudError> {
+    let content = std::fs::read_to_string(credentials_path).map_err(|e| {
+        DbtCloudError::CredentialsRead(format!("{}: {e}", credentials_path.display()))
+    })?;
+    let raw: RawCredentials = serde_yaml::from_str(&content)
+        .map_err(|e| DbtCloudError::CredentialsParse(e.to_string()))?;
+
+    let account_id = raw
+        .account_id
+        .filter(|s| !s.is_empty())
+        .ok_or(DbtCloudError::MissingField("account-id"))?;
+    if !account_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(DbtCloudError::InvalidAccountId(account_id));
+    }
+    let account_host = raw
+        .account_host
+        .filter(|s| !s.is_empty())
+        .ok_or(DbtCloudError::MissingField("account-host"))?;
+    validate_account_host(&account_host)?;
+    let token = raw
+        .token_value
+        .filter(|s| !s.is_empty())
+        .ok_or(DbtCloudError::MissingField("token-value"))?;
+
+    Ok((
+        DbtCloudCredentials {
+            account_id,
+            account_host,
+        },
+        token,
+    ))
+}
+
+// ── Jobs API ──────────────────────────────────────────────────────────────
+
+/// A dbt Cloud job definition with its execute_steps.
+#[derive(Debug, Deserialize)]
+struct JobData {
+    id: i64,
+    #[serde(default)]
+    execute_steps: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JobsResponse {
+    data: Vec<JobData>,
+}
+
+/// Extracts model names from a dbt command's `--select` / `-s` argument.
+/// Uses `select::parse_selector` to parse each selector token, extracting
+/// only model names (skipping tag selectors etc.).
+///
+/// Examples:
+///   "dbt run --select daily_sales" → ["daily_sales"]
+///   "dbt run --select +daily_sales" → ["daily_sales"]
+///   "dbt test --select tag:finance" → [] (tag selectors are not model names)
+///   "dbt run" → [] (no --select means all models)
+pub fn extract_model_names_from_command(command: &str) -> Vec<String> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    let mut models = Vec::new();
+    let mut i = 0;
+    while i < parts.len() {
+        if (parts[i] == "--select" || parts[i] == "-s") && i + 1 < parts.len() {
+            if let Some(name) = crate::select::extract_model_name(parts[i + 1]) {
+                models.push(name);
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    models
+}
+
+/// Fetches all jobs from dbt Cloud and returns a mapping of model name → job IDs.
+/// This is called at compile time to resolve which jobs affect each Asset.
+pub async fn fetch_job_model_mapping(
+    credentials_path: &Path,
+) -> Result<HashMap<String, HashSet<i64>>, DbtCloudError> {
+    let (creds, token) = read_token(credentials_path)?;
+
+    let url = format!(
+        "https://{}/api/v2/accounts/{}/jobs/",
+        creds.account_host, creds.account_id
+    );
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Token {}", token))
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| DbtCloudError::Request(e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Err(DbtCloudError::Response(format!(
+            "HTTP {} from {}",
+            resp.status(),
+            url
+        )));
+    }
+
+    let body: JobsResponse = resp
+        .json()
+        .await
+        .map_err(|e| DbtCloudError::Response(e.to_string()))?;
+
+    Ok(build_model_job_mapping(&body.data))
+}
+
+/// Builds a mapping of model name → set of job IDs from job definitions.
+fn build_model_job_mapping(jobs: &[JobData]) -> HashMap<String, HashSet<i64>> {
+    let mut mapping: HashMap<String, HashSet<i64>> = HashMap::new();
+    for job in jobs {
+        for step in &job.execute_steps {
+            for model in extract_model_names_from_command(step) {
+                mapping.entry(model).or_default().insert(job.id);
+            }
+        }
+    }
+    mapping
+}
+
+// ── Runs API ──────────────────────────────────────────────────────────────
+
 /// Summary of a running dbt Cloud job.
 #[derive(Debug, Clone)]
 pub struct RunningJob {
     pub id: i64,
-    pub job_name: String,
+    pub job_id: i64,
     pub status_humanized: String,
 }
 
@@ -126,42 +254,25 @@ struct RunData {
     status_humanized: String,
 }
 
-/// Checks for currently running jobs in the dbt Cloud account.
+/// Checks for running jobs that affect the given asset.
 ///
-/// Calls `GET https://{host}/api/v2/accounts/{account_id}/runs/?status=3`
-/// (status=3 = Running in dbt Cloud API).
+/// `relevant_job_ids` is the set of dbt Cloud job IDs that include this asset
+/// (resolved at compile time via `fetch_job_model_mapping`).
 ///
-/// The token is read from the credentials file just before use and dropped
-/// after the request completes — never stored in a struct field.
-pub async fn check_running_jobs(credentials_path: &Path) -> Result<Vec<RunningJob>, DbtCloudError> {
-    let content = std::fs::read_to_string(credentials_path).map_err(|e| {
-        DbtCloudError::CredentialsRead(format!("{}: {e}", credentials_path.display()))
-    })?;
-    let raw: RawCredentials = serde_yaml::from_str(&content)
-        .map_err(|e| DbtCloudError::CredentialsParse(e.to_string()))?;
-
-    let account_id = raw
-        .account_id
-        .filter(|s| !s.is_empty())
-        .ok_or(DbtCloudError::MissingField("account-id"))?;
-    // Defense against URL path injection: account-id must be numeric.
-    if !account_id.chars().all(|c| c.is_ascii_digit()) {
-        return Err(DbtCloudError::InvalidAccountId(account_id));
+/// Returns only running jobs whose job_id is in `relevant_job_ids`.
+pub async fn check_running_jobs_for_asset(
+    credentials_path: &Path,
+    relevant_job_ids: &HashSet<i64>,
+) -> Result<Vec<RunningJob>, DbtCloudError> {
+    if relevant_job_ids.is_empty() {
+        return Ok(vec![]);
     }
-    let account_host = raw
-        .account_host
-        .filter(|s| !s.is_empty())
-        .ok_or(DbtCloudError::MissingField("account-host"))?;
-    // Defense against URL injection: account-host must be a plain hostname.
-    validate_account_host(&account_host)?;
-    let token = raw
-        .token_value
-        .filter(|s| !s.is_empty())
-        .ok_or(DbtCloudError::MissingField("token-value"))?;
+
+    let (creds, token) = read_token(credentials_path)?;
 
     let url = format!(
         "https://{}/api/v2/accounts/{}/runs/?status=3",
-        account_host, account_id
+        creds.account_host, creds.account_id
     );
 
     let client = reqwest::Client::new();
@@ -186,32 +297,18 @@ pub async fn check_running_jobs(credentials_path: &Path) -> Result<Vec<RunningJo
         .await
         .map_err(|e| DbtCloudError::Response(e.to_string()))?;
 
-    Ok(body
-        .data
-        .into_iter()
-        .map(|r| RunningJob {
-            id: r.id,
-            job_name: format!("job-{}", r.job_id),
-            status_humanized: r.status_humanized,
-        })
-        .collect())
+    Ok(filter_runs_by_job_ids(&body.data, relevant_job_ids))
 }
 
-/// Parses a dbt Cloud API runs response JSON into `RunningJob` entries.
-#[cfg(test)]
-fn parse_runs_response(json: &str) -> Result<Vec<RunningJob>, DbtCloudError> {
-    let body: RunsResponse =
-        serde_json::from_str(json).map_err(|e| DbtCloudError::Response(e.to_string()))?;
-
-    Ok(body
-        .data
-        .into_iter()
+fn filter_runs_by_job_ids(runs: &[RunData], job_ids: &HashSet<i64>) -> Vec<RunningJob> {
+    runs.iter()
+        .filter(|r| job_ids.contains(&r.job_id))
         .map(|r| RunningJob {
             id: r.id,
-            job_name: format!("job-{}", r.job_id),
-            status_humanized: r.status_humanized,
+            job_id: r.job_id,
+            status_humanized: r.status_humanized.clone(),
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
@@ -291,41 +388,137 @@ account-host: "cloud.getdbt.com"
         assert!(matches!(err, DbtCloudError::CredentialsRead(_)));
     }
 
+    // ── extract_model_names_from_command ─────────────────────────────────
+
+    macro_rules! extract_models_test {
+        ($($name:ident: $input:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let result = extract_model_names_from_command($input);
+                    assert_eq!(result, $expected, "input: {}", $input);
+                }
+            )*
+        };
+    }
+
+    extract_models_test! {
+        extract_simple_select:
+            "dbt run --select daily_sales" => vec!["daily_sales"];
+        extract_with_upstream_marker:
+            "dbt run --select +daily_sales" => vec!["daily_sales"];
+        extract_with_downstream_marker:
+            "dbt run --select daily_sales+" => vec!["daily_sales"];
+        extract_with_both_markers:
+            "dbt run --select +daily_sales+" => vec!["daily_sales"];
+        extract_short_flag:
+            "dbt run -s daily_sales" => vec!["daily_sales"];
+        extract_tag_selector_skipped:
+            "dbt run --select tag:finance" => Vec::<String>::new();
+        extract_no_select:
+            "dbt run" => Vec::<String>::new();
+        extract_test_command:
+            "dbt test --select daily_sales" => vec!["daily_sales"];
+    }
+
+    // ── build_model_job_mapping ──────────────────────────────────────────
+
     #[test]
-    fn parse_runs_response_with_running_jobs() {
-        let json = r#"{
-            "data": [
-                {"id": 100, "job_id": 42, "status_humanized": "Running"},
-                {"id": 101, "job_id": 43, "status_humanized": "Running"}
-            ]
-        }"#;
-        let jobs = parse_runs_response(json).unwrap();
-        assert_eq!(jobs.len(), 2);
-        assert_eq!(jobs[0].id, 100);
-        assert_eq!(jobs[0].job_name, "job-42");
-        assert_eq!(jobs[0].status_humanized, "Running");
-        assert_eq!(jobs[1].id, 101);
+    fn model_job_mapping_basic() {
+        let jobs = vec![
+            JobData {
+                id: 1,
+                execute_steps: vec!["dbt run --select daily_sales".to_string()],
+            },
+            JobData {
+                id: 2,
+                execute_steps: vec!["dbt run --select +daily_sales".to_string()],
+            },
+            JobData {
+                id: 3,
+                execute_steps: vec!["dbt run --select customers".to_string()],
+            },
+        ];
+        let mapping = build_model_job_mapping(&jobs);
+        assert_eq!(mapping.get("daily_sales").unwrap(), &HashSet::from([1, 2]));
+        assert_eq!(mapping.get("customers").unwrap(), &HashSet::from([3]));
     }
 
     #[test]
-    fn parse_runs_response_empty() {
-        let json = r#"{"data": []}"#;
-        let jobs = parse_runs_response(json).unwrap();
-        assert!(jobs.is_empty());
+    fn model_job_mapping_no_select_produces_empty() {
+        let jobs = vec![JobData {
+            id: 1,
+            execute_steps: vec!["dbt run".to_string()],
+        }];
+        let mapping = build_model_job_mapping(&jobs);
+        assert!(mapping.is_empty());
     }
 
     #[test]
-    fn parse_runs_response_invalid_json() {
-        let err = parse_runs_response("not json").unwrap_err();
-        assert!(matches!(err, DbtCloudError::Response(_)));
+    fn model_job_mapping_tag_only_produces_empty() {
+        let jobs = vec![JobData {
+            id: 1,
+            execute_steps: vec!["dbt run --select tag:finance".to_string()],
+        }];
+        let mapping = build_model_job_mapping(&jobs);
+        assert!(mapping.is_empty());
+    }
+
+    // ── filter_runs_by_job_ids ───────────────────────────────────────────
+
+    #[test]
+    fn filter_runs_returns_matching_jobs() {
+        let runs = vec![
+            RunData {
+                id: 100,
+                job_id: 1,
+                status_humanized: "Running".to_string(),
+            },
+            RunData {
+                id: 101,
+                job_id: 2,
+                status_humanized: "Running".to_string(),
+            },
+            RunData {
+                id: 102,
+                job_id: 3,
+                status_humanized: "Running".to_string(),
+            },
+        ];
+        let relevant = HashSet::from([1, 3]);
+        let result = filter_runs_by_job_ids(&runs, &relevant);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].job_id, 1);
+        assert_eq!(result[1].job_id, 3);
+    }
+
+    #[test]
+    fn filter_runs_empty_when_no_match() {
+        let runs = vec![RunData {
+            id: 100,
+            job_id: 1,
+            status_humanized: "Running".to_string(),
+        }];
+        let relevant = HashSet::from([99]);
+        let result = filter_runs_by_job_ids(&runs, &relevant);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_runs_empty_relevant_returns_empty() {
+        let runs = vec![RunData {
+            id: 100,
+            job_id: 1,
+            status_humanized: "Running".to_string(),
+        }];
+        let result = filter_runs_by_job_ids(&runs, &HashSet::new());
+        assert!(result.is_empty());
     }
 
     // ── Security ──────────────────────────────────────────────────────────────
 
     #[test]
     fn account_id_with_path_traversal_is_rejected() {
-        // Defense against URL path injection: "123/../admin" must not reach
-        // a different API endpoint.
         let yaml = r#"
 account-id: "123/../admin"
 token-value: "tok"
@@ -348,7 +541,6 @@ account-host: "cloud.getdbt.com"
 
     #[test]
     fn account_host_with_path_segment_is_rejected() {
-        // Defense: "cloud.getdbt.com/evil" must not be used as a URL host.
         let yaml = r#"
 account-id: "123"
 token-value: "tok"
@@ -371,7 +563,6 @@ account-host: "cloud.getdbt.com?inject=1"
 
     #[test]
     fn account_host_with_at_sign_is_rejected() {
-        // "user@host" pattern can redirect HTTP clients to a different host.
         let yaml = r#"
 account-id: "123"
 token-value: "tok"

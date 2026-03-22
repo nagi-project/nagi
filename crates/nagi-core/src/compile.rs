@@ -67,6 +67,8 @@ pub struct ResolvedAsset {
     /// Resolved on_drift entries: conditions expanded + sync specs resolved.
     pub resolved_on_drift: Vec<ResolvedOnDriftEntry>,
     pub connection: Option<ResolvedConnection>,
+    /// dbt Cloud job IDs whose execute_steps include this asset.
+    pub dbt_cloud_job_ids: Option<HashSet<i64>>,
 }
 
 /// A compiled on_drift entry with resolved conditions and sync spec.
@@ -95,6 +97,20 @@ pub enum ResolvedConnection {
         /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
         dbt_cloud_credentials_file: Option<String>,
     },
+}
+
+/// Applies dbt Cloud job-to-model mapping to resolved assets.
+/// For each asset, sets `dbt_cloud_job_ids` to the set of job IDs whose
+/// `execute_steps` reference that asset's name.
+pub fn apply_dbt_cloud_job_mapping(
+    output: &mut CompileOutput,
+    model_job_mapping: &HashMap<String, HashSet<i64>>,
+) {
+    for asset in &mut output.assets {
+        if let Some(job_ids) = model_job_mapping.get(&asset.metadata.name) {
+            asset.dbt_cloud_job_ids = Some(job_ids.clone());
+        }
+    }
 }
 
 /// Compiles all YAML resources from `resources_dir` and writes resolved output to `target_dir`.
@@ -517,6 +533,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             spec,
             resolved_on_drift,
             connection,
+            dbt_cloud_job_ids: None,
         });
     }
 
@@ -640,6 +657,8 @@ struct CompiledAssetSpecYaml<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     on_drift: &'a Vec<ResolvedOnDriftEntry>,
     auto_sync: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dbt_cloud_job_ids: &'a Option<HashSet<i64>>,
 }
 
 /// Deserialization struct for reading compiled asset YAML from `target/`.
@@ -664,6 +683,10 @@ pub struct CompiledAssetSpec {
     pub on_drift: Vec<ResolvedOnDriftEntry>,
     #[serde(default = "default_true")]
     pub auto_sync: bool,
+    /// dbt Cloud job IDs that include this asset in their execute_steps.
+    /// Resolved at compile time. Used for running-job checks before sync.
+    #[serde(default)]
+    pub dbt_cloud_job_ids: Option<HashSet<i64>>,
 }
 
 fn default_true() -> bool {
@@ -684,6 +707,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
                 sources: &asset.spec.sources,
                 on_drift: &asset.resolved_on_drift,
                 auto_sync: asset.spec.auto_sync,
+                dbt_cloud_job_ids: &asset.dbt_cloud_job_ids,
             },
             connection: &asset.connection,
         };

@@ -379,6 +379,9 @@ pub struct SyncProposalEvaluation {
 
 /// Checks dbt Cloud for running jobs. Returns an error if any are found.
 async fn check_dbt_cloud_preflight(compiled: &CompiledAsset) -> Result<(), SyncError> {
+    let Some(job_ids) = &compiled.spec.dbt_cloud_job_ids else {
+        return Ok(());
+    };
     let cred_path = compiled.connection.as_ref().and_then(|c| match c {
         crate::compile::ResolvedConnection::DbtProfile {
             dbt_cloud_credentials_file,
@@ -388,16 +391,19 @@ async fn check_dbt_cloud_preflight(compiled: &CompiledAsset) -> Result<(), SyncE
     let Some(cred_path) = cred_path else {
         return Ok(());
     };
-    let jobs = crate::dbt::cloud::check_running_jobs(Path::new(cred_path))
+
+    let jobs = crate::dbt::cloud::check_running_jobs_for_asset(Path::new(cred_path), job_ids)
         .await
         .map_err(|e| SyncError::DbtCloud(e.to_string()))?;
+
     if !jobs.is_empty() {
         let details: Vec<String> = jobs
             .iter()
-            .map(|j| format!("  {} ({})", j.job_name, j.status_humanized))
+            .map(|j| format!("  job-{} ({})", j.job_id, j.status_humanized))
             .collect();
         return Err(SyncError::DbtCloud(format!(
-            "dbt Cloud has running jobs:\n{}\nUse --force to override.",
+            "dbt Cloud has running jobs that include asset '{}':\n{}\nUse --force to override.",
+            compiled.metadata.name,
             details.join("\n")
         )));
     }

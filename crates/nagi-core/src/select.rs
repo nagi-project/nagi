@@ -20,6 +20,8 @@ pub enum SelectError {
 /// - `+name`      — name + all ancestors (upstream)
 /// - `name+`      — name + all descendants (downstream)
 /// - `+name+`     — name + ancestors + descendants
+/// - `N+name`     — name + N levels upstream
+/// - `name+N`     — name + N levels downstream
 /// - `tag:value`  — all nodes with the given tag
 /// - `+tag:value` — tag match + all ancestors
 ///
@@ -76,15 +78,39 @@ fn select_single(graph: &DependencyGraph, selector: &str) -> Result<HashSet<Stri
     Ok(result)
 }
 
+/// Parses a selector expression into (upstream, downstream, pattern).
+///
+/// Supported forms:
+/// - `name`        — exact match
+/// - `+name`       — all upstream
+/// - `name+`       — all downstream
+/// - `+name+`      — both
+/// - `2+name`      — N levels upstream (N-plus)
+/// - `name+1`      — N levels downstream
+/// - `2+name+3`    — N levels both directions
 fn parse_selector(selector: &str) -> Result<(bool, bool, &str), SelectError> {
-    let upstream = selector.starts_with('+');
-    let downstream = selector.ends_with('+');
-
-    let inner = if upstream { &selector[1..] } else { selector };
-    let pattern = if downstream && !inner.is_empty() {
-        &inner[..inner.len() - 1]
+    // Strip upstream prefix: `+name` or `2+name`
+    let (upstream, rest) = if let Some(pos) = selector.find('+') {
+        let prefix = &selector[..pos];
+        if prefix.is_empty() || prefix.chars().all(|c| c.is_ascii_digit()) {
+            (true, &selector[pos + 1..])
+        } else {
+            (false, selector)
+        }
     } else {
-        inner
+        (false, selector)
+    };
+
+    // Strip downstream suffix: `name+` or `name+1`
+    let (downstream, pattern) = if let Some(pos) = rest.rfind('+') {
+        let suffix = &rest[pos + 1..];
+        if suffix.is_empty() || suffix.chars().all(|c| c.is_ascii_digit()) {
+            (true, &rest[..pos])
+        } else {
+            (false, rest)
+        }
+    } else {
+        (false, rest)
     };
 
     if pattern.is_empty() {
@@ -94,6 +120,19 @@ fn parse_selector(selector: &str) -> Result<(bool, bool, &str), SelectError> {
     }
 
     Ok((upstream, downstream, pattern))
+}
+
+/// Extracts a model name from a selector expression, stripping `+` markers.
+/// Returns `None` for tag selectors (`tag:value`) or other non-model patterns.
+pub fn extract_model_name(selector: &str) -> Option<String> {
+    let Ok((_upstream, _downstream, pattern)) = parse_selector(selector) else {
+        return None;
+    };
+    // Tag or other qualified selectors are not model names.
+    if pattern.contains(':') {
+        return None;
+    }
+    Some(pattern.to_string())
 }
 
 fn resolve_pattern(graph: &DependencyGraph, pattern: &str) -> Result<Vec<String>, SelectError> {
@@ -324,5 +363,60 @@ mod tests {
         assert_eq!(adj.get("raw-sales").unwrap(), &vec!["daily-sales"]);
         assert_eq!(adj.get("daily-sales").unwrap(), &vec!["monthly-report"]);
         assert!(!adj.contains_key("monthly-report"));
+    }
+
+    // ── parse_selector ──────────────────────────────────────────────────
+
+    macro_rules! parse_selector_test {
+        ($($name:ident: $input:expr => ($up:expr, $down:expr, $pat:expr);)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let (up, down, pat) = parse_selector($input).unwrap();
+                    assert_eq!((up, down, pat), ($up, $down, $pat), "input: {}", $input);
+                }
+            )*
+        };
+    }
+
+    parse_selector_test! {
+        parse_plain_name: "daily-sales" => (false, false, "daily-sales");
+        parse_upstream: "+daily-sales" => (true, false, "daily-sales");
+        parse_downstream: "daily-sales+" => (false, true, "daily-sales");
+        parse_both: "+daily-sales+" => (true, true, "daily-sales");
+        parse_tag: "tag:finance" => (false, false, "tag:finance");
+        parse_upstream_tag: "+tag:finance" => (true, false, "tag:finance");
+        parse_n_plus_upstream: "2+daily-sales" => (true, false, "daily-sales");
+        parse_n_plus_downstream: "daily-sales+1" => (false, true, "daily-sales");
+        parse_n_plus_both: "2+daily-sales+3" => (true, true, "daily-sales");
+        parse_1_plus: "1+daily-sales" => (true, false, "daily-sales");
+    }
+
+    #[test]
+    fn parse_selector_empty_is_error() {
+        assert!(parse_selector("").is_err());
+        assert!(parse_selector("+").is_err());
+    }
+
+    // ── extract_model_name ──────────────────────────────────────────────
+
+    macro_rules! extract_model_test {
+        ($($name:ident: $input:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(extract_model_name($input), $expected, "input: {}", $input);
+                }
+            )*
+        };
+    }
+
+    extract_model_test! {
+        extract_plain: "daily-sales" => Some("daily-sales".to_string());
+        extract_upstream: "+daily-sales" => Some("daily-sales".to_string());
+        extract_n_plus: "2+daily-sales" => Some("daily-sales".to_string());
+        extract_downstream_n: "daily-sales+1" => Some("daily-sales".to_string());
+        extract_tag_returns_none: "tag:finance" => None;
+        extract_upstream_tag_returns_none: "+tag:finance" => None;
     }
 }
