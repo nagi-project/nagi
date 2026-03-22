@@ -119,17 +119,17 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
             }
         }
 
-        // Convert dbt tests to a DesiredGroup and on_drift entry.
+        // Convert dbt tests to a Conditions and on_drift entry.
         let on_drift = if let Some(tests) = model_tests.get(&model.unique_id) {
             let conditions = tests_to_conditions(tests);
             if !conditions.is_empty() {
                 let group_name = format!("dbt-tests-{}", model.name);
-                resources.push(NagiKind::DesiredGroup {
+                resources.push(NagiKind::Conditions {
                     api_version: API_VERSION.to_string(),
                     metadata: Metadata {
                         name: group_name.clone(),
                     },
-                    spec: crate::kind::desired_group::DesiredGroupSpec(conditions),
+                    spec: crate::kind::conditions::ConditionsSpec(conditions),
                 });
                 if let Some(sync_ref) = &default_sync {
                     vec![OnDriftEntry {
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_to_resources_generates_desired_group_for_tests() {
+    fn manifest_to_resources_generates_conditions_for_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
 
@@ -502,7 +502,7 @@ mod tests {
             .iter()
             .find(|r| r.metadata().name == "dbt-tests-customers")
             .unwrap();
-        if let NagiKind::DesiredGroup { spec, .. } = group {
+        if let NagiKind::Conditions { spec, .. } = group {
             let has_not_null = spec.0.iter().any(|c| {
                 matches!(c, DesiredCondition::Command { name, run, .. }
                     if name == "dbt-test-not_null_customers_customer_id"
@@ -517,7 +517,7 @@ mod tests {
             });
             assert!(has_unique, "should have a unique Command condition");
         } else {
-            panic!("expected DesiredGroup");
+            panic!("expected Conditions");
         }
     }
 
@@ -530,7 +530,7 @@ mod tests {
             .iter()
             .find(|r| r.metadata().name == "dbt-tests-orders")
             .unwrap();
-        if let NagiKind::DesiredGroup { spec, .. } = group {
+        if let NagiKind::Conditions { spec, .. } = group {
             let has_command = spec.0.iter().any(|c| {
                 matches!(c, DesiredCondition::Command { run, .. }
                     if run.contains(&"dbt".to_string()))
@@ -540,7 +540,7 @@ mod tests {
                 "orders should have a dbt test Command condition"
             );
         } else {
-            panic!("expected DesiredGroup");
+            panic!("expected Conditions");
         }
     }
 

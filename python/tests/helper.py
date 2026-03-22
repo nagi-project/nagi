@@ -33,7 +33,7 @@ SOURCE_YAML = (
 
 CONDITIONS_YAML = (
     "apiVersion: nagi.io/v1alpha1\n"
-    "kind: DesiredGroup\n"
+    "kind: Conditions\n"
     "metadata:\n"
     f"  name: {CONDITIONS_NAME}\n"
     "spec:\n"

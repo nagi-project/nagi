@@ -73,7 +73,7 @@ pub struct ResolvedAsset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedOnDriftEntry {
-    /// Resolved conditions from the referenced DesiredGroup.
+    /// Resolved conditions from the referenced Conditions.
     pub conditions: Vec<DesiredCondition>,
     /// Name of the conditions group (for display/logging).
     pub conditions_ref: String,
@@ -331,7 +331,7 @@ struct CategorizedResources {
     connections: HashMap<String, ConnectionSpec>,
     sources: HashSet<String>,
     source_connections: HashMap<String, String>,
-    desired_groups: HashMap<String, Vec<DesiredCondition>>,
+    conditions_groups: HashMap<String, Vec<DesiredCondition>>,
     syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
 }
@@ -342,7 +342,7 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         connections: HashMap::new(),
         sources: HashSet::new(),
         source_connections: HashMap::new(),
-        desired_groups: HashMap::new(),
+        conditions_groups: HashMap::new(),
         syncs: HashMap::new(),
         assets: Vec::new(),
     };
@@ -380,8 +380,8 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                             .insert(name.clone(), spec.connection);
                         result.sources.insert(name);
                     }
-                    NagiKind::DesiredGroup { spec, .. } => {
-                        result.desired_groups.insert(name, spec.0.clone());
+                    NagiKind::Conditions { spec, .. } => {
+                        result.conditions_groups.insert(name, spec.0.clone());
                     }
                     NagiKind::Sync { spec, .. } => {
                         result.syncs.insert(name, spec);
@@ -454,7 +454,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         connections,
         sources,
         source_connections,
-        desired_groups,
+        conditions_groups,
         syncs,
         assets,
     } = categorize(resources)?;
@@ -470,10 +470,10 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         let mut resolved_on_drift = Vec::new();
         let mut all_conditions: Vec<DesiredCondition> = Vec::new();
         for entry in &spec.on_drift {
-            // Resolve conditions ref to DesiredGroup.
-            let conditions = desired_groups.get(&entry.conditions).ok_or_else(|| {
+            // Resolve conditions ref to Conditions.
+            let conditions = conditions_groups.get(&entry.conditions).ok_or_else(|| {
                 CompileError::UnresolvedRef {
-                    kind: "DesiredGroup".to_string(),
+                    kind: "Conditions".to_string(),
                     name: entry.conditions.clone(),
                 }
             })?;
@@ -746,7 +746,7 @@ spec:
 
     const DESIRED_GROUP_DAILY_SLA: &str = "\
 apiVersion: nagi.io/v1alpha1
-kind: DesiredGroup
+kind: Conditions
 metadata:
   name: daily-sla
 spec:
@@ -866,7 +866,7 @@ spec:
         ]));
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
-            if kind == "DesiredGroup" && name == "nonexistent-group"));
+            if kind == "Conditions" && name == "nonexistent-group"));
     }
 
     #[test]
@@ -875,7 +875,7 @@ spec:
             DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
-kind: DesiredGroup
+kind: Conditions
 metadata:
   name: quality-checks
 spec:
@@ -917,7 +917,7 @@ spec:
             DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
-kind: DesiredGroup
+kind: Conditions
 metadata:
   name: quality-checks
 spec:
@@ -1018,7 +1018,7 @@ spec:
         let resources = parse(&yaml_docs(&[
             "\
 apiVersion: nagi.io/v1alpha1
-kind: DesiredGroup
+kind: Conditions
 metadata:
   name: checks-a
 spec:
@@ -1027,7 +1027,7 @@ spec:
     query: \"SELECT true\"",
             "\
 apiVersion: nagi.io/v1alpha1
-kind: DesiredGroup
+kind: Conditions
 metadata:
   name: checks-b
 spec:
@@ -1163,7 +1163,7 @@ spec:
             DESIRED_GROUP_DAILY_SLA,
             "\
 apiVersion: nagi.io/v1alpha1
-kind: DesiredGroup
+kind: Conditions
 metadata:
   name: quality-checks
 spec:

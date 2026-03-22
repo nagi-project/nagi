@@ -45,7 +45,7 @@ pub struct SourceRef {
 /// The conditions are evaluated as a group (all must pass for no drift).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OnDriftEntry {
-    /// Name of the `kind: DesiredGroup` resource whose conditions define drift.
+    /// Name of the `kind: Conditions` resource whose conditions define drift.
     pub conditions: String,
     /// Reference to the Sync resource to execute when drift is detected.
     pub sync: SyncRef,
@@ -62,7 +62,7 @@ pub struct SyncRef {
 }
 
 /// A single desired state condition. The Asset is Ready only when all conditions are satisfied.
-/// Each condition carries a `name` that is unique within the Asset (after DesiredGroup expansion)
+/// Each condition carries a `name` that is unique within the Asset (after Conditions expansion)
 /// and used as a key in execution logs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]

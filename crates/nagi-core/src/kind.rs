@@ -3,15 +3,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod asset;
+pub mod conditions;
 pub mod connection;
-pub mod desired_group;
 pub mod origin;
 pub mod source;
 pub mod sync;
 
 pub use asset::AssetSpec;
+pub use conditions::ConditionsSpec;
 pub use connection::ConnectionSpec;
-pub use desired_group::DesiredGroupSpec;
 pub use origin::OriginSpec;
 pub use source::SourceSpec;
 pub use sync::SyncSpec;
@@ -59,11 +59,11 @@ pub enum NagiKind {
         metadata: Metadata,
         spec: AssetSpec,
     },
-    DesiredGroup {
+    Conditions {
         #[serde(rename = "apiVersion")]
         api_version: String,
         metadata: Metadata,
-        spec: DesiredGroupSpec,
+        spec: ConditionsSpec,
     },
     Sync {
         #[serde(rename = "apiVersion")]
@@ -85,7 +85,7 @@ impl NagiKind {
             NagiKind::Connection { api_version, .. } => api_version,
             NagiKind::Source { api_version, .. } => api_version,
             NagiKind::Asset { api_version, .. } => api_version,
-            NagiKind::DesiredGroup { api_version, .. } => api_version,
+            NagiKind::Conditions { api_version, .. } => api_version,
             NagiKind::Sync { api_version, .. } => api_version,
             NagiKind::Origin { api_version, .. } => api_version,
         }
@@ -96,7 +96,7 @@ impl NagiKind {
             NagiKind::Connection { metadata, .. } => metadata,
             NagiKind::Source { metadata, .. } => metadata,
             NagiKind::Asset { metadata, .. } => metadata,
-            NagiKind::DesiredGroup { metadata, .. } => metadata,
+            NagiKind::Conditions { metadata, .. } => metadata,
             NagiKind::Sync { metadata, .. } => metadata,
             NagiKind::Origin { metadata, .. } => metadata,
         }
@@ -107,7 +107,7 @@ impl NagiKind {
             NagiKind::Connection { .. } => connection::KIND,
             NagiKind::Source { .. } => source::KIND,
             NagiKind::Asset { .. } => asset::KIND,
-            NagiKind::DesiredGroup { .. } => desired_group::KIND,
+            NagiKind::Conditions { .. } => conditions::KIND,
             NagiKind::Sync { .. } => sync::KIND,
             NagiKind::Origin { .. } => origin::KIND,
         }
@@ -143,7 +143,7 @@ impl NagiKind {
             NagiKind::Connection { spec, .. } => spec.validate(),
             NagiKind::Source { spec, .. } => spec.validate(),
             NagiKind::Asset { spec, .. } => spec.validate(),
-            NagiKind::DesiredGroup { spec, .. } => spec.validate(),
+            NagiKind::Conditions { spec, .. } => spec.validate(),
             NagiKind::Sync { spec, .. } => spec.validate(),
             NagiKind::Origin { spec, .. } => spec.validate(),
         }
@@ -223,13 +223,6 @@ metadata:
 spec:
   sources:
     - ref: raw-sales
-  desiredSets:
-    - name: data-freshness
-      type: Freshness
-      maxAge: 24h
-      interval: 6h
-  sync:
-    ref: dbt-default
 "#;
         let resource = parse_kind(yaml).unwrap();
         assert_eq!(resource.kind(), asset::KIND);

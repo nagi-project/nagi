@@ -3,7 +3,7 @@ use schemars::schema_for;
 use crate::config::NagiConfig;
 use crate::evaluate::AssetEvalResult;
 use crate::kind::{
-    AssetSpec, ConnectionSpec, DesiredGroupSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
+    AssetSpec, ConditionsSpec, ConnectionSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
 };
 use crate::log::{EvaluateLogEntry, SyncLogEntry};
 use crate::serve::SuspendedInfo;
@@ -35,8 +35,8 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
             serde_json::to_value(schema_for!(SyncSpec)).unwrap(),
         ),
         (
-            "DesiredGroupSpec",
-            serde_json::to_value(schema_for!(DesiredGroupSpec)).unwrap(),
+            "ConditionsSpec",
+            serde_json::to_value(schema_for!(ConditionsSpec)).unwrap(),
         ),
         (
             "OriginSpec",
@@ -104,7 +104,7 @@ mod tests {
             "SourceSpec.json",
             "ConnectionSpec.json",
             "SyncSpec.json",
-            "DesiredGroupSpec.json",
+            "ConditionsSpec.json",
             "OriginSpec.json",
             "NagiConfig.json",
             "AssetEvalResult.json",
