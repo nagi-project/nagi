@@ -26,10 +26,12 @@
     "allowUnsandboxedCommands": false,
     "filesystem": {
       "allowRead": [
-        "~/.cache/uv"
+        "~/.cache/uv",
+        "~/.cargo"
       ],
       "allowWrite": [
-        "~/.cache/uv"
+        "~/.cache/uv",
+        "~/.cargo"
       ],
       "denyRead": [
         "~/.aws/credentials",
