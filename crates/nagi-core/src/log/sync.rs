@@ -31,12 +31,12 @@ pub struct SyncLogEntry {
     pub started_at: String,
     /// RFC 3339 timestamp when the stage finished.
     pub finished_at: String,
-    /// Process exit code of the stage command.
-    pub exit_code: i32,
-    /// File path where stdout output is stored.
-    pub stdout_path: String,
-    /// File path where stderr output is stored.
-    pub stderr_path: String,
+    /// Process exit code of the stage command. None for non-execution stages (e.g. lock_retry).
+    pub exit_code: Option<i32>,
+    /// File path where stdout output is stored. None for non-execution stages.
+    pub stdout_path: Option<String>,
+    /// File path where stderr output is stored. None for non-execution stages.
+    pub stderr_path: Option<String>,
     /// Date partition key (YYYY-MM-DD) derived from `started_at`.
     pub date: String,
 }
@@ -101,6 +101,35 @@ impl LogStore {
             "INSERT INTO sync_evaluations (execution_id, evaluation_id)
              VALUES (?1, ?2)",
             rusqlite::params![execution_id, evaluation_id],
+        )?;
+        Ok(())
+    }
+
+    /// Records a lock retry attempt in sync_logs.
+    pub fn write_sync_lock_log(
+        &self,
+        execution_id: &str,
+        asset_name: &str,
+        attempt: u32,
+        result: &str,
+        timestamp: &str,
+    ) -> Result<(), LogError> {
+        let stage = format!("lock_retry_{attempt}");
+        let date = parse_date(timestamp)?;
+        self.conn.execute(
+            "INSERT INTO sync_logs
+             (execution_id, stage, asset_name, sync_type,
+              started_at, finished_at, date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                execution_id,
+                stage,
+                asset_name,
+                result,
+                timestamp,
+                timestamp,
+                date
+            ],
         )?;
         Ok(())
     }
@@ -184,7 +213,7 @@ mod tests {
         let entries = store.latest_sync_log("my-asset").unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].stage, "pre");
-        assert_eq!(entries[0].exit_code, 0);
+        assert_eq!(entries[0].exit_code, Some(0));
         assert_eq!(entries[1].stage, "run");
     }
 

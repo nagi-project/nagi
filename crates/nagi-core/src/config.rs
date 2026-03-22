@@ -11,7 +11,7 @@ pub enum ConfigError {
     Yaml(#[from] serde_yaml::Error),
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NagiConfig {
     /// State storage backend configuration.
@@ -27,6 +27,42 @@ pub struct NagiConfig {
     /// When the number of connected components exceeds this limit, serve exits with an error.
     /// When omitted, one Controller is created per connected component.
     pub max_controllers: Option<usize>,
+    /// Time-to-live in seconds for sync lock files. Locks expire after this duration,
+    /// preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).
+    #[serde(default = "default_lock_ttl_seconds")]
+    pub lock_ttl_seconds: u64,
+    /// Interval in seconds between lock acquisition retry attempts. Defaults to 10.
+    #[serde(default = "default_lock_retry_interval_seconds")]
+    pub lock_retry_interval_seconds: u64,
+    /// Maximum number of lock acquisition retry attempts before skipping. Defaults to 30.
+    #[serde(default = "default_lock_retry_max_attempts")]
+    pub lock_retry_max_attempts: u32,
+}
+
+impl Default for NagiConfig {
+    fn default() -> Self {
+        Self {
+            backend: BackendConfig::default(),
+            notify: NotifyConfig::default(),
+            termination_grace_period_seconds: None,
+            max_controllers: None,
+            lock_ttl_seconds: default_lock_ttl_seconds(),
+            lock_retry_interval_seconds: default_lock_retry_interval_seconds(),
+            lock_retry_max_attempts: default_lock_retry_max_attempts(),
+        }
+    }
+}
+
+fn default_lock_ttl_seconds() -> u64 {
+    3600
+}
+
+fn default_lock_retry_interval_seconds() -> u64 {
+    900
+}
+
+fn default_lock_retry_max_attempts() -> u32 {
+    3
 }
 
 fn default_backend_type() -> String {
@@ -193,6 +229,47 @@ notify:
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.backend.r#type, "gcs");
         assert!(config.backend.prefix.is_none());
+    }
+
+    #[test]
+    fn default_lock_ttl_is_3600() {
+        let config = NagiConfig::default();
+        assert_eq!(config.lock_ttl_seconds, 3600);
+    }
+
+    #[test]
+    fn load_custom_lock_ttl() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "lockTtlSeconds: 120";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.lock_ttl_seconds, 120);
+    }
+
+    #[test]
+    fn load_without_lock_ttl_uses_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: local";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.lock_ttl_seconds, 3600);
+    }
+
+    #[test]
+    fn default_lock_retry_values() {
+        let config = NagiConfig::default();
+        assert_eq!(config.lock_retry_interval_seconds, 900);
+        assert_eq!(config.lock_retry_max_attempts, 3);
+    }
+
+    #[test]
+    fn load_custom_lock_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "lockRetryIntervalSeconds: 60\nlockRetryMaxAttempts: 5";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.lock_retry_interval_seconds, 60);
+        assert_eq!(config.lock_retry_max_attempts, 5);
     }
 
     #[test]

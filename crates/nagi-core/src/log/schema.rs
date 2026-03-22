@@ -8,11 +8,11 @@ pub fn initialize(conn: &Connection) -> Result<(), LogError> {
             evaluation_id  TEXT NOT NULL,
             condition_name TEXT NOT NULL,
             asset_name     TEXT NOT NULL,
-            condition_type TEXT NOT NULL,
+            condition_type TEXT,
             started_at     TEXT NOT NULL,
             finished_at    TEXT NOT NULL,
             result         TEXT NOT NULL,
-            detail         TEXT NOT NULL DEFAULT '',
+            detail         TEXT DEFAULT '',
             date           TEXT NOT NULL,
             PRIMARY KEY (evaluation_id, condition_name)
         );
@@ -24,9 +24,9 @@ pub fn initialize(conn: &Connection) -> Result<(), LogError> {
             sync_type    TEXT    NOT NULL,
             started_at   TEXT    NOT NULL,
             finished_at  TEXT    NOT NULL,
-            exit_code    INTEGER NOT NULL,
-            stdout_path  TEXT    NOT NULL,
-            stderr_path  TEXT    NOT NULL,
+            exit_code    INTEGER,
+            stdout_path  TEXT,
+            stderr_path  TEXT,
             date         TEXT    NOT NULL,
             PRIMARY KEY (execution_id, stage)
         );

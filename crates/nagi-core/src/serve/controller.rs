@@ -155,6 +155,7 @@ pub(super) async fn run_controller(
     cache_dir: Option<PathBuf>,
     notifier: Option<Arc<dyn Notifier>>,
     log_store: Option<LogStore>,
+    lock_config: reconciler::LockConfig,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
     let mut state = ServeState::new(&edges, suspended_dir()?);
@@ -202,7 +203,12 @@ pub(super) async fn run_controller(
         while let Some(name) = state.next_syncable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
                 eprintln!("[serve] starting sync for {name}");
-                sync_tasks.spawn(reconciler::spawn_sync(name, yaml.to_string()));
+                sync_tasks.spawn(reconciler::spawn_sync(
+                    name,
+                    yaml.to_string(),
+                    lock_config,
+                    notifier.clone(),
+                ));
             }
         }
 

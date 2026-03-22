@@ -122,12 +122,18 @@ pub async fn serve(
         // needs its own instance.
         let store = LogStore::open(&db_path, &logs_dir)
             .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
+        let lc = reconciler::LockConfig {
+            ttl_seconds: config.lock_ttl_seconds,
+            retry_interval_seconds: config.lock_retry_interval_seconds,
+            retry_max_attempts: config.lock_retry_max_attempts,
+        };
         handles.push(tokio::spawn(run_controller(
             input.assets,
             input.edges,
             cd,
             n,
             Some(store),
+            lc,
             rx,
         )));
     }

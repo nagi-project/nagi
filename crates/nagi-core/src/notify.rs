@@ -16,9 +16,21 @@ pub enum NotifyError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NotifyEvent {
-    EvalFailed { asset_name: String, error: String },
-    Suspended { asset_name: String, reason: String },
-    Halted { reason: String },
+    EvalFailed {
+        asset_name: String,
+        error: String,
+    },
+    Suspended {
+        asset_name: String,
+        reason: String,
+    },
+    Halted {
+        reason: String,
+    },
+    SyncLockSkipped {
+        asset_name: String,
+        sync_ref: String,
+    },
 }
 
 impl NotifyEvent {
@@ -27,7 +39,8 @@ impl NotifyEvent {
     pub fn asset_name(&self) -> Option<&str> {
         match self {
             NotifyEvent::EvalFailed { asset_name, .. }
-            | NotifyEvent::Suspended { asset_name, .. } => Some(asset_name),
+            | NotifyEvent::Suspended { asset_name, .. }
+            | NotifyEvent::SyncLockSkipped { asset_name, .. } => Some(asset_name),
             NotifyEvent::Halted { .. } => None,
         }
     }
@@ -44,6 +57,15 @@ impl fmt::Display for NotifyEvent {
             }
             NotifyEvent::Halted { reason } => {
                 write!(f, "[nagi] All assets halted: {reason}")
+            }
+            NotifyEvent::SyncLockSkipped {
+                asset_name,
+                sync_ref,
+            } => {
+                write!(
+                    f,
+                    "[nagi] Asset `{asset_name}` sync skipped: lock for ref `{sync_ref}` unavailable after retries"
+                )
             }
         }
     }
@@ -88,5 +110,26 @@ mod tests {
             reason: "manual halt".to_string(),
         };
         assert_eq!(event.to_string(), "[nagi] All assets halted: manual halt");
+    }
+
+    #[test]
+    fn event_display_sync_lock_skipped() {
+        let event = NotifyEvent::SyncLockSkipped {
+            asset_name: "daily-sales".to_string(),
+            sync_ref: "dbt-default".to_string(),
+        };
+        assert_eq!(
+            event.to_string(),
+            "[nagi] Asset `daily-sales` sync skipped: lock for ref `dbt-default` unavailable after retries"
+        );
+    }
+
+    #[test]
+    fn sync_lock_skipped_has_asset_name() {
+        let event = NotifyEvent::SyncLockSkipped {
+            asset_name: "daily-sales".to_string(),
+            sync_ref: "dbt-default".to_string(),
+        };
+        assert_eq!(event.asset_name(), Some("daily-sales"));
     }
 }

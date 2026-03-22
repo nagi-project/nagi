@@ -1,9 +1,13 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::compile::CompiledAsset;
 use crate::evaluate::{AssetEvalResult, EvaluateError};
-use crate::storage::local::{LocalCache, LocalSourceStatsCache};
-use crate::storage::{Cache, SourceStatsCache};
+use crate::init;
+use crate::log::LogStore;
+use crate::notify::{Notifier, NotifyEvent};
+use crate::storage::local::{LocalCache, LocalSourceStatsCache, LocalSyncLock};
+use crate::storage::{Cache, SourceStatsCache, StorageError, SyncLock};
 use crate::sync::SyncError;
 
 /// Evaluates a single compiled asset and writes the result to the local cache.
@@ -147,15 +151,30 @@ pub async fn spawn_evaluate(
 /// Uses `execute_sync_core` directly (not `sync_from_compiled`) to avoid
 /// `LogStore` (!Send) and `post_sync_re_evaluate` — the Controller handles
 /// re-evaluation itself via `handle_sync_result`.
+/// Lock configuration passed from nagi.yaml to the sync task.
+#[derive(Debug, Clone, Copy)]
+pub struct LockConfig {
+    pub ttl_seconds: u64,
+    pub retry_interval_seconds: u64,
+    pub retry_max_attempts: u32,
+}
+
 pub async fn spawn_sync(
     asset_name: String,
     yaml: String,
+    lock_config: LockConfig,
+    notifier: Option<Arc<dyn Notifier>>,
 ) -> (String, Result<crate::sync::SyncExecutionResult, SyncError>) {
-    let result = resolve_and_sync(&yaml).await;
+    let result = resolve_and_sync(&asset_name, &yaml, lock_config, notifier).await;
     (asset_name, result)
 }
 
-async fn resolve_and_sync(yaml: &str) -> Result<crate::sync::SyncExecutionResult, SyncError> {
+async fn resolve_and_sync(
+    asset_name: &str,
+    yaml: &str,
+    lock_config: LockConfig,
+    notifier: Option<Arc<dyn Notifier>>,
+) -> Result<crate::sync::SyncExecutionResult, SyncError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
     let sync_spec = compiled
@@ -165,13 +184,131 @@ async fn resolve_and_sync(yaml: &str) -> Result<crate::sync::SyncExecutionResult
         .ok_or_else(|| SyncError::NoSyncSpec {
             asset_name: compiled.metadata.name.clone(),
         })?;
-    crate::sync::execute_sync_core(
+
+    let execution_id = crate::sync::generate_uuid();
+    let lock_dir = LocalSyncLock::default_dir();
+    let lock = LocalSyncLock::new(lock_dir);
+    let sync_ref = compiled
+        .spec
+        .sync_ref_name
+        .as_deref()
+        .unwrap_or(&compiled.metadata.name);
+    let ttl = std::time::Duration::from_secs(lock_config.ttl_seconds);
+
+    if !acquire_with_retry(
+        &lock,
+        sync_ref,
+        ttl,
+        &lock_config,
+        asset_name,
+        &execution_id,
+    )
+    .await?
+    {
+        if let Some(n) = &notifier {
+            let event = NotifyEvent::SyncLockSkipped {
+                asset_name: asset_name.to_string(),
+                sync_ref: sync_ref.to_string(),
+            };
+            if let Err(e) = n.notify(&event).await {
+                eprintln!("[serve] warning: notification failed: {e}");
+            }
+        }
+        return Ok(crate::sync::SyncExecutionResult {
+            execution_id,
+            asset_name: asset_name.to_string(),
+            sync_type: crate::sync::SyncType::Sync,
+            stages: vec![],
+            success: true,
+        });
+    }
+
+    let result = crate::sync::execute_sync_core(
         &compiled.metadata.name,
         sync_spec,
         crate::sync::SyncType::Sync,
         None,
     )
-    .await
+    .await;
+
+    if let Err(e) = lock.release(sync_ref) {
+        eprintln!("[serve] warning: failed to release sync lock for {sync_ref}: {e}");
+    }
+
+    result
+}
+
+/// Attempts to acquire the lock, retrying up to `max_attempts` times.
+/// Each attempt is logged to both stderr and logs.db.
+/// Returns `true` if acquired, `false` if all attempts exhausted.
+async fn acquire_with_retry(
+    lock: &dyn crate::storage::SyncLock,
+    sync_ref: &str,
+    ttl: std::time::Duration,
+    config: &LockConfig,
+    asset_name: &str,
+    execution_id: &str,
+) -> Result<bool, SyncError> {
+    for attempt in 0..config.retry_max_attempts {
+        match lock.acquire(sync_ref, ttl).map_err(storage_to_sync_error)? {
+            true => return Ok(true),
+            false => {
+                let now = chrono::Utc::now().to_rfc3339();
+                eprintln!(
+                    "[serve] lock for ref '{sync_ref}' held, sync for '{asset_name}' waiting (attempt {}/{})",
+                    attempt + 1,
+                    config.retry_max_attempts
+                );
+                write_lock_log(execution_id, asset_name, attempt + 1, "waiting", &now);
+                if attempt + 1 < config.retry_max_attempts {
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        config.retry_interval_seconds,
+                    ))
+                    .await;
+                }
+            }
+        }
+    }
+
+    // All retries exhausted — log the skip.
+    eprintln!(
+        "[serve] skipping sync for '{asset_name}': lock for ref '{sync_ref}' unavailable after {} attempts",
+        config.retry_max_attempts
+    );
+    let now = chrono::Utc::now().to_rfc3339();
+    write_lock_log(
+        execution_id,
+        asset_name,
+        config.retry_max_attempts,
+        "skipped",
+        &now,
+    );
+    Ok(false)
+}
+
+fn write_lock_log(
+    execution_id: &str,
+    asset_name: &str,
+    attempts: u32,
+    status: &str,
+    timestamp: &str,
+) {
+    let log_store = match LogStore::open(&init::default_db_path(), &init::default_logs_dir()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[serve] warning: failed to open log store for lock skip log: {e}");
+            return;
+        }
+    };
+    if let Err(e) =
+        log_store.write_sync_lock_log(execution_id, asset_name, attempts, status, timestamp)
+    {
+        eprintln!("[serve] warning: failed to write lock skip log: {e}");
+    }
+}
+
+fn storage_to_sync_error(e: StorageError) -> SyncError {
+    SyncError::Io(std::io::Error::other(e.to_string()))
 }
 
 #[cfg(test)]
@@ -311,6 +448,81 @@ mod tests {
             }],
             evaluation_id: None,
         }
+    }
+
+    struct MockSyncLock {
+        /// Sequence of results to return from `acquire`, in order.
+        /// `true` = acquired, `false` = held by another.
+        results: Mutex<std::collections::VecDeque<bool>>,
+        acquire_count: Mutex<u32>,
+    }
+
+    impl MockSyncLock {
+        fn new(results: Vec<bool>) -> Self {
+            Self {
+                results: Mutex::new(results.into()),
+                acquire_count: Mutex::new(0),
+            }
+        }
+
+        fn acquire_count(&self) -> u32 {
+            *self.acquire_count.lock().unwrap()
+        }
+    }
+
+    impl crate::storage::SyncLock for MockSyncLock {
+        fn acquire(
+            &self,
+            _sync_ref: &str,
+            _ttl: std::time::Duration,
+        ) -> Result<bool, StorageError> {
+            *self.acquire_count.lock().unwrap() += 1;
+            Ok(self.results.lock().unwrap().pop_front().unwrap_or(false))
+        }
+
+        fn release(&self, _sync_ref: &str) -> Result<(), StorageError> {
+            Ok(())
+        }
+    }
+
+    fn instant_lock_config(max_attempts: u32) -> LockConfig {
+        LockConfig {
+            ttl_seconds: 60,
+            retry_interval_seconds: 0,
+            retry_max_attempts: max_attempts,
+        }
+    }
+
+    macro_rules! acquire_with_retry_test {
+        ($($name:ident: $results:expr, $max:expr => $expected:expr, $calls:expr;)*) => {
+            $(
+                #[tokio::test]
+                async fn $name() {
+                    let lock = MockSyncLock::new($results);
+                    let config = instant_lock_config($max);
+                    let got = acquire_with_retry(&lock, "ref", std::time::Duration::from_secs(60), &config, "asset", "exec-1")
+                        .await
+                        .unwrap();
+                    assert_eq!(got, $expected, "return value");
+                    assert_eq!(lock.acquire_count(), $calls, "acquire call count");
+                }
+            )*
+        };
+    }
+
+    acquire_with_retry_test! {
+        acquire_succeeds_on_first_attempt:
+            vec![true], 3 => true, 1;
+        acquire_succeeds_on_second_attempt:
+            vec![false, true], 3 => true, 2;
+        acquire_succeeds_on_last_attempt:
+            vec![false, false, true], 3 => true, 3;
+        acquire_exhausted_returns_false:
+            vec![false, false, false], 3 => false, 3;
+        acquire_single_attempt_succeeds:
+            vec![true], 1 => true, 1;
+        acquire_single_attempt_fails:
+            vec![false], 1 => false, 1;
     }
 
     #[tokio::test]
