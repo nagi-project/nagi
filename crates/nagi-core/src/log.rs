@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use thiserror::Error;
 
+pub use self::evaluate::EvaluateLogEntry;
 pub use self::sync::{SyncLogEntry, SyncLogFilePaths};
 
 #[derive(Debug, Error)]

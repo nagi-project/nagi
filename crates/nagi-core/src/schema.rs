@@ -5,7 +5,7 @@ use crate::evaluate::AssetEvalResult;
 use crate::kind::{
     AssetSpec, ConnectionSpec, DesiredGroupSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
 };
-use crate::log::SyncLogEntry;
+use crate::log::{EvaluateLogEntry, SyncLogEntry};
 use crate::serve::SuspendedInfo;
 use crate::storage::lock::LockInfo;
 
@@ -62,6 +62,10 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
             "SyncLogEntry",
             serde_json::to_value(schema_for!(SyncLogEntry)).unwrap(),
         ),
+        (
+            "EvaluateLogEntry",
+            serde_json::to_value(schema_for!(EvaluateLogEntry)).unwrap(),
+        ),
     ];
 
     for (name, schema) in schemas {
@@ -107,6 +111,7 @@ mod tests {
             "LockInfo.json",
             "SuspendedInfo.json",
             "SyncLogEntry.json",
+            "EvaluateLogEntry.json",
         ];
         for name in expected {
             let path = dir.path().join(name);

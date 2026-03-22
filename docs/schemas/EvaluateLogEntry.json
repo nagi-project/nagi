@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "A single row in evaluate_logs.",
+  "properties": {
+    "assetName": {
+      "description": "Name of the Asset that was evaluated.",
+      "type": "string"
+    },
+    "conditionName": {
+      "description": "Name of the evaluated condition.",
+      "type": "string"
+    },
+    "conditionType": {
+      "description": "Type of the condition (e.g. `SQL`, `Freshness`).",
+      "type": "string"
+    },
+    "date": {
+      "description": "Date partition key (YYYY-MM-DD) derived from `started_at`.",
+      "type": "string"
+    },
+    "detail": {
+      "description": "Human-readable reason when result is `NotReady`. Empty when `Ready`.",
+      "type": "string"
+    },
+    "evaluationId": {
+      "description": "Unique identifier for this evaluation run.",
+      "type": "string"
+    },
+    "finishedAt": {
+      "description": "RFC 3339 timestamp when evaluation finished.",
+      "type": "string"
+    },
+    "result": {
+      "description": "Evaluation result: `Ready` or `NotReady`.",
+      "type": "string"
+    },
+    "startedAt": {
+      "description": "RFC 3339 timestamp when evaluation started.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "assetName",
+    "conditionName",
+    "conditionType",
+    "date",
+    "detail",
+    "evaluationId",
+    "finishedAt",
+    "result",
+    "startedAt"
+  ],
+  "title": "EvaluateLogEntry",
+  "type": "object"
+}
