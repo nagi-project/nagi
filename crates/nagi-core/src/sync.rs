@@ -511,6 +511,8 @@ async fn post_sync_re_evaluate(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::kind::sync::{StepType, SyncStep};
 
@@ -520,6 +522,7 @@ mod tests {
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec!["echo".to_string(), "hello".to_string()],
+                env: HashMap::new(),
             },
             post: None,
         }
@@ -530,14 +533,17 @@ mod tests {
             pre: Some(SyncStep {
                 step_type: StepType::Command,
                 args: vec!["echo".to_string(), "pre".to_string()],
+                env: HashMap::new(),
             }),
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec!["echo".to_string(), "run".to_string()],
+                env: HashMap::new(),
             },
             post: Some(SyncStep {
                 step_type: StepType::Command,
                 args: vec!["echo".to_string(), "post".to_string()],
+                env: HashMap::new(),
             }),
         }
     }
@@ -629,6 +635,7 @@ mod tests {
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec!["echo".to_string(), "hello world".to_string()],
+                env: HashMap::new(),
             },
             post: None,
         };
@@ -649,6 +656,7 @@ mod tests {
                     "-c".to_string(),
                     "echo error >&2".to_string(),
                 ],
+                env: HashMap::new(),
             },
             post: None,
         };
@@ -664,10 +672,12 @@ mod tests {
             pre: Some(SyncStep {
                 step_type: StepType::Command,
                 args: vec!["false".to_string()],
+                env: HashMap::new(),
             }),
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec!["echo".to_string(), "should not run".to_string()],
+                env: HashMap::new(),
             },
             post: None,
         };
@@ -731,6 +741,7 @@ mod tests {
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec!["__nagi_no_such_command__".to_string()],
+                env: HashMap::new(),
             },
             post: None,
         };

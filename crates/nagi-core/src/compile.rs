@@ -431,6 +431,7 @@ fn expand_sync_templates(
                 .iter()
                 .map(|arg| expand_template_string(arg, asset_name, with))
                 .collect(),
+            env: step.env.clone(),
         }
     };
     SyncSpec {

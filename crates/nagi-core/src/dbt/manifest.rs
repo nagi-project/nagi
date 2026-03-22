@@ -189,6 +189,7 @@ fn tests_to_conditions(tests: &[&DbtNode]) -> Vec<DesiredCondition> {
                     test.name.clone(),
                 ],
                 interval: None,
+                env: HashMap::new(),
             });
         }
     }
@@ -252,6 +253,7 @@ fn make_tag_sync(name: &str, selector: &str) -> NagiKind {
                     "--select".to_string(),
                     selector.to_string(),
                 ],
+                env: HashMap::new(),
             },
             post: None,
         },

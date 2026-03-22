@@ -88,6 +88,9 @@ pub enum DesiredCondition {
         /// Optional polling interval. If omitted, only evaluated on upstream state change or after sync.
         #[serde(default)]
         interval: Option<Duration>,
+        /// Environment variables to set for the subprocess.
+        #[serde(default)]
+        env: HashMap<String, String>,
     },
 }
 
@@ -486,6 +489,7 @@ run: [dbt, test, --select, my_model]
             name: "check".to_string(),
             run: vec![],
             interval: None,
+            env: HashMap::new(),
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -497,6 +501,7 @@ run: [dbt, test, --select, my_model]
             name: "check".to_string(),
             run: vec!["".to_string()],
             interval: None,
+            env: HashMap::new(),
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));

@@ -284,6 +284,8 @@ pub fn dry_run_from_compiled(yaml: &str) -> Result<String, EvaluateError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use async_trait::async_trait;
     use serde_json::Value;
 
@@ -338,6 +340,7 @@ mod tests {
             run: SyncStep {
                 step_type: crate::kind::sync::StepType::Command,
                 args: vec!["true".to_string()],
+                env: HashMap::new(),
             },
             post: None,
         }
@@ -561,6 +564,7 @@ mod tests {
             name: "dbt-test".to_string(),
             run: vec!["dbt".to_string(), "test".to_string()],
             interval: None,
+            env: HashMap::new(),
         };
         let on_drift = on_drift_with(vec![condition.clone()]);
         let result = dry_run_asset("my_table", &on_drift);
@@ -582,6 +586,7 @@ mod tests {
             name: "always-true".to_string(),
             run: vec!["true".to_string()],
             interval: None,
+            env: HashMap::new(),
         }]);
         let result = evaluate_asset("my_table", &on_drift, None, None)
             .await

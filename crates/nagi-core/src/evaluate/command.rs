@@ -1,13 +1,22 @@
+use std::collections::HashMap;
+
 use tokio::process::Command;
 
 use super::{ConditionStatus, EvaluateError};
 
-pub(super) async fn evaluate_command(run: &[String]) -> Result<ConditionStatus, EvaluateError> {
+pub(super) async fn evaluate_command(
+    run: &[String],
+    env: &HashMap<String, String>,
+) -> Result<ConditionStatus, EvaluateError> {
     let (program, args) = run
         .split_first()
         .expect("run must not be empty; validated at parse time");
-    let status = Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let status = cmd
         .status()
         .await
         .map_err(|e| EvaluateError::CommandFailed(format!("failed to spawn '{}': {e}", program)))?;
@@ -31,21 +40,34 @@ mod tests {
     #[tokio::test]
     async fn exit_zero_is_ready() {
         let run = vec!["true".to_string()];
-        let status = evaluate_command(&run).await.unwrap();
+        let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert_eq!(status, ConditionStatus::Ready);
     }
 
     #[tokio::test]
-    async fn exit_nonzero_is_not_ready() {
+    async fn exit_nonzero_is_drifted() {
         let run = vec!["false".to_string()];
-        let status = evaluate_command(&run).await.unwrap();
+        let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert!(matches!(status, ConditionStatus::Drifted { .. }));
     }
 
     #[tokio::test]
     async fn nonexistent_program_returns_error() {
         let run = vec!["__nagi_no_such_command__".to_string()];
-        let result = evaluate_command(&run).await;
+        let result = evaluate_command(&run, &HashMap::new()).await;
         assert!(matches!(result, Err(EvaluateError::CommandFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn env_vars_are_passed_to_subprocess() {
+        let run = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "test \"$NAGI_TEST_VAR\" = hello".to_string(),
+        ];
+        let mut env = HashMap::new();
+        env.insert("NAGI_TEST_VAR".to_string(), "hello".to_string());
+        let status = evaluate_command(&run, &env).await.unwrap();
+        assert_eq!(status, ConditionStatus::Ready);
     }
 }

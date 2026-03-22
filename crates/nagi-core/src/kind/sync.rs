@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +26,9 @@ pub struct SyncStep {
     pub step_type: StepType,
     /// Command and arguments in argv format.
     pub args: Vec<String>,
+    /// Environment variables to set for the subprocess.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 /// Currently only `Command` (subprocess execution) is supported.
@@ -123,6 +128,7 @@ run:
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec![],
+                env: HashMap::new(),
             },
             post: None,
         };
@@ -137,6 +143,7 @@ run:
             run: SyncStep {
                 step_type: StepType::Command,
                 args: vec!["dbt".to_string(), "run".to_string()],
+                env: HashMap::new(),
             },
             post: None,
         };

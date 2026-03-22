@@ -17,11 +17,15 @@ pub async fn execute_step(stage: Stage, step: &SyncStep) -> Result<StageResult, 
 
     let started_at = Utc::now().to_rfc3339();
 
-    let output = Command::new(program)
-        .args(cmd_args)
+    let mut cmd = Command::new(program);
+    cmd.args(cmd_args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in &step.env {
+        cmd.env(key, value);
+    }
+    let output = cmd
         .spawn()
         .map_err(|e| SyncError::SpawnFailed(format!("{program}: {e}")))?
         .wait_with_output()

@@ -53,8 +53,8 @@ pub(super) async fn evaluate_condition(
             let status = boolean::evaluate_boolean(value)?;
             ("SQL".to_string(), status)
         }
-        DesiredCondition::Command { run, .. } => {
-            let status = command::evaluate_command(run).await?;
+        DesiredCondition::Command { run, env, .. } => {
+            let status = command::evaluate_command(run, env).await?;
             ("Command".to_string(), status)
         }
     };
