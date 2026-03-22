@@ -15,11 +15,19 @@ use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
 use crate::sync::SyncError;
 
+use crate::storage::SyncLock;
+
 use super::graph::connected_components;
 use super::reconciler;
 use super::state::{AssetEntry, ServeState};
-use super::suspended::suspended_dir;
 use super::ServeError;
+
+/// Shared storage backends passed to each Controller.
+#[derive(Clone)]
+pub(super) struct BackendStores {
+    pub sync_lock: Arc<dyn SyncLock>,
+    pub suspended_store: Arc<dyn crate::storage::SuspendedStore>,
+}
 
 /// Builds a notifier from project config, if configured.
 /// Returns `None` if no project dir, no config, or no Slack config.
@@ -150,15 +158,20 @@ fn compute_min_interval(compiled: &CompiledAsset) -> Option<StdDuration> {
 ///
 /// Sync is serialized: at most one sync runs at a time per Controller.
 pub(super) async fn run_controller(
-    assets: Vec<AssetEntry>,
-    edges: Vec<GraphEdge>,
+    input: ControllerInput,
+    backend: BackendStores,
     cache_dir: Option<PathBuf>,
     notifier: Option<Arc<dyn Notifier>>,
     log_store: Option<LogStore>,
     lock_config: reconciler::LockConfig,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
-    let mut state = ServeState::new(&edges, suspended_dir()?);
+    let ControllerInput { assets, edges } = input;
+    let BackendStores {
+        sync_lock,
+        suspended_store,
+    } = backend;
+    let mut state = ServeState::new(&edges, suspended_store);
     let mut eval_tasks: JoinSet<(String, reconciler::EvalOutcome)> = JoinSet::new();
     let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
@@ -206,6 +219,7 @@ pub(super) async fn run_controller(
                 sync_tasks.spawn(reconciler::spawn_sync(
                     name,
                     yaml.to_string(),
+                    sync_lock.clone(),
                     lock_config,
                     notifier.clone(),
                 ));

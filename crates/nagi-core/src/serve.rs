@@ -39,8 +39,12 @@ pub use suspended::SuspendedInfo;
 
 use controller::{
     await_controller_shutdown, build_controller_inputs, build_notifier, run_controller,
+    BackendStores,
 };
 use suspended::{list_suspended, remove_suspended, suspended_dir, suspended_path};
+
+use crate::storage::local::{LocalSuspendedStore, LocalSyncLock};
+use crate::storage::SuspendedStore;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -111,7 +115,16 @@ pub async fn serve(
         }
     }
 
+    // Build storage backends from config.
+    let base_backend = build_backend_stores(&config)?;
+
     let (shutdown_tx, _) = watch::channel(false);
+
+    let lc = reconciler::LockConfig {
+        ttl_seconds: config.lock_ttl_seconds,
+        retry_interval_seconds: config.lock_retry_interval_seconds,
+        retry_max_attempts: config.lock_retry_max_attempts,
+    };
 
     let mut handles = Vec::new();
     for input in inputs {
@@ -122,14 +135,10 @@ pub async fn serve(
         // needs its own instance.
         let store = LogStore::open(&db_path, &logs_dir)
             .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
-        let lc = reconciler::LockConfig {
-            ttl_seconds: config.lock_ttl_seconds,
-            retry_interval_seconds: config.lock_retry_interval_seconds,
-            retry_max_attempts: config.lock_retry_max_attempts,
-        };
+        let backend = base_backend.clone();
         handles.push(tokio::spawn(run_controller(
-            input.assets,
-            input.edges,
+            input,
+            backend,
             cd,
             n,
             Some(store),
@@ -154,6 +163,36 @@ pub async fn serve(
     await_controller_shutdown(handles, grace_period).await;
 
     Ok(())
+}
+
+/// Creates [`BackendStores`] from the backend config.
+fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendStores, ServeError> {
+    use crate::storage::remote::create_remote_store;
+    use std::sync::Arc;
+
+    match config.backend.r#type.as_str() {
+        "local" => {
+            let lock_dir = LocalSyncLock::default_dir();
+            let sync_lock: Arc<dyn crate::storage::SyncLock> =
+                Arc::new(LocalSyncLock::new(lock_dir));
+            let susp_dir = suspended_dir().map_err(ServeError::Io)?;
+            let suspended_store: Arc<dyn SuspendedStore> =
+                Arc::new(LocalSuspendedStore::new(susp_dir));
+            Ok(BackendStores {
+                sync_lock,
+                suspended_store,
+            })
+        }
+        "gcs" | "s3" => {
+            let remote =
+                Arc::new(create_remote_store(&config.backend).map_err(ServeError::Storage)?);
+            Ok(BackendStores {
+                sync_lock: remote.clone(),
+                suspended_store: remote,
+            })
+        }
+        t => Err(ServeError::Parse(format!("unknown backend type: {t}"))),
+    }
 }
 
 /// Lists all currently suspended assets.

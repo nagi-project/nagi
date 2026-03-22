@@ -75,6 +75,7 @@ impl Cache for LocalCache {
 
 /// Local file-based suspended store.
 /// Stores suspension flags as `{dir}/{asset_name}.json`.
+#[derive(Debug)]
 pub struct LocalSuspendedStore {
     dir: PathBuf,
 }
@@ -480,7 +481,12 @@ fn check_existing_lock(path: &std::path::Path) -> Result<LockCheck, StorageError
 }
 
 impl SyncLock for LocalSyncLock {
-    fn acquire(&self, sync_ref: &str, ttl: Duration) -> Result<bool, StorageError> {
+    fn acquire(
+        &self,
+        sync_ref: &str,
+        ttl: Duration,
+        execution_id: &str,
+    ) -> Result<bool, StorageError> {
         std::fs::create_dir_all(&self.dir)?;
         let path = self.lock_path(sync_ref);
 
@@ -489,7 +495,7 @@ impl SyncLock for LocalSyncLock {
         }
 
         let info = LockInfo {
-            pid: std::process::id(),
+            execution_id: execution_id.to_string(),
             acquired_at_epoch_secs: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -531,11 +537,17 @@ mod lock_tests {
         let dir = tempfile::tempdir().unwrap();
         let lock = LocalSyncLock::new(dir.path().to_path_buf());
 
-        assert!(lock.acquire("dbt-run", Duration::from_secs(60)).unwrap());
-        assert!(!lock.acquire("dbt-run", Duration::from_secs(60)).unwrap());
+        assert!(lock
+            .acquire("dbt-run", Duration::from_secs(60), "exec-1")
+            .unwrap());
+        assert!(!lock
+            .acquire("dbt-run", Duration::from_secs(60), "exec-1")
+            .unwrap());
 
         lock.release("dbt-run").unwrap();
-        assert!(lock.acquire("dbt-run", Duration::from_secs(60)).unwrap());
+        assert!(lock
+            .acquire("dbt-run", Duration::from_secs(60), "exec-1")
+            .unwrap());
     }
 
     #[test]
@@ -543,8 +555,12 @@ mod lock_tests {
         let dir = tempfile::tempdir().unwrap();
         let lock = LocalSyncLock::new(dir.path().to_path_buf());
 
-        assert!(lock.acquire("ref-a", Duration::from_secs(60)).unwrap());
-        assert!(lock.acquire("ref-b", Duration::from_secs(60)).unwrap());
+        assert!(lock
+            .acquire("ref-a", Duration::from_secs(60), "exec-1")
+            .unwrap());
+        assert!(lock
+            .acquire("ref-b", Duration::from_secs(60), "exec-2")
+            .unwrap());
     }
 
     #[test]
@@ -561,14 +577,16 @@ mod lock_tests {
 
         std::fs::create_dir_all(dir.path()).unwrap();
         let info = LockInfo {
-            pid: 99999,
+            execution_id: "exec-stale".to_string(),
             acquired_at_epoch_secs: 0,
             ttl_secs: 1,
         };
         let json = serde_json::to_string(&info).unwrap();
         std::fs::write(dir.path().join("stale.lock"), json).unwrap();
 
-        assert!(lock.acquire("stale", Duration::from_secs(60)).unwrap());
+        assert!(lock
+            .acquire("stale", Duration::from_secs(60), "exec-1")
+            .unwrap());
     }
 
     #[test]
@@ -579,7 +597,9 @@ mod lock_tests {
         std::fs::create_dir_all(dir.path()).unwrap();
         std::fs::write(dir.path().join("bad.lock"), "not json").unwrap();
 
-        assert!(lock.acquire("bad", Duration::from_secs(60)).unwrap());
+        assert!(lock
+            .acquire("bad", Duration::from_secs(60), "exec-1")
+            .unwrap());
     }
 
     #[test]
@@ -588,7 +608,9 @@ mod lock_tests {
         let nested = dir.path().join("nested").join("locks");
         let lock = LocalSyncLock::new(nested);
 
-        assert!(lock.acquire("test", Duration::from_secs(60)).unwrap());
+        assert!(lock
+            .acquire("test", Duration::from_secs(60), "exec-1")
+            .unwrap());
     }
 
     #[test]
@@ -606,7 +628,7 @@ mod lock_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("active.lock");
         let info = LockInfo {
-            pid: std::process::id(),
+            execution_id: "exec-active".to_string(),
             acquired_at_epoch_secs: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -625,7 +647,7 @@ mod lock_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("expired.lock");
         let info = LockInfo {
-            pid: 99999,
+            execution_id: "exec-stale".to_string(),
             acquired_at_epoch_secs: 0,
             ttl_secs: 1,
         };

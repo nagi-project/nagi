@@ -6,7 +6,7 @@ use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::init;
 use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
-use crate::storage::local::{LocalCache, LocalSourceStatsCache, LocalSyncLock};
+use crate::storage::local::{LocalCache, LocalSourceStatsCache};
 use crate::storage::{Cache, SourceStatsCache, StorageError, SyncLock};
 use crate::sync::SyncError;
 
@@ -162,16 +162,18 @@ pub struct LockConfig {
 pub async fn spawn_sync(
     asset_name: String,
     yaml: String,
+    lock: Arc<dyn SyncLock>,
     lock_config: LockConfig,
     notifier: Option<Arc<dyn Notifier>>,
 ) -> (String, Result<crate::sync::SyncExecutionResult, SyncError>) {
-    let result = resolve_and_sync(&asset_name, &yaml, lock_config, notifier).await;
+    let result = resolve_and_sync(&asset_name, &yaml, lock, lock_config, notifier).await;
     (asset_name, result)
 }
 
 async fn resolve_and_sync(
     asset_name: &str,
     yaml: &str,
+    lock: Arc<dyn SyncLock>,
     lock_config: LockConfig,
     notifier: Option<Arc<dyn Notifier>>,
 ) -> Result<crate::sync::SyncExecutionResult, SyncError> {
@@ -186,8 +188,6 @@ async fn resolve_and_sync(
         })?;
 
     let execution_id = crate::sync::generate_uuid();
-    let lock_dir = LocalSyncLock::default_dir();
-    let lock = LocalSyncLock::new(lock_dir);
     let sync_ref = compiled
         .spec
         .sync_ref_name
@@ -196,7 +196,7 @@ async fn resolve_and_sync(
     let ttl = std::time::Duration::from_secs(lock_config.ttl_seconds);
 
     if !acquire_with_retry(
-        &lock,
+        lock.as_ref(),
         sync_ref,
         ttl,
         &lock_config,
@@ -250,7 +250,10 @@ async fn acquire_with_retry(
     execution_id: &str,
 ) -> Result<bool, SyncError> {
     for attempt in 0..config.retry_max_attempts {
-        match lock.acquire(sync_ref, ttl).map_err(storage_to_sync_error)? {
+        match lock
+            .acquire(sync_ref, ttl, execution_id)
+            .map_err(storage_to_sync_error)?
+        {
             true => return Ok(true),
             false => {
                 let now = chrono::Utc::now().to_rfc3339();
@@ -475,6 +478,7 @@ mod tests {
             &self,
             _sync_ref: &str,
             _ttl: std::time::Duration,
+            _execution_id: &str,
         ) -> Result<bool, StorageError> {
             *self.acquire_count.lock().unwrap() += 1;
             Ok(self.results.lock().unwrap().pop_front().unwrap_or(false))

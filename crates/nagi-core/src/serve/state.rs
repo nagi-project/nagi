@@ -1,16 +1,17 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use crate::compile::GraphEdge;
 use crate::evaluate::{AssetEvalResult, EvaluateError};
+use crate::storage::SuspendedStore;
 use crate::sync::SyncError;
 
 use super::graph::build_downstream_map;
 use super::guardrail::{GuardrailState, MAX_CONSECUTIVE_FAILURES};
 use super::queue::WorkQueue;
 use super::scheduler::SchedulerState;
-use super::suspended::{suspended_path, write_suspended, SuspendedInfo};
+use super::suspended::SuspendedInfo;
 
 /// Emitted when an asset is suspended, allowing the controller to
 /// trigger notifications without coupling ServeState to the notifier.
@@ -107,8 +108,8 @@ pub struct ServeState {
     pub syncing: HashSet<String>,
     /// Tracks consecutive sync failures and exponential backoff.
     pub guardrail: GuardrailState,
-    /// Directory for suspended flag files.
-    suspended_dir: PathBuf,
+    /// Store for suspended flag files.
+    suspended_store: Arc<dyn SuspendedStore>,
     /// Ready condition count from the last evaluation, per asset.
     last_ready_count: HashMap<String, usize>,
     /// Assets awaiting post-sync re-evaluation for degradation detection.
@@ -116,7 +117,7 @@ pub struct ServeState {
 }
 
 impl ServeState {
-    pub fn new(edges: &[GraphEdge], suspended_dir: PathBuf) -> Self {
+    pub fn new(edges: &[GraphEdge], suspended_store: Arc<dyn SuspendedStore>) -> Self {
         Self {
             scheduler: SchedulerState::new(),
             work_queue: WorkQueue::new(),
@@ -128,7 +129,7 @@ impl ServeState {
             syncing_refs: HashSet::new(),
             syncing: HashSet::new(),
             guardrail: GuardrailState::new(),
-            suspended_dir,
+            suspended_store,
             last_ready_count: HashMap::new(),
             pending_sync_reeval: HashSet::new(),
         }
@@ -185,12 +186,11 @@ impl ServeState {
         };
         // Sync is allowed only when the asset opts in (auto_sync + has_sync),
         // is not already syncing, not suspended, and not in backoff.
+        let is_suspended = self.suspended_store.exists(asset_name).unwrap_or(false);
         let eligible = config.auto_sync
             && config.has_sync
             && !self.syncing.contains(asset_name)
-            && !suspended_path(&self.suspended_dir, asset_name)
-                .map(|p| p.exists())
-                .unwrap_or(false)
+            && !is_suspended
             && !self.guardrail.is_backoff_active(asset_name);
         if !eligible {
             return false;
@@ -201,13 +201,11 @@ impl ServeState {
     /// Removes the suspended flag if the asset is Ready and was previously suspended.
     /// Also resets the guardrail failure counter so sync can resume.
     fn try_auto_unsuspend(&mut self, asset_name: &str) {
-        let is_suspended = suspended_path(&self.suspended_dir, asset_name)
-            .map(|p| p.exists())
-            .unwrap_or(false);
+        let is_suspended = self.suspended_store.exists(asset_name).unwrap_or(false);
         if !is_suspended {
             return;
         }
-        match super::suspended::remove_suspended(&self.suspended_dir, asset_name) {
+        match self.suspended_store.remove(asset_name) {
             Ok(()) => {
                 eprintln!("[serve] asset {asset_name} is Ready, auto-unsuspending");
                 self.guardrail.record_sync_success(asset_name);
@@ -307,7 +305,7 @@ impl ServeState {
             suspended_at: chrono::Utc::now().to_rfc3339(),
             execution_id: execution_id.map(|s| s.to_string()),
         };
-        if let Err(e) = write_suspended(&self.suspended_dir, &info) {
+        if let Err(e) = self.suspended_store.write(&info) {
             eprintln!("[serve] warning: failed to write suspended flag for {asset_name}: {e}");
         }
     }
@@ -435,6 +433,40 @@ impl ServeState {
 mod tests {
     use super::*;
     use crate::compile::GraphEdge;
+    use crate::storage::StorageError;
+
+    /// In-memory SuspendedStore for testing.
+    #[derive(Debug, Default)]
+    struct MemSuspendedStore {
+        inner: std::sync::Mutex<std::collections::HashMap<String, SuspendedInfo>>,
+    }
+
+    impl crate::storage::SuspendedStore for MemSuspendedStore {
+        fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError> {
+            self.inner
+                .lock()
+                .unwrap()
+                .insert(info.asset_name.clone(), info.clone());
+            Ok(())
+        }
+        fn read(&self, name: &str) -> Result<Option<SuspendedInfo>, StorageError> {
+            Ok(self.inner.lock().unwrap().get(name).cloned())
+        }
+        fn remove(&self, name: &str) -> Result<(), StorageError> {
+            self.inner.lock().unwrap().remove(name);
+            Ok(())
+        }
+        fn exists(&self, name: &str) -> Result<bool, StorageError> {
+            Ok(self.inner.lock().unwrap().contains_key(name))
+        }
+        fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError> {
+            Ok(self.inner.lock().unwrap().values().cloned().collect())
+        }
+    }
+
+    fn mem_suspended_store() -> Arc<dyn crate::storage::SuspendedStore> {
+        Arc::new(MemSuspendedStore::default())
+    }
 
     fn edge(from: &str, to: &str) -> GraphEdge {
         GraphEdge {
@@ -537,7 +569,7 @@ mod tests {
     #[test]
     fn serve_state_init_enqueues_and_registers() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&edges, mem_suspended_store());
         let assets = vec![
             asset_entry("a", Some(StdDuration::from_secs(60))),
             asset_entry("b", None),
@@ -553,7 +585,7 @@ mod tests {
 
     #[test]
     fn next_spawnable_skips_in_flight() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.work_queue.enqueue("a".to_string());
         state.work_queue.enqueue("b".to_string());
         state.in_flight.insert("a".to_string());
@@ -567,7 +599,7 @@ mod tests {
 
     #[test]
     fn handle_eval_result_clears_in_flight_and_reschedules() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry("a", Some(StdDuration::from_secs(60)))]);
         state.in_flight.insert("a".to_string());
 
@@ -580,7 +612,7 @@ mod tests {
 
     #[test]
     fn handle_eval_result_error_marks_not_ready() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.in_flight.insert("a".to_string());
 
         state.handle_eval_result("a", &eval_ok("a", true));
@@ -598,7 +630,7 @@ mod tests {
     #[test]
     fn propagate_downstream_enqueues_on_transition() {
         let edges = vec![edge("a", "b"), edge("a", "c")];
-        let mut state = ServeState::new(&edges, PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&edges, mem_suspended_store());
         state.readiness.record("a", false);
 
         let propagated = state.propagate_downstream("a", true);
@@ -608,7 +640,7 @@ mod tests {
     #[test]
     fn propagate_downstream_skips_without_transition() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&edges, mem_suspended_store());
         state.readiness.record("a", false);
         state.propagate_downstream("a", true);
 
@@ -619,7 +651,7 @@ mod tests {
     #[test]
     fn propagate_downstream_skips_in_flight() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&edges, mem_suspended_store());
         state.readiness.record("a", false);
         state.in_flight.insert("b".to_string());
 
@@ -629,7 +661,7 @@ mod tests {
 
     #[test]
     fn propagate_downstream_no_downstreams() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.readiness.record("a", false);
 
         let propagated = state.propagate_downstream("a", true);
@@ -640,7 +672,7 @@ mod tests {
 
     #[test]
     fn request_sync_enqueues_when_auto_sync_enabled() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
@@ -650,7 +682,7 @@ mod tests {
 
     #[test]
     fn request_sync_skips_when_auto_sync_false() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry("a", None)]);
         state.work_queue.dequeue();
 
@@ -660,7 +692,7 @@ mod tests {
 
     #[test]
     fn request_sync_skips_when_already_syncing() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
@@ -670,7 +702,7 @@ mod tests {
 
     #[test]
     fn request_sync_dedup() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
@@ -680,7 +712,7 @@ mod tests {
 
     #[test]
     fn next_syncable_serializes_same_sync_ref() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[
             asset_entry_with_sync_ref("a", "dbt-run"),
             asset_entry_with_sync_ref("b", "dbt-run"),
@@ -695,7 +727,7 @@ mod tests {
 
     #[test]
     fn next_syncable_allows_different_sync_refs() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[
             asset_entry_with_sync_ref("a", "dbt-run"),
             asset_entry_with_sync_ref("b", "bq-copy"),
@@ -710,7 +742,7 @@ mod tests {
 
     #[test]
     fn handle_sync_result_clears_syncing_and_enqueues_re_eval() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
@@ -723,7 +755,7 @@ mod tests {
 
     #[test]
     fn handle_sync_result_unblocks_same_sync_ref() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[
             asset_entry_with_sync_ref("a", "dbt-run"),
             asset_entry_with_sync_ref("b", "dbt-run"),
@@ -741,7 +773,7 @@ mod tests {
 
     #[test]
     fn handle_eval_not_ready_with_auto_sync_requests_sync() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
@@ -753,7 +785,7 @@ mod tests {
 
     #[test]
     fn handle_eval_ready_does_not_request_sync() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
@@ -767,7 +799,7 @@ mod tests {
 
     #[test]
     fn handle_sync_failure_applies_backoff() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.work_queue.dequeue();
 
@@ -779,8 +811,9 @@ mod tests {
 
     #[test]
     fn handle_sync_failure_suspends_after_max() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = Arc::new(MemSuspendedStore::default());
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
         for _ in 0..MAX_CONSECUTIVE_FAILURES {
@@ -788,25 +821,23 @@ mod tests {
             state.handle_sync_result("a", false, None);
         }
 
-        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(susp.exists("a").unwrap());
         assert!(!state.request_sync("a"));
     }
 
     #[test]
     fn request_sync_blocked_when_suspended() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = Arc::new(MemSuspendedStore::default());
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
-        write_suspended(
-            dir.path(),
-            &SuspendedInfo {
-                asset_name: "a".to_string(),
-                reason: "test".to_string(),
-                suspended_at: "2025-01-01T00:00:00Z".to_string(),
-                execution_id: None,
-            },
-        )
+        susp.write(&SuspendedInfo {
+            asset_name: "a".to_string(),
+            reason: "test".to_string(),
+            suspended_at: "2025-01-01T00:00:00Z".to_string(),
+            execution_id: None,
+        })
         .unwrap();
 
         assert!(!state.request_sync("a"));
@@ -817,7 +848,7 @@ mod tests {
     #[test]
     fn on_eval_complete_updates_state() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&edges, mem_suspended_store());
         state.init(&[asset_entry("a", None), asset_entry("b", None)]);
         state.in_flight.insert("a".to_string());
         while state.work_queue.dequeue().is_some() {}
@@ -833,7 +864,7 @@ mod tests {
 
     #[test]
     fn on_eval_complete_ignores_none() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry("a", None)]);
         while state.work_queue.dequeue().is_some() {}
 
@@ -843,7 +874,7 @@ mod tests {
 
     #[test]
     fn on_sync_complete_success_resets_guardrail() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         while state.work_queue.dequeue().is_some() {}
 
@@ -866,7 +897,7 @@ mod tests {
 
     #[test]
     fn on_sync_complete_failure_increments_guardrail() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
 
         state.syncing.insert("a".to_string());
@@ -881,7 +912,7 @@ mod tests {
 
     #[test]
     fn on_sync_complete_ignores_none() {
-        let mut state = ServeState::new(&[], PathBuf::from("/tmp/nagi-test-suspended"));
+        let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[asset_entry_with_sync("a")]);
         state.syncing.insert("a".to_string());
 
@@ -889,12 +920,21 @@ mod tests {
         assert!(!state.syncing.is_empty());
     }
 
+    fn susp_store() -> Arc<dyn crate::storage::SuspendedStore> {
+        Arc::new(MemSuspendedStore::default())
+    }
+
+    fn susp_store_shared() -> Arc<MemSuspendedStore> {
+        Arc::new(MemSuspendedStore::default())
+    }
+
     // ── Degradation detection tests ──────────────────────────────────────
 
     #[test]
     fn degradation_suspends_when_ready_count_decreases() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
@@ -920,13 +960,14 @@ mod tests {
         });
         state.handle_eval_result("a", &degraded);
 
-        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(susp.exists("a").unwrap());
     }
 
     #[test]
     fn no_degradation_when_ready_count_same_or_increases() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
@@ -949,29 +990,25 @@ mod tests {
         });
         state.handle_eval_result("a", &same);
 
-        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(!susp.exists("a").unwrap());
     }
 
     #[test]
     fn auto_unsuspend_when_ready() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
-        // Manually suspend the asset.
-        write_suspended(
-            dir.path(),
-            &SuspendedInfo {
-                asset_name: "a".to_string(),
-                reason: "test".to_string(),
-                suspended_at: "2025-01-01T00:00:00Z".to_string(),
-                execution_id: None,
-            },
-        )
+        susp.write(&SuspendedInfo {
+            asset_name: "a".to_string(),
+            reason: "test".to_string(),
+            suspended_at: "2025-01-01T00:00:00Z".to_string(),
+            execution_id: None,
+        })
         .unwrap();
-        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(susp.exists("a").unwrap());
 
-        // Evaluate returns Ready.
         state.in_flight.insert("a".to_string());
         let result = Ok(AssetEvalResult {
             asset_name: "a".to_string(),
@@ -981,27 +1018,23 @@ mod tests {
         });
         state.handle_eval_result("a", &result);
 
-        // Suspended flag should be removed.
-        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
-        // Guardrail failure counter should be reset.
+        assert!(!susp.exists("a").unwrap());
         assert_eq!(state.guardrail.consecutive_failures.get("a").copied(), None);
     }
 
     #[test]
     fn no_unsuspend_when_not_ready() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
-        write_suspended(
-            dir.path(),
-            &SuspendedInfo {
-                asset_name: "a".to_string(),
-                reason: "test".to_string(),
-                suspended_at: "2025-01-01T00:00:00Z".to_string(),
-                execution_id: None,
-            },
-        )
+        susp.write(&SuspendedInfo {
+            asset_name: "a".to_string(),
+            reason: "test".to_string(),
+            suspended_at: "2025-01-01T00:00:00Z".to_string(),
+            execution_id: None,
+        })
         .unwrap();
 
         state.in_flight.insert("a".to_string());
@@ -1013,16 +1046,14 @@ mod tests {
         });
         state.handle_eval_result("a", &result);
 
-        // Suspended flag should remain.
-        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(susp.exists("a").unwrap());
     }
 
     // ── release_sync_slot tests ─────────────────────────────────────────
 
     #[test]
     fn release_sync_slot_clears_syncing_and_ref() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let mut state = ServeState::new(&[], susp_store());
         state.init(&[asset_entry_with_sync_ref("a", "dbt-default")]);
         state.syncing.insert("a".to_string());
         state.syncing_refs.insert("dbt-default".to_string());
@@ -1035,11 +1066,10 @@ mod tests {
 
     #[test]
     fn release_sync_slot_noop_if_not_syncing() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let mut state = ServeState::new(&[], susp_store());
         state.init(&[asset_entry_with_sync("a")]);
 
-        state.release_sync_slot("a"); // should not panic
+        state.release_sync_slot("a");
         assert!(!state.syncing.contains("a"));
     }
 
@@ -1047,19 +1077,21 @@ mod tests {
 
     #[test]
     fn handle_sync_failure_returns_none_below_threshold() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
         let result = state.handle_sync_failure("a", None);
         assert!(result.is_none());
-        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(!susp.exists("a").unwrap());
     }
 
     #[test]
     fn handle_sync_failure_suspends_at_threshold() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
         for _ in 0..MAX_CONSECUTIVE_FAILURES - 1 {
@@ -1067,35 +1099,33 @@ mod tests {
         }
         let result = state.handle_sync_failure("a", None);
         assert!(result.is_some());
-        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(susp.exists("a").unwrap());
     }
 
     #[test]
     fn handle_sync_failure_records_execution_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.init(&[asset_entry_with_sync("a")]);
 
         for _ in 0..MAX_CONSECUTIVE_FAILURES {
             state.handle_sync_failure("a", Some("exec-123"));
         }
-        let info = crate::serve::suspended::list_suspended(dir.path()).unwrap();
+        let info = susp.list().unwrap();
         assert_eq!(info[0].execution_id.as_deref(), Some("exec-123"));
     }
 
     // ── suspend_asset tests ─────────────────────────────────────────────
 
     #[test]
-    fn suspend_asset_writes_flag_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = ServeState::new(&[], dir.path().to_path_buf());
+    fn suspend_asset_writes_flag() {
+        let susp = susp_store_shared();
+        let state = ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
 
         state.suspend_asset("a", "test reason", Some("exec-1"));
 
-        let path = suspended_path(dir.path(), "a").unwrap();
-        assert!(path.exists());
-        let content = std::fs::read_to_string(path).unwrap();
-        let info: SuspendedInfo = serde_json::from_str(&content).unwrap();
+        let info = susp.read("a").unwrap().unwrap();
         assert_eq!(info.asset_name, "a");
         assert_eq!(info.reason, "test reason");
         assert_eq!(info.execution_id.as_deref(), Some("exec-1"));
@@ -1103,32 +1133,32 @@ mod tests {
 
     #[test]
     fn suspend_asset_without_execution_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let state = ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
 
         state.suspend_asset("a", "test reason", None);
 
-        let info = crate::serve::suspended::list_suspended(dir.path()).unwrap();
-        assert_eq!(info[0].asset_name, "a");
-        assert!(info[0].execution_id.is_none());
+        let info = susp.read("a").unwrap().unwrap();
+        assert_eq!(info.asset_name, "a");
+        assert!(info.execution_id.is_none());
     }
 
     // ── check_degradation tests ─────────────────────────────────────────
 
     #[test]
     fn check_degradation_returns_none_when_improved() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.last_ready_count.insert("a".to_string(), 1);
 
         assert!(state.check_degradation("a", 2).is_none());
-        assert!(!suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(!susp.exists("a").unwrap());
     }
 
     #[test]
     fn check_degradation_returns_none_when_unchanged() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let mut state = ServeState::new(&[], susp_store());
         state.last_ready_count.insert("a".to_string(), 2);
 
         assert!(state.check_degradation("a", 2).is_none());
@@ -1136,19 +1166,19 @@ mod tests {
 
     #[test]
     fn check_degradation_suspends_when_decreased() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let susp = susp_store_shared();
+        let mut state =
+            ServeState::new(&[], susp.clone() as Arc<dyn crate::storage::SuspendedStore>);
         state.last_ready_count.insert("a".to_string(), 3);
 
         let reason = state.check_degradation("a", 1);
         assert!(reason.is_some());
-        assert!(suspended_path(dir.path(), "a").unwrap().exists());
+        assert!(susp.exists("a").unwrap());
     }
 
     #[test]
     fn check_degradation_returns_none_when_no_previous() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = ServeState::new(&[], dir.path().to_path_buf());
+        let state = ServeState::new(&[], susp_store());
 
         assert!(state.check_degradation("a", 1).is_none());
     }
@@ -1157,10 +1187,9 @@ mod tests {
 
     #[test]
     fn try_auto_unsuspend_noop_when_not_suspended() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = ServeState::new(&[], dir.path().to_path_buf());
+        let mut state = ServeState::new(&[], susp_store());
         state.init(&[asset_entry_with_sync("a")]);
 
-        state.try_auto_unsuspend("a"); // should not panic
+        state.try_auto_unsuspend("a");
     }
 }
