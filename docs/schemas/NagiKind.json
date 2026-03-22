@@ -208,6 +208,14 @@
         {
           "description": "Runs an external command. Ready when the process exits with code 0. `run` is argv: the first element is the program, the rest are arguments.",
           "properties": {
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "Environment variables to set for the subprocess.",
+              "type": "object"
+            },
             "interval": {
               "anyOf": [
                 {
@@ -394,6 +402,14 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables to set for the subprocess.",
+          "type": "object"
         },
         "type": {
           "allOf": [

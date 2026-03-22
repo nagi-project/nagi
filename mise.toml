@@ -57,4 +57,4 @@ run = "uv run mkdocs build --strict"
 
 [tasks."docs:serve"]
 description = "Serve documentation site locally with live reload"
-run = "uv run mkdocs serve"
+run = "uv run mkdocs serve --livereload -w ."

@@ -1,0 +1,8 @@
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: greeting-check
+spec:
+  - name: file-exists
+    type: Command
+    run: [test, -f, greeting.txt]

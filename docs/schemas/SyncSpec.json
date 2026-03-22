@@ -17,6 +17,14 @@
           },
           "type": "array"
         },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables to set for the subprocess.",
+          "type": "object"
+        },
         "type": {
           "allOf": [
             {

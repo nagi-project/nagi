@@ -59,6 +59,7 @@ nav:
     - MCP Server: architecture/mcp.md
   - Integrations:
     - dbt Core: integrations/dbt-core.md
+    - dbt Cloud: integrations/dbt-cloud.md
   - Reference:
     - CLI: cli.md
     - Glossary: glossary.md

@@ -19,7 +19,7 @@
       "type": "string"
     },
     "detail": {
-      "description": "Human-readable reason when result is `NotReady`. Empty when `Ready`.",
+      "description": "Human-readable reason when result is `Drifted`. Empty when `Ready`.",
       "type": "string"
     },
     "evaluationId": {
@@ -31,7 +31,7 @@
       "type": "string"
     },
     "result": {
-      "description": "Evaluation result: `Ready` or `NotReady`.",
+      "description": "Evaluation result: `Ready` or `Drifted`.",
       "type": "string"
     },
     "startedAt": {

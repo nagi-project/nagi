@@ -1,0 +1,8 @@
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: greeting
+spec:
+  onDrift:
+    - conditions: greeting-check
+      sync: create-greeting

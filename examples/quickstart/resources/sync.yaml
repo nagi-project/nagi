@@ -1,0 +1,8 @@
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: create-greeting
+spec:
+  run:
+    type: Command
+    args: [sh, -c, "echo 'Hello from Nagi!' > greeting.txt"]
