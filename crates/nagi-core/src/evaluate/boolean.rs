@@ -5,12 +5,12 @@ use super::{ConditionStatus, EvaluateError};
 pub(super) fn evaluate_boolean(value: Value) -> Result<ConditionStatus, EvaluateError> {
     match &value {
         Value::Bool(true) => Ok(ConditionStatus::Ready),
-        Value::Bool(false) => Ok(ConditionStatus::NotReady {
+        Value::Bool(false) => Ok(ConditionStatus::Drifted {
             reason: "condition returned false".to_string(),
         }),
         // BigQuery returns booleans as strings "true"/"false" in query results.
         Value::String(s) if s.eq_ignore_ascii_case("true") => Ok(ConditionStatus::Ready),
-        Value::String(s) if s.eq_ignore_ascii_case("false") => Ok(ConditionStatus::NotReady {
+        Value::String(s) if s.eq_ignore_ascii_case("false") => Ok(ConditionStatus::Drifted {
             reason: "condition returned false".to_string(),
         }),
         other => Err(EvaluateError::UnexpectedResult(format!(
@@ -46,7 +46,7 @@ mod tests {
                 fn $name() {
                     assert!(matches!(
                         evaluate_boolean($input).unwrap(),
-                        ConditionStatus::NotReady { .. }
+                        ConditionStatus::Drifted { .. }
                     ));
                 }
             )*

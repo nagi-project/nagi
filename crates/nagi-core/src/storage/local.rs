@@ -212,7 +212,7 @@ mod tests {
                 status: if ready {
                     ConditionStatus::Ready
                 } else {
-                    ConditionStatus::NotReady {
+                    ConditionStatus::Drifted {
                         reason: "query returned false".to_string(),
                     }
                 },

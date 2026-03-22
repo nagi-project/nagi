@@ -520,7 +520,7 @@ mod tests {
         crate::evaluate::ConditionResult {
             condition_name: name.to_string(),
             condition_type: "test".to_string(),
-            status: crate::evaluate::ConditionStatus::NotReady {
+            status: crate::evaluate::ConditionStatus::Drifted {
                 reason: "test".to_string(),
             },
         }

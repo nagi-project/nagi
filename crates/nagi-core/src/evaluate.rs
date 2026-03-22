@@ -31,7 +31,7 @@ pub struct ConditionResult {
 #[serde(rename_all = "camelCase", tag = "state")]
 pub enum ConditionStatus {
     Ready,
-    NotReady {
+    Drifted {
         /// Human-readable explanation of why the condition is not satisfied.
         reason: String,
     },
@@ -401,7 +401,7 @@ mod tests {
         assert!(!result.ready);
         assert!(matches!(
             &result.conditions[0].status,
-            ConditionStatus::NotReady { .. }
+            ConditionStatus::Drifted { .. }
         ));
     }
 
@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(result.conditions[0].status, ConditionStatus::Ready);
         assert!(matches!(
             result.conditions[1].status,
-            ConditionStatus::NotReady { .. }
+            ConditionStatus::Drifted { .. }
         ));
     }
 

@@ -22,7 +22,7 @@ pub(super) fn evaluate_freshness(
     if age_secs <= max_age.as_secs_f64() {
         Ok(ConditionStatus::Ready)
     } else {
-        Ok(ConditionStatus::NotReady {
+        Ok(ConditionStatus::Drifted {
             reason: format!(
                 "last updated {:.0}s ago, max age is {}s",
                 age_secs,

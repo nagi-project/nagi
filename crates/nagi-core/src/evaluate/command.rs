@@ -18,7 +18,7 @@ pub(super) async fn evaluate_command(run: &[String]) -> Result<ConditionStatus, 
             .code()
             .map(|c| c.to_string())
             .unwrap_or_else(|| "signal".to_string());
-        Ok(ConditionStatus::NotReady {
+        Ok(ConditionStatus::Drifted {
             reason: format!("'{}' exited with code {code}", program),
         })
     }
@@ -39,7 +39,7 @@ mod tests {
     async fn exit_nonzero_is_not_ready() {
         let run = vec!["false".to_string()];
         let status = evaluate_command(&run).await.unwrap();
-        assert!(matches!(status, ConditionStatus::NotReady { .. }));
+        assert!(matches!(status, ConditionStatus::Drifted { .. }));
     }
 
     #[tokio::test]

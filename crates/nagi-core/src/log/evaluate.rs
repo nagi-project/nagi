@@ -20,9 +20,9 @@ pub struct EvaluateLogEntry {
     pub started_at: String,
     /// RFC 3339 timestamp when evaluation finished.
     pub finished_at: String,
-    /// Evaluation result: `Ready` or `NotReady`.
+    /// Evaluation result: `Ready` or `Drifted`.
     pub result: String,
-    /// Human-readable reason when result is `NotReady`. Empty when `Ready`.
+    /// Human-readable reason when result is `Drifted`. Empty when `Ready`.
     pub detail: String,
     /// Date partition key (YYYY-MM-DD) derived from `started_at`.
     pub date: String,
@@ -43,9 +43,7 @@ impl EvaluateLogEntry {
             .map(|cond| {
                 let (result_str, detail) = match &cond.status {
                     ConditionStatus::Ready => ("Ready".to_string(), String::new()),
-                    ConditionStatus::NotReady { reason } => {
-                        ("NotReady".to_string(), reason.clone())
-                    }
+                    ConditionStatus::Drifted { reason } => ("Drifted".to_string(), reason.clone()),
                 };
                 EvaluateLogEntry {
                     evaluation_id: evaluation_id.to_string(),
@@ -123,7 +121,7 @@ mod tests {
                 ConditionResult {
                     condition_name: "row-count".to_string(),
                     condition_type: "SQL".to_string(),
-                    status: CS::NotReady {
+                    status: CS::Drifted {
                         reason: "count is 0".to_string(),
                     },
                 },
@@ -168,7 +166,7 @@ mod tests {
             conditions: vec![ConditionResult {
                 condition_name: "row-count".to_string(),
                 condition_type: "SQL".to_string(),
-                status: CS::NotReady {
+                status: CS::Drifted {
                     reason: "count is 0".to_string(),
                 },
             }],
@@ -182,7 +180,7 @@ mod tests {
             "2026-03-22",
         );
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].result, "NotReady");
+        assert_eq!(entries[0].result, "Drifted");
         assert_eq!(entries[0].detail, "count is 0");
     }
 
@@ -264,7 +262,7 @@ mod tests {
         assert_eq!(cond_name, "row-count");
         assert_eq!(asset, "my-asset");
         assert_eq!(cond_type, "SQL");
-        assert_eq!(res, "NotReady");
+        assert_eq!(res, "Drifted");
         assert_eq!(detail, "count is 0");
         assert_eq!(date, "2026-03-16");
     }
