@@ -29,7 +29,7 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
 @click.option(
     "--cache-dir",
     default=None,
-    help="Cache directory (defaults to ~/.nagi/cache/)",
+    help="Cache directory (defaults to &lt;nagiDir&gt;/cache/)",
 )
 @click.option(
     "--project-dir",

@@ -20,12 +20,8 @@ pub struct SuspendedInfo {
     pub execution_id: Option<String>,
 }
 
-pub fn suspended_dir() -> std::io::Result<PathBuf> {
-    dirs::home_dir()
-        .map(|h| h.join(".nagi").join("suspended"))
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
-        })
+pub fn suspended_dir(nagi_dir: &Path) -> PathBuf {
+    nagi_dir.join("suspended")
 }
 
 /// Validates that the asset name is a safe filename component (no path

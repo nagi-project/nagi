@@ -19,14 +19,6 @@ impl LocalCache {
         Self { cache_dir }
     }
 
-    /// Creates a cache using the default directory: `~/.nagi/cache/`.
-    pub fn default_dir() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".nagi")
-            .join("cache")
-    }
-
     fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
         super::validate_asset_name(asset_name)?;
         Ok(self.cache_dir.join(format!("{asset_name}.json")))
@@ -83,13 +75,6 @@ pub struct LocalSuspendedStore {
 impl LocalSuspendedStore {
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
-    }
-
-    pub fn default_dir() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".nagi")
-            .join("suspended")
     }
 
     fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
@@ -162,13 +147,6 @@ pub struct LocalSourceStatsCache {
 impl LocalSourceStatsCache {
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
-    }
-
-    pub fn default_dir() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".nagi")
-            .join("source_stats")
     }
 
     fn source_path(&self, source_name: &str) -> Result<PathBuf, StorageError> {
@@ -434,13 +412,6 @@ pub struct LocalSyncLock {
 impl LocalSyncLock {
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
-    }
-
-    pub fn default_dir() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".nagi")
-            .join("locks")
     }
 
     fn lock_path(&self, sync_ref: &str) -> PathBuf {

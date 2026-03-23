@@ -6,17 +6,7 @@ use crate::log::{LogError, LogStore};
 
 /// Returns the default nagi home directory (`~/.nagi`).
 pub fn default_nagi_dir() -> std::path::PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".nagi")
-}
-
-/// Returns the default database path (`~/.nagi/logs.db`).
-pub fn default_db_path() -> std::path::PathBuf {
-    default_nagi_dir().join("logs.db")
-}
-
-/// Returns the default logs directory (`~/.nagi/logs`).
-pub fn default_logs_dir() -> std::path::PathBuf {
-    default_nagi_dir().join("logs")
+    crate::config::default_nagi_dir()
 }
 
 #[derive(Debug, Error)]
@@ -40,11 +30,10 @@ pub fn ensure_resources_dir(base_dir: &Path) -> Result<(), InitError> {
     Ok(())
 }
 
-/// Creates `~/.nagi/config.yaml` with default content if it does not exist.
-pub fn ensure_config() -> Result<(), InitError> {
-    let config_dir = dirs::home_dir().unwrap_or_default().join(".nagi");
-    std::fs::create_dir_all(&config_dir)?;
-    let config_path = config_dir.join("config.yaml");
+/// Creates `{nagi_dir}/config.yaml` with default content if it does not exist.
+pub fn ensure_config(nagi_dir: &Path) -> Result<(), InitError> {
+    std::fs::create_dir_all(nagi_dir)?;
+    let config_path = nagi_dir.join("config.yaml");
     if !config_path.exists() {
         std::fs::write(&config_path, "backend:\n  type: local\n")?;
     }
@@ -61,10 +50,12 @@ pub fn ensure_log_store(db_path: &Path, logs_dir: &Path) -> Result<(), InitError
 }
 
 /// Initialises the workspace: creates `resources/`, config, and log store.
-pub fn init_workspace(base_dir: &Path, db_path: &Path, logs_dir: &Path) -> Result<(), InitError> {
+pub fn init_workspace(base_dir: &Path, nagi_dir: &Path) -> Result<(), InitError> {
     ensure_resources_dir(base_dir)?;
-    ensure_config()?;
-    ensure_log_store(db_path, logs_dir)?;
+    ensure_config(nagi_dir)?;
+    let db_path = nagi_dir.join("logs.db");
+    let logs_dir = nagi_dir.join("logs");
+    ensure_log_store(&db_path, &logs_dir)?;
     Ok(())
 }
 
@@ -340,10 +331,9 @@ mod tests {
     #[test]
     fn init_workspace_creates_all() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("logs.db");
-        let logs_dir = dir.path().join("logs");
-        init_workspace(dir.path(), &db_path, &logs_dir).unwrap();
+        let nagi_dir = dir.path().join(".nagi");
+        init_workspace(dir.path(), &nagi_dir).unwrap();
         assert!(dir.path().join("resources").exists());
-        assert!(db_path.exists());
+        assert!(nagi_dir.join("logs.db").exists());
     }
 }

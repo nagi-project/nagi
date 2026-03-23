@@ -37,7 +37,7 @@ def _make_sync_command(sync_type: str) -> click.Command:
     @click.option(
         "--cache-dir",
         default=None,
-        help="Cache directory (defaults to ~/.nagi/cache/)",
+        help="Cache directory (defaults to &lt;nagiDir&gt;/cache/)",
     )
     @click.option(
         "--dry-run",

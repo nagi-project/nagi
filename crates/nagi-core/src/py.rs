@@ -171,15 +171,16 @@ pub fn asset_status(
     logs_dir: Option<&str>,
     suspended_dir: Option<&str>,
 ) -> PyResult<String> {
+    let nagi_dir = crate::config::default_nagi_dir();
     let db = db_path
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::init::default_db_path);
+        .unwrap_or_else(|| nagi_dir.join("logs.db"));
     let logs = logs_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::init::default_logs_dir);
+        .unwrap_or_else(|| nagi_dir.join("logs"));
     let suspended = suspended_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::storage::local::LocalSuspendedStore::default_dir);
+        .unwrap_or_else(|| nagi_dir.join("suspended"));
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::status::asset_status(
         std::path::Path::new(target_dir),
@@ -196,19 +197,12 @@ pub fn asset_status(
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (base_dir=".", db_path=None, logs_dir=None))]
-pub fn init_workspace(
-    base_dir: &str,
-    db_path: Option<&str>,
-    logs_dir: Option<&str>,
-) -> PyResult<()> {
-    let db = db_path
+#[pyo3(signature = (base_dir=".", nagi_dir=None))]
+pub fn init_workspace(base_dir: &str, nagi_dir: Option<&str>) -> PyResult<()> {
+    let nd = nagi_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::init::default_db_path);
-    let logs = logs_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::init::default_logs_dir);
-    crate::init::init_workspace(std::path::Path::new(base_dir), &db, &logs).map_err(to_py_err)
+        .unwrap_or_else(crate::config::default_nagi_dir);
+    crate::init::init_workspace(std::path::Path::new(base_dir), &nd).map_err(to_py_err)
 }
 
 #[pyfunction]
@@ -244,16 +238,19 @@ pub fn serve(
 #[pyfunction]
 #[pyo3(signature = (selectors))]
 pub fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
+    let nagi_dir = crate::config::default_nagi_dir();
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
-    let result = crate::serve::resume(&selector_refs).map_err(to_py_err)?;
+    let result = crate::serve::resume(&selector_refs, &nagi_dir).map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
 }
 
 #[pyfunction]
 #[pyo3(signature = (target_dir, reason=None))]
 pub fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
+    let nagi_dir = crate::config::default_nagi_dir();
     let r = reason.unwrap_or("manual halt");
-    let result = crate::serve::halt(std::path::Path::new(target_dir), r).map_err(to_py_err)?;
+    let result =
+        crate::serve::halt(std::path::Path::new(target_dir), r, &nagi_dir).map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
 }
 

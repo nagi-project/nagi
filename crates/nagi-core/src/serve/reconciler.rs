@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use crate::compile::CompiledAsset;
 use crate::evaluate::{AssetEvalResult, EvaluateError};
-use crate::init;
 use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
 use crate::storage::local::{LocalCache, LocalSourceStatsCache};
@@ -35,7 +34,7 @@ pub async fn evaluate_and_cache(
 
     let cache_path = cache_dir
         .map(PathBuf::from)
-        .unwrap_or_else(LocalCache::default_dir);
+        .unwrap_or_else(|| crate::config::default_nagi_dir().join("cache"));
     let eval_cache = LocalCache::new(cache_path);
 
     let has_sources = conn.is_some() && !compiled.spec.sources.is_empty();
@@ -43,7 +42,7 @@ pub async fn evaluate_and_cache(
         Some(LocalSourceStatsCache::new(
             source_stats_dir
                 .map(PathBuf::from)
-                .unwrap_or_else(LocalSourceStatsCache::default_dir),
+                .unwrap_or_else(|| crate::config::default_nagi_dir().join("source_stats")),
         ))
     } else {
         None
@@ -298,7 +297,8 @@ fn write_lock_log(
     status: &str,
     timestamp: &str,
 ) {
-    let log_store = match LogStore::open(&init::default_db_path(), &init::default_logs_dir()) {
+    let nagi_dir = crate::config::default_nagi_dir();
+    let log_store = match LogStore::open(&nagi_dir.join("logs.db"), &nagi_dir.join("logs")) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(error = %e, "failed to open log store for lock skip log");

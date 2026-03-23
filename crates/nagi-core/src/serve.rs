@@ -98,8 +98,8 @@ pub async fn serve(
 
     let notifier = build_notifier(project_dir);
 
-    let db_path = crate::init::default_db_path();
-    let logs_dir = crate::init::default_logs_dir();
+    let db_path = config.db_path();
+    let logs_dir = config.logs_dir();
 
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let inputs = build_controller_inputs(&graph, &asset_map)?;
@@ -172,12 +172,10 @@ fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendSto
 
     match config.backend.r#type.as_str() {
         "local" => {
-            let lock_dir = LocalSyncLock::default_dir();
             let sync_lock: Arc<dyn crate::storage::SyncLock> =
-                Arc::new(LocalSyncLock::new(lock_dir));
-            let susp_dir = suspended_dir().map_err(ServeError::Io)?;
+                Arc::new(LocalSyncLock::new(config.locks_dir()));
             let suspended_store: Arc<dyn SuspendedStore> =
-                Arc::new(LocalSuspendedStore::new(susp_dir));
+                Arc::new(LocalSuspendedStore::new(config.suspended_dir()));
             Ok(BackendStores {
                 sync_lock,
                 suspended_store,
@@ -196,16 +194,16 @@ fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendSto
 }
 
 /// Lists all currently suspended assets.
-pub fn list_suspended_assets() -> Result<Vec<SuspendedInfo>, std::io::Error> {
-    list_suspended(&suspended_dir()?)
+pub fn list_suspended_assets(nagi_dir: &Path) -> Result<Vec<SuspendedInfo>, std::io::Error> {
+    list_suspended(&suspended_dir(nagi_dir))
 }
 
 /// Resumes suspended assets by removing their flag files.
 ///
 /// If `selectors` is empty, lists suspended assets without removing.
 /// If `selectors` is non-empty, removes the suspended flag for each matching asset.
-pub fn resume(selectors: &[&str]) -> Result<Vec<String>, std::io::Error> {
-    let dir = suspended_dir()?;
+pub fn resume(selectors: &[&str], nagi_dir: &Path) -> Result<Vec<String>, std::io::Error> {
+    let dir = suspended_dir(nagi_dir);
     if selectors.is_empty() {
         let items = list_suspended(&dir)?;
         return Ok(items.into_iter().map(|i| i.asset_name).collect());
@@ -224,12 +222,12 @@ pub fn resume(selectors: &[&str]) -> Result<Vec<String>, std::io::Error> {
 ///
 /// Returns the list of asset names that were halted (newly suspended).
 /// Assets already suspended are skipped.
-pub fn halt(target_dir: &Path, reason: &str) -> Result<Vec<String>, ServeError> {
+pub fn halt(target_dir: &Path, reason: &str, nagi_dir: &Path) -> Result<Vec<String>, ServeError> {
     use crate::storage::local::LocalSuspendedStore;
     use crate::storage::SuspendedStore;
 
     let asset_names = crate::compile::resolve_compiled_asset_names(target_dir, &[])?;
-    let store = LocalSuspendedStore::new(suspended_dir()?);
+    let store = LocalSuspendedStore::new(suspended_dir(nagi_dir));
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut halted = Vec::new();

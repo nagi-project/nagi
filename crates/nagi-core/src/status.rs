@@ -50,7 +50,7 @@ pub fn asset_status(
 
     let cache_path = cache_dir
         .map(PathBuf::from)
-        .unwrap_or_else(LocalCache::default_dir);
+        .unwrap_or_else(|| crate::config::default_nagi_dir().join("cache"));
     let cache = LocalCache::new(cache_path);
 
     let store = if db_path.exists() {

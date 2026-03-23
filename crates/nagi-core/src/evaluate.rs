@@ -237,7 +237,7 @@ pub async fn evaluate_from_compiled(
 
     let cache_path = cache_dir
         .map(PathBuf::from)
-        .unwrap_or_else(LocalCache::default_dir);
+        .unwrap_or_else(|| crate::config::default_nagi_dir().join("cache"));
     let cache = LocalCache::new(cache_path);
     cache
         .write(&result)

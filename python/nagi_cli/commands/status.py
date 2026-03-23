@@ -21,7 +21,7 @@ from nagi_cli._nagi_core import asset_status
 @click.option(
     "--cache-dir",
     default=None,
-    help="Cache directory (defaults to ~/.nagi/cache/)",
+    help="Cache directory (defaults to <nagiDir>/cache/)",
 )
 def status(
     selectors: tuple[str, ...],

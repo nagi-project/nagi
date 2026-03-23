@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -37,6 +37,9 @@ pub struct NagiConfig {
     /// Maximum number of lock acquisition retry attempts before skipping. Defaults to 30.
     #[serde(default = "default_lock_retry_max_attempts")]
     pub lock_retry_max_attempts: u32,
+    /// Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.
+    #[serde(default = "default_nagi_dir")]
+    pub nagi_dir: PathBuf,
 }
 
 impl Default for NagiConfig {
@@ -49,7 +52,34 @@ impl Default for NagiConfig {
             lock_ttl_seconds: default_lock_ttl_seconds(),
             lock_retry_interval_seconds: default_lock_retry_interval_seconds(),
             lock_retry_max_attempts: default_lock_retry_max_attempts(),
+            nagi_dir: default_nagi_dir(),
         }
+    }
+}
+
+impl NagiConfig {
+    pub fn db_path(&self) -> PathBuf {
+        self.nagi_dir.join("logs.db")
+    }
+
+    pub fn logs_dir(&self) -> PathBuf {
+        self.nagi_dir.join("logs")
+    }
+
+    pub fn cache_dir(&self) -> PathBuf {
+        self.nagi_dir.join("cache")
+    }
+
+    pub fn locks_dir(&self) -> PathBuf {
+        self.nagi_dir.join("locks")
+    }
+
+    pub fn suspended_dir(&self) -> PathBuf {
+        self.nagi_dir.join("suspended")
+    }
+
+    pub fn source_stats_dir(&self) -> PathBuf {
+        self.nagi_dir.join("source_stats")
     }
 }
 
@@ -63,6 +93,10 @@ fn default_lock_retry_interval_seconds() -> u64 {
 
 fn default_lock_retry_max_attempts() -> u32 {
     3
+}
+
+pub fn default_nagi_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".nagi")
 }
 
 fn default_backend_type() -> String {
@@ -315,5 +349,49 @@ notify:
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("nagi.yaml"), "{{invalid").unwrap();
         assert!(load_config(dir.path()).is_err());
+    }
+
+    #[test]
+    fn default_nagi_dir_is_dot_nagi() {
+        let config = NagiConfig::default();
+        assert!(config.nagi_dir.ends_with(".nagi"));
+    }
+
+    #[test]
+    fn load_custom_nagi_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "nagiDir: /tmp/my-nagi";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.nagi_dir, PathBuf::from("/tmp/my-nagi"));
+    }
+
+    #[test]
+    fn load_without_nagi_dir_uses_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: local";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.nagi_dir, default_nagi_dir());
+    }
+
+    #[test]
+    fn config_derived_paths() {
+        let config = NagiConfig {
+            nagi_dir: PathBuf::from("/data/nagi"),
+            ..NagiConfig::default()
+        };
+        assert_eq!(config.db_path(), PathBuf::from("/data/nagi/logs.db"));
+        assert_eq!(config.logs_dir(), PathBuf::from("/data/nagi/logs"));
+        assert_eq!(config.cache_dir(), PathBuf::from("/data/nagi/cache"));
+        assert_eq!(config.locks_dir(), PathBuf::from("/data/nagi/locks"));
+        assert_eq!(
+            config.suspended_dir(),
+            PathBuf::from("/data/nagi/suspended")
+        );
+        assert_eq!(
+            config.source_stats_dir(),
+            PathBuf::from("/data/nagi/source_stats")
+        );
     }
 }

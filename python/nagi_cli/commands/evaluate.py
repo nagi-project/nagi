@@ -19,7 +19,7 @@ from nagi_cli._nagi_core import evaluate_all
 @click.option(
     "--cache-dir",
     default=None,
-    help="Cache directory (defaults to ~/.nagi/cache/)",
+    help="Cache directory (defaults to &lt;nagiDir&gt;/cache/)",
 )
 @click.option(
     "--dry-run",
