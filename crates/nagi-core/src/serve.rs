@@ -88,10 +88,7 @@ pub async fn serve(
 
     let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
 
-    let graph_path = target_dir.join("graph.json");
-    let graph_json = std::fs::read_to_string(&graph_path)?;
-    let graph: DependencyGraph =
-        serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
+    let graph: DependencyGraph = crate::compile::load_graph(target_dir)?;
 
     let config = crate::config::load_config(project_dir.unwrap_or(Path::new(".")))
         .map_err(|e| ServeError::Parse(format!("failed to load config: {e}")))?;

@@ -8,6 +8,7 @@ pub mod evaluate;
 pub mod init;
 pub mod kind;
 pub mod log;
+pub mod ls;
 pub mod notify;
 pub mod schema;
 pub mod select;
@@ -39,5 +40,6 @@ fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py::serve, m)?)?;
     m.add_function(wrap_pyfunction!(py::serve_resume, m)?)?;
     m.add_function(wrap_pyfunction!(py::serve_halt, m)?)?;
+    m.add_function(wrap_pyfunction!(py::list_resources, m)?)?;
     Ok(())
 }
