@@ -205,7 +205,10 @@ fn build_merge_sql(dataset: &str, table: ExportTable) -> String {
     let target = format!("{dataset}.{table_name}");
     let pks = primary_keys(table);
 
-    let on_clause: Vec<String> = pks.iter().map(|pk| format!("T.{pk} = S.{pk}")).collect();
+    let on_clause: Vec<String> = pks
+        .iter()
+        .map(|pk| format!("T.`{pk}` = S.`{pk}`"))
+        .collect();
 
     format!(
         "MERGE `{target}` T USING `{staging}` S ON {on} \
@@ -781,22 +784,22 @@ mod tests {
         assert!(sql.contains("MERGE"));
         assert!(sql.contains("nagi_logs.evaluate_logs"));
         assert!(sql.contains("nagi_logs._staging_evaluate_logs"));
-        assert!(sql.contains("T.evaluation_id = S.evaluation_id"));
-        assert!(sql.contains("T.condition_name = S.condition_name"));
+        assert!(sql.contains("T.`evaluation_id` = S.`evaluation_id`"));
+        assert!(sql.contains("T.`condition_name` = S.`condition_name`"));
     }
 
     #[test]
     fn build_merge_sql_sync_logs() {
         let sql = build_merge_sql("nagi_logs", ExportTable::SyncLogs);
-        assert!(sql.contains("T.execution_id = S.execution_id"));
-        assert!(sql.contains("T.stage = S.stage"));
+        assert!(sql.contains("T.`execution_id` = S.`execution_id`"));
+        assert!(sql.contains("T.`stage` = S.`stage`"));
     }
 
     #[test]
     fn build_merge_sql_sync_evaluations() {
         let sql = build_merge_sql("nagi_logs", ExportTable::SyncEvaluations);
-        assert!(sql.contains("T.execution_id = S.execution_id"));
-        assert!(sql.contains("T.evaluation_id = S.evaluation_id"));
+        assert!(sql.contains("T.`execution_id` = S.`execution_id`"));
+        assert!(sql.contains("T.`evaluation_id` = S.`evaluation_id`"));
     }
 
     #[test]
