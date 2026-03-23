@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
-use crate::kind::asset::{AssetSpec, DesiredCondition, OnDriftEntry};
+use crate::kind::asset::{AssetSpec, DesiredCondition, MergePosition, OnDriftEntry};
 use crate::kind::origin::OriginSpec;
 use crate::kind::source::SourceSpec;
 use crate::kind::sync::{StepType, SyncSpec, SyncStep};
@@ -118,9 +118,11 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         }
 
         // Convert dbt tests to a Conditions and on_drift entry.
-        let on_drift = if let Some(tests) = model_tests.get(&model.unique_id) {
-            let conditions = tests_to_conditions(tests);
-            if !conditions.is_empty() {
+        let on_drift = model_tests
+            .get(&model.unique_id)
+            .map(|tests| tests_to_conditions(tests))
+            .filter(|conditions| !conditions.is_empty())
+            .and_then(|conditions| {
                 let group_name = format!("dbt-tests-{}", model.name);
                 resources.push(NagiKind::Conditions {
                     api_version: API_VERSION.to_string(),
@@ -129,21 +131,15 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
                     },
                     spec: crate::kind::condition::ConditionsSpec(conditions),
                 });
-                if let Some(sync_name) = &default_sync {
-                    vec![OnDriftEntry {
-                        conditions: group_name,
-                        sync: sync_name.clone(),
-                        with: HashMap::new(),
-                    }]
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
+                default_sync.as_ref().map(|sync_name| OnDriftEntry {
+                    conditions: group_name,
+                    sync: sync_name.clone(),
+                    with: HashMap::new(),
+                    merge_position: MergePosition::BeforeOrigin,
+                })
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
 
         // Collect tags for Sync generation.
         if !model.tags.is_empty() {

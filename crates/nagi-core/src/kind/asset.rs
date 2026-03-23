@@ -10,6 +10,16 @@ use super::KindError;
 
 pub const KIND: &str = "Asset";
 
+/// Controls where an overlay onDrift entry is placed relative to Origin-generated entries
+/// during Asset overlay merge.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum MergePosition {
+    #[default]
+    BeforeOrigin,
+    AfterOrigin,
+}
+
 /// Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.
 /// `on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -37,6 +47,7 @@ fn default_auto_sync() -> bool {
 /// An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.
 /// The conditions are evaluated as a group (all must pass for no drift).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct OnDriftEntry {
     /// Name of the `kind: Conditions` resource whose conditions define drift.
     pub conditions: String,
@@ -45,6 +56,9 @@ pub struct OnDriftEntry {
     /// Template variables passed to the Sync resource for argument interpolation.
     #[serde(default)]
     pub with: HashMap<String, String>,
+    /// Controls insertion position during overlay merge. Not included in compiled output.
+    #[serde(default)]
+    pub merge_position: MergePosition,
 }
 
 /// A single desired state condition. The Asset is Ready only when all conditions are satisfied.
@@ -101,6 +115,23 @@ impl AssetSpec {
         }
         Ok(())
     }
+}
+
+/// Merges overlay (user-defined) on_drift entries with origin-generated entries.
+/// Result order: [beforeOrigin overlay] + [origin] + [afterOrigin overlay].
+/// Within each group, input order is preserved.
+pub fn merge_on_drift_entries(
+    overlay: Vec<OnDriftEntry>,
+    origin: Vec<OnDriftEntry>,
+) -> Vec<OnDriftEntry> {
+    let (before, after): (Vec<_>, Vec<_>) = overlay
+        .into_iter()
+        .partition(|e| e.merge_position == MergePosition::BeforeOrigin);
+    let mut merged = Vec::with_capacity(before.len() + origin.len() + after.len());
+    merged.extend(before);
+    merged.extend(origin);
+    merged.extend(after);
+    merged
 }
 
 impl OnDriftEntry {
@@ -298,6 +329,7 @@ autoSync: false
                 conditions: "daily-sla".to_string(),
                 sync: "dbt-run".to_string(),
                 with: HashMap::new(),
+                merge_position: MergePosition::BeforeOrigin,
             }],
             auto_sync: true,
         };
@@ -313,6 +345,7 @@ autoSync: false
                 conditions: "".to_string(),
                 sync: "dbt-run".to_string(),
                 with: HashMap::new(),
+                merge_position: MergePosition::BeforeOrigin,
             }],
             auto_sync: true,
         };
@@ -329,6 +362,7 @@ autoSync: false
                 conditions: "daily-sla".to_string(),
                 sync: "".to_string(),
                 with: HashMap::new(),
+                merge_position: MergePosition::BeforeOrigin,
             }],
             auto_sync: true,
         };
@@ -522,5 +556,124 @@ onDrift:
         assert_eq!(spec.on_drift[0].sync, "dbt-incremental");
         assert_eq!(spec.on_drift[1].conditions, "sales-quality");
         assert_eq!(spec.on_drift[1].sync, "dbt-full-refresh");
+    }
+
+    #[test]
+    fn parse_on_drift_with_merge_position() {
+        let yaml = r#"
+onDrift:
+  - conditions: check
+    sync: run
+    mergePosition: afterOrigin
+"#;
+        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.on_drift[0].merge_position, MergePosition::AfterOrigin);
+    }
+
+    #[test]
+    fn parse_on_drift_default_merge_position() {
+        let yaml = r#"
+onDrift:
+  - conditions: check
+    sync: run
+"#;
+        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.on_drift[0].merge_position, MergePosition::BeforeOrigin);
+    }
+
+    macro_rules! merge_position_serde_test {
+        ($($name:ident: $value:expr => $yaml_str:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let entry = OnDriftEntry {
+                        conditions: "c".to_string(),
+                        sync: "s".to_string(),
+                        with: HashMap::new(),
+                        merge_position: $value,
+                    };
+                    let serialized = serde_yaml::to_string(&entry).unwrap();
+                    assert!(serialized.contains($yaml_str), "serialized: {serialized}");
+                    let deserialized: OnDriftEntry = serde_yaml::from_str(&serialized).unwrap();
+                    assert_eq!(deserialized.merge_position, $value);
+                }
+            )*
+        };
+    }
+
+    merge_position_serde_test! {
+        merge_position_round_trip_before: MergePosition::BeforeOrigin => "beforeOrigin";
+        merge_position_round_trip_after: MergePosition::AfterOrigin => "afterOrigin";
+    }
+
+    fn entry(name: &str, pos: MergePosition) -> OnDriftEntry {
+        OnDriftEntry {
+            conditions: name.to_string(),
+            sync: format!("sync-{name}"),
+            with: HashMap::new(),
+            merge_position: pos,
+        }
+    }
+
+    fn names(entries: &[OnDriftEntry]) -> Vec<&str> {
+        entries.iter().map(|e| e.conditions.as_str()).collect()
+    }
+
+    #[test]
+    fn merge_all_before_origin() {
+        let overlay = vec![entry("user-a", MergePosition::BeforeOrigin)];
+        let origin = vec![entry("origin-a", MergePosition::BeforeOrigin)];
+        let merged = merge_on_drift_entries(overlay, origin);
+        assert_eq!(names(&merged), vec!["user-a", "origin-a"]);
+    }
+
+    #[test]
+    fn merge_all_after_origin() {
+        let overlay = vec![entry("user-a", MergePosition::AfterOrigin)];
+        let origin = vec![entry("origin-a", MergePosition::BeforeOrigin)];
+        let merged = merge_on_drift_entries(overlay, origin);
+        assert_eq!(names(&merged), vec!["origin-a", "user-a"]);
+    }
+
+    #[test]
+    fn merge_before_and_after_origin() {
+        let overlay = vec![
+            entry("before-1", MergePosition::BeforeOrigin),
+            entry("after-1", MergePosition::AfterOrigin),
+            entry("before-2", MergePosition::BeforeOrigin),
+            entry("after-2", MergePosition::AfterOrigin),
+        ];
+        let origin = vec![
+            entry("origin-1", MergePosition::BeforeOrigin),
+            entry("origin-2", MergePosition::BeforeOrigin),
+        ];
+        let merged = merge_on_drift_entries(overlay, origin);
+        assert_eq!(
+            names(&merged),
+            vec!["before-1", "before-2", "origin-1", "origin-2", "after-1", "after-2"]
+        );
+    }
+
+    #[test]
+    fn merge_empty_overlay() {
+        let origin = vec![entry("origin-a", MergePosition::BeforeOrigin)];
+        let merged = merge_on_drift_entries(vec![], origin);
+        assert_eq!(names(&merged), vec!["origin-a"]);
+    }
+
+    #[test]
+    fn merge_empty_origin() {
+        let overlay = vec![
+            entry("before", MergePosition::BeforeOrigin),
+            entry("after", MergePosition::AfterOrigin),
+        ];
+        let merged = merge_on_drift_entries(overlay, vec![]);
+        assert_eq!(names(&merged), vec!["before", "after"]);
+    }
+
+    #[test]
+    fn merge_both_empty() {
+        let merged = merge_on_drift_entries(vec![], vec![]);
+        assert!(merged.is_empty());
     }
 }

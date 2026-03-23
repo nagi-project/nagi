@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::dbt::manifest::{self, DbtManifest};
-use crate::kind::asset::{validate_no_duplicate_condition_names, AssetSpec, DesiredCondition};
+use crate::kind::asset::{
+    self as asset, validate_no_duplicate_condition_names, AssetSpec, DesiredCondition,
+};
 use crate::kind::origin::OriginSpec;
 use crate::kind::sync::SyncSpec;
 use crate::kind::{self, KindError, Metadata, NagiKind};
@@ -376,7 +378,9 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                         // Third or more: error.
                         return Err(CompileError::DuplicateName { kind, name });
                     }
-                    result.assets[idx].1.on_drift.extend(spec.on_drift);
+                    let overlay = std::mem::take(&mut result.assets[idx].1.on_drift);
+                    result.assets[idx].1.on_drift =
+                        asset::merge_on_drift_entries(overlay, spec.on_drift);
                 } else {
                     asset_indices.insert(name, result.assets.len());
                     result.assets.push((metadata, spec));
@@ -998,6 +1002,114 @@ spec: {}",
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::DuplicateName { kind, name }
             if kind == "Asset" && name == "daily-sales"));
+    }
+
+    #[test]
+    fn resolve_merge_orders_by_merge_position() {
+        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: quality-checks
+spec:
+  - name: check-b
+    type: SQL
+    query: \"SELECT true\"",
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: post-checks
+spec:
+  - name: check-c
+    type: SQL
+    query: \"SELECT 1\"",
+            SYNC_DBT_RUN,
+            SYNC_DBT_FULL,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: dbt-post
+spec:
+  run:
+    type: Command
+    args: [\"dbt\", \"test\"]",
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  onDrift:
+    - conditions: daily-sla
+      sync: dbt-run
+      mergePosition: beforeOrigin
+    - conditions: post-checks
+      sync: dbt-post
+      mergePosition: afterOrigin
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  onDrift:
+    - conditions: quality-checks
+      sync: dbt-full",
+        ]));
+        let output = resolve(resources).unwrap();
+        assert_eq!(output.assets.len(), 1);
+        let on_drift = &output.assets[0].resolved_on_drift;
+        assert_eq!(on_drift.len(), 3);
+        // [beforeOrigin user entry] + [origin entry] + [afterOrigin user entry]
+        assert_eq!(on_drift[0].conditions_ref, "daily-sla");
+        assert_eq!(on_drift[1].conditions_ref, "quality-checks");
+        assert_eq!(on_drift[2].conditions_ref, "post-checks");
+    }
+
+    #[test]
+    fn resolve_merge_default_position_is_before_origin() {
+        let resources = parse(&yaml_docs(&[
+            DESIRED_GROUP_DAILY_SLA,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: quality-checks
+spec:
+  - name: check-b
+    type: SQL
+    query: \"SELECT true\"",
+            SYNC_DBT_RUN,
+            SYNC_DBT_FULL,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  onDrift:
+    - conditions: daily-sla
+      sync: dbt-run
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  onDrift:
+    - conditions: quality-checks
+      sync: dbt-full",
+        ]));
+        let output = resolve(resources).unwrap();
+        let on_drift = &output.assets[0].resolved_on_drift;
+        assert_eq!(on_drift.len(), 2);
+        // Default mergePosition is beforeOrigin, so user entry comes first
+        assert_eq!(on_drift[0].conditions_ref, "daily-sla");
+        assert_eq!(on_drift[1].conditions_ref, "quality-checks");
     }
 
     #[test]
