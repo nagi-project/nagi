@@ -207,11 +207,11 @@ impl ServeState {
         }
         match self.suspended_store.remove(asset_name) {
             Ok(()) => {
-                eprintln!("[serve] asset {asset_name} is Ready, auto-unsuspending");
+                tracing::info!(asset = %asset_name, "asset is Ready, auto-unsuspending");
                 self.guardrail.record_sync_success(asset_name);
             }
             Err(e) => {
-                eprintln!("[serve] warning: failed to remove suspended flag for {asset_name}: {e}");
+                tracing::warn!(asset = %asset_name, error = %e, "failed to remove suspended flag");
             }
         }
     }
@@ -306,7 +306,7 @@ impl ServeState {
             execution_id: execution_id.map(|s| s.to_string()),
         };
         if let Err(e) = self.suspended_store.write(&info) {
-            eprintln!("[serve] warning: failed to write suspended flag for {asset_name}: {e}");
+            tracing::warn!(asset = %asset_name, error = %e, "failed to write suspended flag");
         }
     }
 
@@ -395,12 +395,12 @@ impl ServeState {
             return None;
         };
         match &eval_result {
-            Ok(r) => eprintln!("[serve] evaluated {}: ready={}", r.asset_name, r.ready),
-            Err(e) => eprintln!("[serve] evaluation failed for {asset_name}: {e}"),
+            Ok(r) => tracing::info!(asset = %r.asset_name, ready = r.ready, "evaluated"),
+            Err(e) => tracing::error!(asset = %asset_name, error = %e, "evaluation failed"),
         }
         let (propagated, suspended) = self.handle_eval_result(&asset_name, &eval_result);
         for ds in &propagated {
-            eprintln!("[serve] propagating to downstream: {ds}");
+            tracing::debug!(downstream = %ds, "propagating to downstream");
         }
         suspended
     }
@@ -412,11 +412,8 @@ impl ServeState {
             return None;
         };
         match &sync_result {
-            Ok(r) => eprintln!(
-                "[serve] sync completed for {asset_name}: success={}",
-                r.success
-            ),
-            Err(e) => eprintln!("[serve] sync failed for {asset_name}: {e}"),
+            Ok(r) => tracing::info!(asset = %asset_name, success = r.success, "sync completed"),
+            Err(e) => tracing::error!(asset = %asset_name, error = %e, "sync failed"),
         }
         let (success, execution_id) = match &sync_result {
             Ok(r) => (r.success, Some(r.execution_id.as_str())),

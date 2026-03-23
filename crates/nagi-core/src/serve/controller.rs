@@ -46,13 +46,13 @@ async fn drain_sync_tasks(
     if tasks.is_empty() {
         return;
     }
-    eprintln!(
-        "[serve] waiting for {} in-flight sync task(s) to finish",
-        tasks.len()
+    tracing::info!(
+        count = tasks.len(),
+        "waiting for in-flight sync tasks to finish"
     );
     while let Some(result) = tasks.join_next().await {
         if let Ok((name, Err(e))) = result {
-            eprintln!("[serve] sync for {name} failed during shutdown: {e}");
+            tracing::error!(asset = %name, error = %e, "sync failed during shutdown");
         }
     }
 }
@@ -67,7 +67,10 @@ pub(super) async fn await_controller_shutdown(
             Some(timeout) => match tokio::time::timeout(timeout, h).await {
                 Ok(r) => Some(r),
                 Err(_) => {
-                    eprintln!("[serve] controller did not shut down within {timeout:?}, aborting");
+                    tracing::warn!(
+                        ?timeout,
+                        "controller did not shut down within timeout, aborting"
+                    );
                     None
                 }
             },
@@ -76,8 +79,8 @@ pub(super) async fn await_controller_shutdown(
         if let Some(r) = result {
             match r {
                 Ok(Ok(())) => {}
-                Ok(Err(e)) => eprintln!("[serve] controller error: {e}"),
-                Err(e) => eprintln!("[serve] controller task panicked: {e}"),
+                Ok(Err(e)) => tracing::error!(error = %e, "controller error"),
+                Err(e) => tracing::error!(error = %e, "controller task panicked"),
             }
         }
     }
@@ -90,7 +93,7 @@ fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
     };
     tokio::spawn(async move {
         if let Err(e) = n.notify(&event).await {
-            eprintln!("[serve] notification failed: {e}");
+            tracing::warn!(error = %e, "notification failed");
         }
     });
 }
@@ -113,7 +116,7 @@ fn process_eval_outcome(
         if let Err(e) =
             store.write_evaluate_log(&eval_id, eval, &outcome.started_at, &outcome.finished_at)
         {
-            eprintln!("[serve] warning: failed to log evaluation for {name}: {e}");
+            tracing::warn!(asset = %name, error = %e, "failed to log evaluation");
         }
     }
     let event = if let Err(ref e) = outcome.result {
@@ -130,7 +133,7 @@ fn process_eval_outcome(
 /// Writes sync result to log store. Errors are logged but not propagated.
 fn log_sync_result(name: &str, result: &crate::sync::SyncExecutionResult, log_store: &LogStore) {
     if let Err(e) = log_store.write_sync_log(result) {
-        eprintln!("[serve] warning: failed to log sync for {name}: {e}");
+        tracing::warn!(asset = %name, error = %e, "failed to log sync");
     }
 }
 
@@ -211,7 +214,7 @@ pub(super) async fn run_controller(
         // (2) Spawn syncs whose sync ref is not currently in use.
         while let Some(name) = state.next_syncable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
-                eprintln!("[serve] starting sync for {name}");
+                tracing::info!(asset = %name, "starting sync");
                 sync_tasks.spawn(reconciler::spawn_sync(
                     name,
                     yaml.to_string(),
@@ -268,7 +271,7 @@ pub(super) async fn run_controller(
 
             // (d) Shutdown signal received.
             _ = shutdown.changed() => {
-                eprintln!("[serve] shutting down controller");
+                tracing::info!("shutting down controller");
                 break;
             }
         }
@@ -307,7 +310,7 @@ pub(super) fn build_controller_inputs(
                 let compiled: CompiledAsset = match serde_yaml::from_str(yaml) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("[serve] warning: skipping asset {name}: {e}");
+                        tracing::warn!(asset = %name, error = %e, "skipping asset");
                         return None;
                     }
                 };

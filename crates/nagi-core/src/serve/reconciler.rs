@@ -110,7 +110,7 @@ async fn update_source_stats(
     for source in &compiled.spec.sources {
         if let Ok(stats) = conn.table_stats(source).await {
             if let Err(e) = stats_cache.write(source, &stats) {
-                eprintln!("warning: failed to cache source stats for {}: {e}", source);
+                tracing::warn!(source = %source, error = %e, "failed to cache source stats");
             }
         }
     }
@@ -209,7 +209,7 @@ async fn resolve_and_sync(
                 sync_ref: sync_ref.to_string(),
             };
             if let Err(e) = n.notify(&event).await {
-                eprintln!("[serve] warning: notification failed: {e}");
+                tracing::warn!(error = %e, "notification failed");
             }
         }
         return Ok(crate::sync::SyncExecutionResult {
@@ -230,7 +230,7 @@ async fn resolve_and_sync(
     .await;
 
     if let Err(e) = lock.release(sync_ref) {
-        eprintln!("[serve] warning: failed to release sync lock for {sync_ref}: {e}");
+        tracing::warn!(sync_ref = %sync_ref, error = %e, "failed to release sync lock");
     }
 
     result
@@ -255,10 +255,12 @@ async fn acquire_with_retry(
             true => return Ok(true),
             false => {
                 let now = chrono::Utc::now().to_rfc3339();
-                eprintln!(
-                    "[serve] lock for ref '{sync_ref}' held, sync for '{asset_name}' waiting (attempt {}/{})",
-                    attempt + 1,
-                    config.retry_max_attempts
+                tracing::info!(
+                    sync_ref = %sync_ref,
+                    asset = %asset_name,
+                    attempt = attempt + 1,
+                    max_attempts = config.retry_max_attempts,
+                    "lock held, waiting"
                 );
                 write_lock_log(execution_id, asset_name, attempt + 1, "waiting", &now);
                 if attempt + 1 < config.retry_max_attempts {
@@ -272,9 +274,11 @@ async fn acquire_with_retry(
     }
 
     // All retries exhausted — log the skip.
-    eprintln!(
-        "[serve] skipping sync for '{asset_name}': lock for ref '{sync_ref}' unavailable after {} attempts",
-        config.retry_max_attempts
+    tracing::warn!(
+        asset = %asset_name,
+        sync_ref = %sync_ref,
+        attempts = config.retry_max_attempts,
+        "skipping sync, lock unavailable"
     );
     let now = chrono::Utc::now().to_rfc3339();
     write_lock_log(
@@ -297,14 +301,14 @@ fn write_lock_log(
     let log_store = match LogStore::open(&init::default_db_path(), &init::default_logs_dir()) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[serve] warning: failed to open log store for lock skip log: {e}");
+            tracing::warn!(error = %e, "failed to open log store for lock skip log");
             return;
         }
     };
     if let Err(e) =
         log_store.write_sync_lock_log(execution_id, asset_name, attempts, status, timestamp)
     {
-        eprintln!("[serve] warning: failed to write lock skip log: {e}");
+        tracing::warn!(error = %e, "failed to write lock skip log");
     }
 }
 

@@ -106,10 +106,10 @@ impl Cache for RemoteObjectStore {
                     let bytes = block(r.bytes()).map_err(remote_err)?;
                     match serde_json::from_slice::<AssetEvalResult>(&bytes) {
                         Ok(v) => results.push(v),
-                        Err(e) => eprintln!("warning: failed to parse cache entry: {e}"),
+                        Err(e) => tracing::warn!(error = %e, "failed to parse cache entry"),
                     }
                 }
-                Err(e) => eprintln!("warning: failed to read cache entry: {e}"),
+                Err(e) => tracing::warn!(error = %e, "failed to read cache entry"),
             }
         }
         Ok(results)
@@ -166,10 +166,10 @@ impl SuspendedStore for RemoteObjectStore {
                     let bytes = block(r.bytes()).map_err(remote_err)?;
                     match serde_json::from_slice::<SuspendedInfo>(&bytes) {
                         Ok(v) => results.push(v),
-                        Err(e) => eprintln!("warning: failed to parse suspended entry: {e}"),
+                        Err(e) => tracing::warn!(error = %e, "failed to parse suspended entry"),
                     }
                 }
-                Err(e) => eprintln!("warning: failed to read suspended entry: {e}"),
+                Err(e) => tracing::warn!(error = %e, "failed to read suspended entry"),
             }
         }
         Ok(results)

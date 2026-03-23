@@ -78,12 +78,12 @@ pub async fn serve(
     cache_dir: Option<&Path>,
     project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
-    eprintln!("[serve] compiling resources...");
+    tracing::info!("compiling resources...");
     let output = crate::compile::compile(resources_dir, target_dir)?;
-    eprintln!(
-        "[serve] compiled {} node(s), {} edge(s)",
-        output.graph.nodes.len(),
-        output.graph.edges.len()
+    tracing::info!(
+        nodes = output.graph.nodes.len(),
+        edges = output.graph.edges.len(),
+        "compiled"
     );
 
     let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
@@ -147,13 +147,13 @@ pub async fn serve(
         )));
     }
 
-    eprintln!(
-        "[serve] started {} controller(s). Press Ctrl-C to stop.",
-        handles.len()
+    tracing::info!(
+        controllers = handles.len(),
+        "started controllers, press Ctrl-C to stop"
     );
 
     tokio::signal::ctrl_c().await.ok();
-    eprintln!("[serve] received Ctrl-C, shutting down...");
+    tracing::info!("received Ctrl-C, shutting down...");
     shutdown_tx.send(true).ok();
 
     let grace_period = config
