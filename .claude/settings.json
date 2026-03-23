@@ -33,6 +33,7 @@
         "~/.cache/uv",
         "~/.cargo",
         "~/.local/state/mise",
+        ".venv",
         ".git"
       ],
       "denyRead": [
