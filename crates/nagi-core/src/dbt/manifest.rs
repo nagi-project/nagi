@@ -59,89 +59,24 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         ..
     } = origin;
 
-    let mut resources: Vec<NagiKind> = Vec::new();
+    let (source_map, source_resources) = collect_sources(manifest, connection);
+    let (model_names, model_nodes) = collect_models(manifest);
+    let model_tests = collect_model_tests(manifest, &model_names);
 
-    // Collect all source unique_ids to map them to Nagi Source names.
-    let mut source_map: HashMap<String, String> = HashMap::new();
-    let mut seen_source_names: HashSet<String> = HashSet::new();
-    for source in manifest.sources.values() {
-        // Use "source_name.name" as the Nagi Source name to avoid collisions.
-        let nagi_name = format!("{}.{}", source.source_name, source.name);
-        source_map.insert(source.unique_id.clone(), nagi_name.clone());
-        if seen_source_names.insert(nagi_name.clone()) {
-            resources.push(NagiKind::Source {
-                api_version: API_VERSION.to_string(),
-                metadata: Metadata { name: nagi_name },
-                spec: SourceSpec {
-                    connection: connection.clone(),
-                },
-            });
-        }
-    }
-
-    // Single pass: build model lookup and collect model nodes.
-    let mut model_names: HashMap<String, String> = HashMap::new();
-    let mut model_nodes: Vec<&DbtNode> = Vec::new();
-    for node in manifest.nodes.values() {
-        if node.resource_type == "model" {
-            model_names.insert(node.unique_id.clone(), node.name.clone());
-            model_nodes.push(node);
-        }
-    }
-    model_nodes.sort_by_key(|n| &n.name);
-
-    // Collect tests grouped by the model they depend on.
-    let mut model_tests: HashMap<String, Vec<&DbtNode>> = HashMap::new();
-    for node in manifest.nodes.values() {
-        if node.resource_type == "test" {
-            for dep in &node.depends_on.nodes {
-                if model_names.contains_key(dep) {
-                    model_tests.entry(dep.clone()).or_default().push(node);
-                }
-            }
-        }
-    }
-
-    // Collect all tags used across models for Sync generation.
+    let mut resources: Vec<NagiKind> = source_resources;
     let mut all_tag_sets: Vec<Vec<String>> = Vec::new();
 
     for model in &model_nodes {
-        let mut sources_refs = Vec::new();
-        let mut model_deps = Vec::new();
+        let (sources_refs, _model_deps) =
+            resolve_deps(&model.depends_on.nodes, &source_map, &model_names);
 
-        for dep_id in &model.depends_on.nodes {
-            if let Some(source_name) = source_map.get(dep_id) {
-                sources_refs.push(source_name.clone());
-            } else if let Some(model_name) = model_names.get(dep_id) {
-                model_deps.push(model_name.clone());
-            }
+        let (on_drift, conditions_resource) =
+            build_on_drift(model_tests.get(&model.unique_id), &model.name, default_sync);
+
+        if let Some(cond) = conditions_resource {
+            resources.push(cond);
         }
 
-        // Convert dbt tests to a Conditions and on_drift entry.
-        let on_drift = model_tests
-            .get(&model.unique_id)
-            .map(|tests| tests_to_conditions(tests))
-            .filter(|conditions| !conditions.is_empty())
-            .and_then(|conditions| {
-                let group_name = format!("dbt-tests-{}", model.name);
-                resources.push(NagiKind::Conditions {
-                    api_version: API_VERSION.to_string(),
-                    metadata: Metadata {
-                        name: group_name.clone(),
-                    },
-                    spec: crate::kind::condition::ConditionsSpec(conditions),
-                });
-                default_sync.as_ref().map(|sync_name| OnDriftEntry {
-                    conditions: group_name,
-                    sync: sync_name.clone(),
-                    with: HashMap::new(),
-                    merge_position: MergePosition::BeforeOrigin,
-                })
-            })
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        // Collect tags for Sync generation.
         if !model.tags.is_empty() {
             let mut sorted = model.tags.clone();
             sorted.sort();
@@ -162,11 +97,120 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         });
     }
 
-    // Generate tag-based Syncs.
-    let tag_syncs = generate_tag_syncs(&all_tag_sets);
-    resources.extend(tag_syncs);
-
+    resources.extend(generate_tag_syncs(&all_tag_sets));
     resources
+}
+
+/// Maps dbt sources to Nagi Source resources and builds a unique_id → nagi_name lookup.
+fn collect_sources(
+    manifest: &DbtManifest,
+    connection: &str,
+) -> (HashMap<String, String>, Vec<NagiKind>) {
+    let mut source_map: HashMap<String, String> = HashMap::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut resources: Vec<NagiKind> = Vec::new();
+
+    for source in manifest.sources.values() {
+        let nagi_name = format!("{}.{}", source.source_name, source.name);
+        source_map.insert(source.unique_id.clone(), nagi_name.clone());
+        if seen.insert(nagi_name.clone()) {
+            resources.push(NagiKind::Source {
+                api_version: API_VERSION.to_string(),
+                metadata: Metadata { name: nagi_name },
+                spec: SourceSpec {
+                    connection: connection.to_string(),
+                },
+            });
+        }
+    }
+    (source_map, resources)
+}
+
+/// Extracts model nodes sorted by name and builds a unique_id → name lookup.
+fn collect_models(manifest: &DbtManifest) -> (HashMap<String, String>, Vec<&DbtNode>) {
+    let mut model_names: HashMap<String, String> = HashMap::new();
+    let mut model_nodes: Vec<&DbtNode> = Vec::new();
+    for node in manifest.nodes.values() {
+        if node.resource_type == "model" {
+            model_names.insert(node.unique_id.clone(), node.name.clone());
+            model_nodes.push(node);
+        }
+    }
+    model_nodes.sort_by_key(|n| &n.name);
+    (model_names, model_nodes)
+}
+
+/// Groups test nodes by the model unique_id they depend on.
+fn collect_model_tests<'a>(
+    manifest: &'a DbtManifest,
+    model_names: &HashMap<String, String>,
+) -> HashMap<String, Vec<&'a DbtNode>> {
+    let mut model_tests: HashMap<String, Vec<&DbtNode>> = HashMap::new();
+    for node in manifest.nodes.values() {
+        if node.resource_type == "test" {
+            for dep in &node.depends_on.nodes {
+                if model_names.contains_key(dep) {
+                    model_tests.entry(dep.clone()).or_default().push(node);
+                }
+            }
+        }
+    }
+    model_tests
+}
+
+/// Classifies dependency ids into source refs and model deps.
+fn resolve_deps(
+    dep_ids: &[String],
+    source_map: &HashMap<String, String>,
+    model_names: &HashMap<String, String>,
+) -> (Vec<String>, Vec<String>) {
+    let mut sources = Vec::new();
+    let mut models = Vec::new();
+    for dep_id in dep_ids {
+        if let Some(source_name) = source_map.get(dep_id) {
+            sources.push(source_name.clone());
+        } else if let Some(model_name) = model_names.get(dep_id) {
+            models.push(model_name.clone());
+        }
+    }
+    (sources, models)
+}
+
+/// Builds on_drift entries and an optional Conditions resource from model tests.
+fn build_on_drift(
+    tests: Option<&Vec<&DbtNode>>,
+    model_name: &str,
+    default_sync: &Option<String>,
+) -> (Vec<OnDriftEntry>, Option<NagiKind>) {
+    let conditions = tests
+        .map(|t| tests_to_conditions(t))
+        .filter(|c| !c.is_empty());
+
+    let Some(conditions) = conditions else {
+        return (Vec::new(), None);
+    };
+
+    let group_name = format!("dbt-tests-{model_name}");
+    let conditions_resource = NagiKind::Conditions {
+        api_version: API_VERSION.to_string(),
+        metadata: Metadata {
+            name: group_name.clone(),
+        },
+        spec: crate::kind::condition::ConditionsSpec(conditions),
+    };
+
+    let on_drift = default_sync
+        .as_ref()
+        .map(|sync_name| OnDriftEntry {
+            conditions: group_name,
+            sync: sync_name.clone(),
+            with: HashMap::new(),
+            merge_position: MergePosition::BeforeOrigin,
+        })
+        .into_iter()
+        .collect();
+
+    (on_drift, Some(conditions_resource))
 }
 
 /// Converts dbt tests into Nagi DesiredCondition entries.
@@ -612,6 +656,118 @@ mod tests {
         } else {
             panic!("expected Source");
         }
+    }
+
+    #[test]
+    fn collect_sources_deduplicates() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let (source_map, source_resources) = collect_sources(&manifest, "my-bigquery");
+
+        assert_eq!(source_map.len(), 2);
+        assert_eq!(source_resources.len(), 2);
+        assert_eq!(
+            source_map.get("source.jaffle_shop.raw.customers").unwrap(),
+            "raw.customers"
+        );
+    }
+
+    #[test]
+    fn collect_models_sorted_by_name() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let (model_names, model_nodes) = collect_models(&manifest);
+
+        assert_eq!(model_names.len(), 4);
+        let names: Vec<&str> = model_nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["customers", "orders", "stg_customers", "stg_orders"]
+        );
+    }
+
+    #[test]
+    fn collect_model_tests_groups_by_model() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let (model_names, _) = collect_models(&manifest);
+        let tests = collect_model_tests(&manifest, &model_names);
+
+        assert_eq!(tests.get("model.jaffle_shop.customers").unwrap().len(), 2);
+        assert_eq!(tests.get("model.jaffle_shop.orders").unwrap().len(), 1);
+        assert!(!tests.contains_key("model.jaffle_shop.stg_customers"));
+    }
+
+    #[test]
+    fn resolve_deps_classifies_source_and_model() {
+        let source_map: HashMap<String, String> = [(
+            "source.jaffle_shop.raw.orders".to_string(),
+            "raw.orders".to_string(),
+        )]
+        .into_iter()
+        .collect();
+        let model_names: HashMap<String, String> = [(
+            "model.jaffle_shop.stg_orders".to_string(),
+            "stg_orders".to_string(),
+        )]
+        .into_iter()
+        .collect();
+        let deps = vec![
+            "source.jaffle_shop.raw.orders".to_string(),
+            "model.jaffle_shop.stg_orders".to_string(),
+            "unknown.id".to_string(),
+        ];
+        let (sources, models) = resolve_deps(&deps, &source_map, &model_names);
+        assert_eq!(sources, vec!["raw.orders"]);
+        assert_eq!(models, vec!["stg_orders"]);
+    }
+
+    #[test]
+    fn build_on_drift_returns_empty_without_tests() {
+        let (on_drift, conditions) =
+            build_on_drift(None, "my_model", &Some("sync-name".to_string()));
+        assert!(on_drift.is_empty());
+        assert!(conditions.is_none());
+    }
+
+    #[test]
+    fn build_on_drift_returns_empty_without_default_sync() {
+        let test_node = DbtNode {
+            unique_id: "test.pkg.t1".to_string(),
+            resource_type: "test".to_string(),
+            name: "t1".to_string(),
+            package_name: "pkg".to_string(),
+            tags: vec![],
+            depends_on: DbtDependsOn { nodes: vec![] },
+            test_metadata: Some(DbtTestMetadata {
+                name: "not_null".to_string(),
+                kwargs: HashMap::new(),
+            }),
+        };
+        let tests = vec![&test_node];
+        let (on_drift, conditions) = build_on_drift(Some(&tests), "my_model", &None);
+        assert!(on_drift.is_empty());
+        assert!(conditions.is_some(), "Conditions should still be generated");
+    }
+
+    #[test]
+    fn build_on_drift_with_tests_and_sync() {
+        let test_node = DbtNode {
+            unique_id: "test.pkg.t1".to_string(),
+            resource_type: "test".to_string(),
+            name: "t1".to_string(),
+            package_name: "pkg".to_string(),
+            tags: vec![],
+            depends_on: DbtDependsOn { nodes: vec![] },
+            test_metadata: Some(DbtTestMetadata {
+                name: "not_null".to_string(),
+                kwargs: HashMap::new(),
+            }),
+        };
+        let tests = vec![&test_node];
+        let (on_drift, conditions) =
+            build_on_drift(Some(&tests), "my_model", &Some("default-sync".to_string()));
+        assert_eq!(on_drift.len(), 1);
+        assert_eq!(on_drift[0].sync, "default-sync");
+        assert_eq!(on_drift[0].conditions, "dbt-tests-my_model");
+        assert!(conditions.is_some());
     }
 
     #[test]
