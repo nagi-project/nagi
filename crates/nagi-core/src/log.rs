@@ -1,6 +1,7 @@
 mod evaluate;
 mod file;
 mod schema;
+pub mod subscriber;
 mod sync;
 
 use std::path::{Path, PathBuf};

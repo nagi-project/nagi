@@ -26,6 +26,7 @@ use pyo3::prelude::*;
 #[pymodule]
 #[pyo3(name = "_nagi_core")]
 fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    log::subscriber::init();
     m.add_function(wrap_pyfunction!(py::load_dbt_profiles, m)?)?;
     m.add_function(wrap_pyfunction!(py::evaluate_all, m)?)?;
     m.add_function(wrap_pyfunction!(py::compile_assets, m)?)?;
