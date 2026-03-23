@@ -94,6 +94,8 @@ pub enum ResolvedConnection {
     /// Connection resolved via dbt profiles.yml.
     #[serde(rename_all = "camelCase")]
     DbtProfile {
+        /// Original Connection resource name.
+        name: String,
         profile: String,
         target: Option<String>,
         /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
@@ -256,6 +258,13 @@ pub fn resolve_asset_names(
         .collect();
     names.sort();
     Ok(names)
+}
+
+/// Loads and parses the dependency graph from `target/graph.json`.
+pub fn load_graph(target_dir: &Path) -> Result<DependencyGraph, CompileError> {
+    let graph_path = target_dir.join("graph.json");
+    let graph_json = std::fs::read_to_string(&graph_path).map_err(CompileError::Io)?;
+    serde_json::from_str(&graph_json).map_err(|e| CompileError::ManifestParse(e.to_string()))
 }
 
 /// Resolves asset names from a compiled target directory.
@@ -521,8 +530,13 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             .sources
             .first()
             .and_then(|s| source_connections.get(s))
-            .and_then(|conn_name| connections.get(conn_name))
-            .map(|conn_spec| ResolvedConnection::DbtProfile {
+            .and_then(|conn_name| {
+                connections
+                    .get(conn_name)
+                    .map(|spec| (conn_name.clone(), spec))
+            })
+            .map(|(conn_name, conn_spec)| ResolvedConnection::DbtProfile {
+                name: conn_name,
                 profile: conn_spec.dbt_profile.profile.clone(),
                 target: conn_spec.dbt_profile.target.clone(),
                 dbt_cloud_credentials_file: conn_spec.dbt_cloud.as_ref().map(|c| {

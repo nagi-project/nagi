@@ -81,7 +81,19 @@ pub fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
     Ok(dirs.join(", "))
 }
 
+<<<<<<< HEAD
 // ── Sync ─────────────────────────────────────────────────────────────────────
+=======
+/// Lists all compiled resources in target/ as JSON.
+#[pyfunction]
+#[pyo3(signature = (target_dir))]
+pub fn list_resources(target_dir: &str) -> PyResult<String> {
+    let output = crate::ls::ls(std::path::Path::new(target_dir)).map_err(to_py_err)?;
+    serde_json::to_string(&output).map_err(to_py_err)
+}
+
+// ── Sync / Resync ────────────────────────────────────────────────────────────
+>>>>>>> worktree-feat-agent-tooling
 
 /// Builds sync proposals for all compiled assets matching selectors.
 /// Returns JSON array of proposals. Each proposal contains an opaque `_index`
