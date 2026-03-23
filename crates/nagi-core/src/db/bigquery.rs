@@ -454,13 +454,11 @@ impl Connection for BigQueryConnection {
         }
 
         let dml_resp: DmlResponse = resp.json().await?;
-        if let Some(errors) = dml_resp.errors {
-            if let Some(first) = errors.first() {
-                return Err(ConnectionError::QueryFailed(format!(
-                    "execute_sql error: {}",
-                    first.message
-                )));
-            }
+        if let Some(msg) = dml_resp.errors.as_deref().and_then(|e| e.first()) {
+            return Err(ConnectionError::QueryFailed(format!(
+                "execute_sql error: {}",
+                msg.message
+            )));
         }
 
         Ok(())
@@ -531,13 +529,11 @@ impl Connection for BigQueryConnection {
             .json()
             .await?;
 
-        if let Some(status) = resp.status {
-            if let Some(err) = status.error_result {
-                return Err(ConnectionError::QueryFailed(format!(
-                    "load job failed: {}",
-                    err.message
-                )));
-            }
+        if let Some(err) = resp.status.and_then(|s| s.error_result) {
+            return Err(ConnectionError::QueryFailed(format!(
+                "load job failed: {}",
+                err.message
+            )));
         }
         Ok(())
     }
