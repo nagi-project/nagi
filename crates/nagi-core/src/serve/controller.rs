@@ -159,13 +159,17 @@ fn compute_min_interval(on_drift: &[ResolvedOnDriftEntry]) -> Option<StdDuration
 pub(super) async fn run_controller(
     input: ControllerInput,
     backend: BackendStores,
-    cache_dir: Option<PathBuf>,
     notifier: Option<Arc<dyn Notifier>>,
     log_store: Option<LogStore>,
     lock_config: reconciler::LockConfig,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
-    let ControllerInput { assets, edges } = input;
+    let ControllerInput {
+        assets,
+        edges,
+        cache_dir,
+        source_stats_dir,
+    } = input;
     let BackendStores {
         sync_lock,
         suspended_store,
@@ -206,7 +210,7 @@ pub(super) async fn run_controller(
                     name,
                     yaml.to_string(),
                     cache_dir.clone(),
-                    None,
+                    source_stats_dir.clone(),
                 ));
             }
         }
@@ -285,9 +289,12 @@ pub(super) async fn run_controller(
 }
 
 /// Input for one Controller: assets with their YAML and intervals, plus edges.
+#[derive(Debug)]
 pub(super) struct ControllerInput {
     pub(super) assets: Vec<AssetEntry>,
     pub(super) edges: Vec<GraphEdge>,
+    pub(super) cache_dir: Option<PathBuf>,
+    pub(super) source_stats_dir: Option<PathBuf>,
 }
 
 /// Builds per-component [`ControllerInput`]s from the graph and compiled assets.
@@ -342,7 +349,12 @@ pub(super) fn build_controller_inputs(
             .cloned()
             .collect();
 
-        inputs.push(ControllerInput { assets, edges });
+        inputs.push(ControllerInput {
+            assets,
+            edges,
+            cache_dir: None,
+            source_stats_dir: None,
+        });
     }
 
     Ok(inputs)
@@ -525,7 +537,7 @@ mod tests {
     async fn drain_sync_tasks_handles_errors() {
         let mut tasks = JoinSet::new();
         tasks.spawn(async {
-            let err = SyncError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test error"));
+            let err = SyncError::Io(std::io::Error::other("test error"));
             ("a".to_string(), Err(err))
         });
 

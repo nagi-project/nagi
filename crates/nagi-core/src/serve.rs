@@ -78,74 +78,19 @@ pub async fn serve(
     cache_dir: Option<&Path>,
     project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
+    let config = crate::config::load_config(project_dir.unwrap_or(Path::new(".")))
+        .map_err(|e| ServeError::Parse(format!("failed to load config: {e}")))?;
+
     tracing::info!("compiling resources...");
-    let output = crate::compile::compile(resources_dir, target_dir)?;
+    let output = crate::compile::compile(resources_dir, target_dir, config.export.as_ref())?;
     tracing::info!(
         nodes = output.graph.nodes.len(),
         edges = output.graph.edges.len(),
         "compiled"
     );
 
-    let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
-
-    let graph_path = target_dir.join("graph.json");
-    let graph_json = std::fs::read_to_string(&graph_path)?;
-    let graph: DependencyGraph =
-        serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
-
-    let config = crate::config::load_config(project_dir.unwrap_or(Path::new(".")))
-        .map_err(|e| ServeError::Parse(format!("failed to load config: {e}")))?;
-
-    let notifier = build_notifier(project_dir);
-
-    let db_path = config.db_path();
-    let logs_dir = config.logs_dir();
-
-    let asset_map: HashMap<String, String> = assets.into_iter().collect();
-    let inputs = build_controller_inputs(&graph, &asset_map)?;
-
-    if let Some(max) = config.max_controllers {
-        if inputs.len() > max {
-            return Err(ServeError::Parse(format!(
-                "dependency graph has {} connected components, but maxControllers is set to {}. \
-                 Reduce the number of independent asset groups or increase maxControllers in nagi.yaml.",
-                inputs.len(),
-                max
-            )));
-        }
-    }
-
-    // Build storage backends from config.
-    let base_backend = build_backend_stores(&config)?;
-
-    let (shutdown_tx, _) = watch::channel(false);
-
-    let lc = reconciler::LockConfig {
-        ttl_seconds: config.lock_ttl_seconds,
-        retry_interval_seconds: config.lock_retry_interval_seconds,
-        retry_max_attempts: config.lock_retry_max_attempts,
-    };
-
-    let mut handles = Vec::new();
-    for input in inputs {
-        let rx = shutdown_tx.subscribe();
-        let cd = cache_dir.map(PathBuf::from);
-        let n = notifier.clone();
-        // LogStore uses rusqlite::Connection which is !Send, so each controller
-        // needs its own instance.
-        let store = LogStore::open(&db_path, &logs_dir)
-            .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
-        let backend = base_backend.clone();
-        handles.push(tokio::spawn(run_controller(
-            input,
-            backend,
-            cd,
-            n,
-            Some(store),
-            lc,
-            rx,
-        )));
-    }
+    let inputs = load_controller_inputs(target_dir, selectors, &config, cache_dir)?;
+    let (shutdown_tx, handles) = spawn_controllers(inputs, &config, project_dir)?;
 
     tracing::info!(
         controllers = handles.len(),
@@ -162,7 +107,138 @@ pub async fn serve(
 
     await_controller_shutdown(handles, grace_period).await;
 
+    run_final_export(&config, resources_dir).await;
+
     Ok(())
+}
+
+/// Loads compiled assets and the dependency graph, then partitions into controller inputs.
+fn load_controller_inputs(
+    target_dir: &Path,
+    selectors: &[&str],
+    config: &crate::config::NagiConfig,
+    cache_dir: Option<&Path>,
+) -> Result<Vec<controller::ControllerInput>, ServeError> {
+    let assets = crate::compile::load_compiled_assets(target_dir, selectors)?;
+
+    let graph_path = target_dir.join("graph.json");
+    let graph_json = std::fs::read_to_string(&graph_path)?;
+    let graph: DependencyGraph =
+        serde_json::from_str(&graph_json).map_err(|e| ServeError::Parse(e.to_string()))?;
+
+    let asset_map: HashMap<String, String> = assets.into_iter().collect();
+    let mut inputs = build_controller_inputs(&graph, &asset_map)?;
+
+    if let Some(max) = config.max_controllers {
+        if inputs.len() > max {
+            return Err(ServeError::Parse(format!(
+                "dependency graph has {} connected components, but maxControllers is set to {}. \
+                 Reduce the number of independent asset groups or increase maxControllers in nagi.yaml.",
+                inputs.len(),
+                max
+            )));
+        }
+    }
+
+    let resolved_cache = Some(
+        cache_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| config.cache_dir()),
+    );
+    let resolved_stats = Some(config.source_stats_dir());
+    for input in &mut inputs {
+        input.cache_dir = resolved_cache.clone();
+        input.source_stats_dir = resolved_stats.clone();
+    }
+
+    Ok(inputs)
+}
+
+type ControllerHandle = tokio::task::JoinHandle<Result<(), ServeError>>;
+
+/// Spawns one controller task per input, returning the shutdown channel and task handles.
+fn spawn_controllers(
+    inputs: Vec<controller::ControllerInput>,
+    config: &crate::config::NagiConfig,
+    project_dir: Option<&Path>,
+) -> Result<(watch::Sender<bool>, Vec<ControllerHandle>), ServeError> {
+    let notifier = build_notifier(project_dir);
+    let base_backend = build_backend_stores(config)?;
+    let db_path = config.db_path();
+    let logs_dir = config.logs_dir();
+
+    let lc = reconciler::LockConfig {
+        ttl_seconds: config.lock_ttl_seconds,
+        retry_interval_seconds: config.lock_retry_interval_seconds,
+        retry_max_attempts: config.lock_retry_max_attempts,
+    };
+
+    let (shutdown_tx, _) = watch::channel(false);
+
+    let mut handles = Vec::new();
+    for input in inputs {
+        let rx = shutdown_tx.subscribe();
+        let n = notifier.clone();
+        let store = LogStore::open(&db_path, &logs_dir)
+            .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
+        let backend = base_backend.clone();
+        handles.push(tokio::spawn(run_controller(
+            input,
+            backend,
+            n,
+            Some(store),
+            lc,
+            rx,
+        )));
+    }
+
+    Ok((shutdown_tx, handles))
+}
+
+/// Runs a final export of all log tables during graceful shutdown.
+/// Failures are logged as warnings and do not propagate.
+async fn run_final_export(config: &crate::config::NagiConfig, resources_dir: &Path) {
+    let export_config = match config.export {
+        Some(ref c) => c,
+        None => return,
+    };
+
+    tracing::info!("running final export...");
+    let db_path = config.db_path();
+    let logs_dir = config.logs_dir();
+    let wm_dir = crate::export::watermarks_dir(&config.nagi_dir);
+
+    let log_store = match crate::log::LogStore::open(&db_path, &logs_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(%e, "failed to open log store for export");
+            return;
+        }
+    };
+
+    let conn =
+        match crate::export::resolve_export_connection(resources_dir, &export_config.connection) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(%e, "export connection resolution failed");
+                return;
+            }
+        };
+
+    let remote_store = crate::storage::remote::create_remote_store(&config.backend).ok();
+    let results = crate::export::export_all(
+        &log_store,
+        conn.as_ref(),
+        remote_store.as_ref(),
+        export_config,
+        &wm_dir,
+        &[],
+    )
+    .await;
+
+    for r in &results {
+        tracing::info!(table = %r.table, rows = r.rows_exported, "export complete");
+    }
 }
 
 /// Creates [`BackendStores`] from the backend config.
@@ -246,4 +322,97 @@ pub fn halt(target_dir: &Path, reason: &str, nagi_dir: &Path) -> Result<Vec<Stri
         halted.push(name);
     }
     Ok(halted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compile::{DependencyGraph, GraphEdge, GraphNode};
+
+    fn setup_target(dir: &Path, asset_names: &[&str], edges: &[(&str, &str)]) {
+        let assets_dir = dir.join("assets");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+
+        let graph = DependencyGraph {
+            nodes: asset_names
+                .iter()
+                .map(|n| GraphNode {
+                    name: n.to_string(),
+                    kind: "Asset".to_string(),
+                    tags: vec![],
+                })
+                .collect(),
+            edges: edges
+                .iter()
+                .map(|(f, t)| GraphEdge {
+                    from: f.to_string(),
+                    to: t.to_string(),
+                })
+                .collect(),
+        };
+        std::fs::write(
+            dir.join("graph.json"),
+            serde_json::to_string(&graph).unwrap(),
+        )
+        .unwrap();
+
+        for name in asset_names {
+            let yaml = format!(
+                "apiVersion: nagi.io/v1alpha1\nmetadata:\n  name: {name}\nspec:\n  sources: []\n  onDrift: []\n  autoSync: false\n  tags: []\n"
+            );
+            std::fs::write(assets_dir.join(format!("{name}.yaml")), yaml).unwrap();
+        }
+    }
+
+    #[test]
+    fn build_backend_stores_rejects_unknown_type() {
+        let config = crate::config::NagiConfig {
+            backend: crate::config::BackendConfig {
+                r#type: "redis".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(build_backend_stores(&config).is_err());
+    }
+
+    #[test]
+    fn load_controller_inputs_returns_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        setup_target(&target, &["a", "b"], &[]);
+
+        let config = crate::config::NagiConfig::default();
+        let inputs = load_controller_inputs(&target, &[], &config, None).unwrap();
+        // Two independent assets → two components
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs[0].cache_dir.is_some());
+        assert!(inputs[0].source_stats_dir.is_some());
+    }
+
+    #[test]
+    fn load_controller_inputs_rejects_exceeding_max_controllers() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        setup_target(&target, &["a", "b", "c"], &[]);
+
+        let config = crate::config::NagiConfig {
+            max_controllers: Some(2),
+            ..Default::default()
+        };
+        let err = load_controller_inputs(&target, &[], &config, None).unwrap_err();
+        assert!(err.to_string().contains("3 connected components"));
+    }
+
+    #[test]
+    fn load_controller_inputs_respects_cache_dir_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        setup_target(&target, &["a"], &[]);
+
+        let config = crate::config::NagiConfig::default();
+        let custom = dir.path().join("custom-cache");
+        let inputs = load_controller_inputs(&target, &[], &config, Some(custom.as_path())).unwrap();
+        assert_eq!(inputs[0].cache_dir, Some(custom));
+    }
 }

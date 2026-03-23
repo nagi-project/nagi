@@ -37,6 +37,22 @@ pub struct StatusResult {
     pub assets: Vec<AssetStatus>,
 }
 
+/// Collects convergence status using config-derived paths.
+pub fn asset_status_for_config(
+    config: &crate::config::NagiConfig,
+    target_dir: &Path,
+    selectors: &[&str],
+) -> Result<StatusResult, StatusError> {
+    asset_status(
+        target_dir,
+        selectors,
+        Some(config.cache_dir().as_path()),
+        &config.db_path(),
+        &config.logs_dir(),
+        Some(config.suspended_dir().as_path()),
+    )
+}
+
 /// Collects convergence status for compiled assets: cached evaluation + latest sync log + suspended state.
 pub fn asset_status(
     target_dir: &Path,
@@ -48,10 +64,11 @@ pub fn asset_status(
 ) -> Result<StatusResult, StatusError> {
     let asset_names = compile::resolve_compiled_asset_names(target_dir, selectors)?;
 
-    let cache_path = cache_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::config::default_nagi_dir().join("cache"));
-    let cache = LocalCache::new(cache_path);
+    let cache = LocalCache::new(
+        cache_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| crate::config::resolve_nagi_dir(Path::new(".")).join("cache")),
+    );
 
     let store = if db_path.exists() {
         Some(LogStore::open(db_path, logs_dir)?)

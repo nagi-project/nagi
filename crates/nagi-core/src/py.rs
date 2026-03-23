@@ -46,11 +46,15 @@ pub fn evaluate_all(
     dry_run: bool,
 ) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
+    let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
+    let resolved_cache = cache_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| nagi_dir.join("cache"));
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::evaluate::evaluate_all(
         std::path::Path::new(target_dir),
         &selector_refs,
-        cache_dir.map(std::path::Path::new),
+        Some(resolved_cache.as_path()),
         dry_run,
     ))
     .map_err(to_py_err)
@@ -59,10 +63,21 @@ pub fn evaluate_all(
 /// Compiles resources and returns a summary JSON.
 /// Returns: `{"nodes": N, "edges": N, "target": "..."}`
 #[pyfunction]
-pub fn compile_assets(resources_dir: &str, target_dir: &str) -> PyResult<String> {
+#[pyo3(signature = (resources_dir, target_dir, project_dir=None))]
+pub fn compile_assets(
+    resources_dir: &str,
+    target_dir: &str,
+    project_dir: Option<&str>,
+) -> PyResult<String> {
     let resources_path = std::path::Path::new(resources_dir);
     let target_path = std::path::Path::new(target_dir);
-    let output = crate::compile::compile(resources_path, target_path).map_err(to_py_err)?;
+    let config = project_dir
+        .map(|d| crate::config::load_config(std::path::Path::new(d)))
+        .transpose()
+        .map_err(to_py_err)?;
+    let export_config = config.as_ref().and_then(|c| c.export.as_ref());
+    let output =
+        crate::compile::compile(resources_path, target_path, export_config).map_err(to_py_err)?;
     let summary = serde_json::json!({
         "nodes": output.graph.nodes.len(),
         "edges": output.graph.edges.len(),
@@ -171,27 +186,76 @@ pub fn asset_status(
     logs_dir: Option<&str>,
     suspended_dir: Option<&str>,
 ) -> PyResult<String> {
-    let nagi_dir = crate::config::default_nagi_dir();
+    let config = crate::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
     let db = db_path
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| nagi_dir.join("logs.db"));
+        .unwrap_or_else(|| config.db_path());
     let logs = logs_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| nagi_dir.join("logs"));
-    let suspended = suspended_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| nagi_dir.join("suspended"));
+        .unwrap_or_else(|| config.logs_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::status::asset_status(
         std::path::Path::new(target_dir),
         &selector_refs,
-        cache_dir.map(std::path::Path::new),
+        Some(
+            cache_dir
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| config.cache_dir())
+                .as_path(),
+        ),
         &db,
         &logs,
-        Some(&suspended),
+        Some(
+            suspended_dir
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| config.suspended_dir())
+                .as_path(),
+        ),
     )
     .map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+
+/// Runs export dry-run and returns JSON array of results.
+#[pyfunction]
+#[pyo3(signature = (select=None))]
+pub fn export_dry_run(select: Option<&str>) -> PyResult<String> {
+    let config = crate::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
+    let results = crate::export::dry_run_for_config(&config, select).map_err(to_py_err)?;
+    serde_json::to_string(&results).map_err(to_py_err)
+}
+
+/// Runs full export and returns JSON array of results.
+#[pyfunction]
+#[pyo3(signature = (select=None, resources_dir="resources"))]
+pub fn export_logs(select: Option<&str>, resources_dir: &str) -> PyResult<String> {
+    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
+    let config = crate::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
+    let results = rt
+        .block_on(crate::export::export_for_config(
+            &config,
+            std::path::Path::new(resources_dir),
+            select,
+        ))
+        .map_err(to_py_err)?;
+    serde_json::to_string(&results).map_err(to_py_err)
+}
+
+/// Attempts export if configured and interval has elapsed.
+/// Failures are logged as warnings and do not affect the caller.
+#[pyfunction]
+#[pyo3(signature = (resources_dir="resources", project_dir="."))]
+pub fn try_export(resources_dir: &str, project_dir: &str) {
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(_) => return,
+    };
+    rt.block_on(crate::export::try_export(
+        std::path::Path::new(resources_dir),
+        std::path::Path::new(project_dir),
+    ));
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -238,7 +302,7 @@ pub fn serve(
 #[pyfunction]
 #[pyo3(signature = (selectors))]
 pub fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
-    let nagi_dir = crate::config::default_nagi_dir();
+    let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::serve::resume(&selector_refs, &nagi_dir).map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
@@ -247,7 +311,7 @@ pub fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (target_dir, reason=None))]
 pub fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
-    let nagi_dir = crate::config::default_nagi_dir();
+    let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
     let r = reason.unwrap_or("manual halt");
     let result =
         crate::serve::halt(std::path::Path::new(target_dir), r, &nagi_dir).map_err(to_py_err)?;
@@ -260,26 +324,8 @@ pub fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (base_dir, entries_json))]
 pub fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<String> {
-    let raw: Vec<serde_json::Value> = serde_json::from_str(entries_json).map_err(to_py_err)?;
-    let entries: Vec<crate::init::DbtProjectEntry> = raw
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            let project_dir = v["projectDir"]
-                .as_str()
-                .ok_or_else(|| to_py_err(format!("entries[{i}] missing projectDir")))?
-                .to_string();
-            let profile = v["profile"]
-                .as_str()
-                .ok_or_else(|| to_py_err(format!("entries[{i}] missing profile")))?
-                .to_string();
-            Ok(crate::init::DbtProjectEntry {
-                project_dir,
-                profile,
-                target: v["target"].as_str().map(String::from),
-            })
-        })
-        .collect::<PyResult<Vec<_>>>()?;
+    let entries: Vec<crate::init::DbtProjectEntry> =
+        serde_json::from_str(entries_json).map_err(to_py_err)?;
     let result = crate::init::write_init_dbt_files(std::path::Path::new(base_dir), &entries)
         .map_err(to_py_err)?;
     let json = serde_json::json!({

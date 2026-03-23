@@ -27,6 +27,30 @@ pub enum LogError {
     InvalidAssetName(String),
 }
 
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
 /// Extracts YYYY-MM-DD from an ISO 8601 timestamp.
 /// Defense against panic on malformed input (slice out-of-bounds).
 fn parse_date(timestamp: &str) -> Result<&str, LogError> {
@@ -61,6 +85,9 @@ fn sanitize_path_component(name: &str) -> Result<String, LogError> {
     Ok(name.to_string())
 }
 
+/// Callback for transforming a row before writing to JSONL.
+pub type RowTransform = dyn Fn(&mut serde_json::Map<String, serde_json::Value>);
+
 /// Handle for the logging subsystem.
 /// Manages SQLite metadata and file-based stdout/stderr storage.
 pub struct LogStore {
@@ -80,6 +107,80 @@ impl LogStore {
         })
     }
 
+    /// Executes a SQL query that returns a single scalar i64 value.
+    pub fn query_row(&self, sql: &str, params: impl rusqlite::Params) -> Result<i64, LogError> {
+        Ok(self.conn.query_row(sql, params, |row| row.get(0))?)
+    }
+
+    /// Extracts rows from a table where rowid > last_rowid, writing each row
+    /// as a JSON object to the provided writer. Returns the max rowid seen
+    /// and the number of rows written.
+    ///
+    /// `transform_row` is called for each row to allow rewriting fields
+    /// (e.g. replacing local file paths with remote URIs).
+    pub fn extract_rows_jsonl<W: std::io::Write>(
+        &self,
+        table: &str,
+        last_rowid: i64,
+        writer: &mut W,
+        transform_row: Option<&RowTransform>,
+    ) -> Result<(i64, i64), LogError> {
+        let sql = format!(
+            "SELECT rowid, * FROM {} WHERE rowid > ?1 ORDER BY rowid",
+            table
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let column_names: Vec<String> = stmt
+            .column_names()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let mut max_rowid = last_rowid;
+        let mut count: i64 = 0;
+
+        let mut rows = stmt.query(rusqlite::params![last_rowid])?;
+        while let Some(row) = rows.next()? {
+            let rowid: i64 = row.get(0)?;
+            max_rowid = rowid;
+
+            let mut map = serde_json::Map::new();
+            // Skip column 0 (rowid) - start from 1
+            for (i, name) in column_names.iter().enumerate().skip(1) {
+                let value: rusqlite::types::Value = row.get(i)?;
+                let json_val = match value {
+                    rusqlite::types::Value::Null => serde_json::Value::Null,
+                    rusqlite::types::Value::Integer(n) => serde_json::Value::Number(n.into()),
+                    rusqlite::types::Value::Real(f) => serde_json::json!(f),
+                    rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
+                    rusqlite::types::Value::Blob(b) => serde_json::Value::String(base64_encode(&b)),
+                };
+                map.insert(name.clone(), json_val);
+            }
+
+            if let Some(transform) = transform_row {
+                transform(&mut map);
+            }
+
+            serde_json::to_writer(&mut *writer, &serde_json::Value::Object(map))
+                .map_err(|e| LogError::Io(std::io::Error::other(e.to_string())))?;
+            writeln!(writer).map_err(LogError::Io)?;
+            count += 1;
+        }
+
+        Ok((max_rowid, count))
+    }
+
+    /// Prepares a SQL statement for querying.
+    pub fn prepare(&self, sql: &str) -> Result<rusqlite::Statement<'_>, LogError> {
+        Ok(self.conn.prepare(sql)?)
+    }
+
+    /// Returns the logs directory path.
+    pub fn logs_dir(&self) -> &Path {
+        &self.logs_dir
+    }
+
     /// Opens an in-memory database (for testing).
     #[cfg(test)]
     pub fn open_in_memory(logs_dir: &Path) -> Result<Self, LogError> {
@@ -89,6 +190,12 @@ impl LogStore {
             conn,
             logs_dir: logs_dir.to_path_buf(),
         })
+    }
+
+    /// Executes a batch of SQL statements (for testing).
+    #[cfg(test)]
+    pub fn execute_batch(&self, sql: &str) -> Result<(), LogError> {
+        Ok(self.conn.execute_batch(sql)?)
     }
 }
 

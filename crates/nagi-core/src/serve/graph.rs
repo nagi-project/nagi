@@ -150,7 +150,7 @@ mod tests {
             &vec!["b".to_string(), "c".to_string()]
         );
         assert_eq!(map.get("b").unwrap(), &vec!["c".to_string()]);
-        assert!(map.get("c").is_none());
+        assert!(!map.contains_key("c"));
     }
 
     #[test]

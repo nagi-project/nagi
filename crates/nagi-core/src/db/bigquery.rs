@@ -95,7 +95,7 @@ fn require_str(
 
 // ── Token acquisition ────────────────────────────────────────────────────────
 
-const BIGQUERY_SCOPE: &str = "https://www.googleapis.com/auth/bigquery.readonly";
+const BIGQUERY_SCOPE: &str = "https://www.googleapis.com/auth/bigquery";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 /// Maximum allowed JWT lifetime for Google service accounts (enforced by Google).
 const JWT_LIFETIME_SECS: u64 = 3600;
@@ -393,6 +393,153 @@ impl Connection for BigQueryConnection {
             num_rows: parse_u64_field(&resp.num_rows, "numRows")?,
             num_bytes: parse_u64_field(&resp.num_bytes, "numBytes")?,
         })
+    }
+
+    async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError> {
+        let token = self.access_token().await?;
+        let url = format!(
+            "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
+            self.config.project
+        );
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct QueryRequest<'a> {
+            query: &'a str,
+            use_legacy_sql: bool,
+            default_dataset: DatasetRef<'a>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            timeout_ms: Option<u32>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DatasetRef<'a> {
+            project_id: &'a str,
+            dataset_id: &'a str,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DmlResponse {
+            #[serde(default)]
+            errors: Option<Vec<DmlError>>,
+        }
+        #[derive(Deserialize)]
+        struct DmlError {
+            message: String,
+        }
+
+        let body = QueryRequest {
+            query: sql,
+            use_legacy_sql: false,
+            default_dataset: DatasetRef {
+                project_id: &self.config.project,
+                dataset_id: &self.config.dataset,
+            },
+            timeout_ms: self.config.timeout_ms,
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ConnectionError::QueryFailed(format!(
+                "execute_sql failed: {body}"
+            )));
+        }
+
+        let dml_resp: DmlResponse = resp.json().await?;
+        if let Some(errors) = dml_resp.errors {
+            if let Some(first) = errors.first() {
+                return Err(ConnectionError::QueryFailed(format!(
+                    "execute_sql error: {}",
+                    first.message
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn load_jsonl(
+        &self,
+        dataset: &str,
+        table: &str,
+        jsonl_path: &Path,
+    ) -> Result<(), ConnectionError> {
+        let token = self.access_token().await?;
+        let content = std::fs::read(jsonl_path)
+            .map_err(|e| ConnectionError::QueryFailed(format!("cannot read JSONL file: {e}")))?;
+
+        let url = format!(
+            "https://bigquery.googleapis.com/upload/bigquery/v2/projects/{}/jobs?\
+             uploadType=multipart",
+            self.config.project,
+        );
+
+        let job_config = serde_json::json!({
+            "configuration": {
+                "load": {
+                    "destinationTable": {
+                        "projectId": self.config.project,
+                        "datasetId": dataset,
+                        "tableId": table,
+                    },
+                    "sourceFormat": "NEWLINE_DELIMITED_JSON",
+                    "writeDisposition": "WRITE_TRUNCATE",
+                    "autodetect": true,
+                }
+            }
+        });
+
+        let metadata_part = reqwest::multipart::Part::text(job_config.to_string())
+            .mime_str("application/json")
+            .map_err(|e| ConnectionError::QueryFailed(e.to_string()))?;
+        let data_part = reqwest::multipart::Part::bytes(content)
+            .mime_str("application/octet-stream")
+            .map_err(|e| ConnectionError::QueryFailed(e.to_string()))?;
+        let form = reqwest::multipart::Form::new()
+            .part("metadata", metadata_part)
+            .part("data", data_part);
+
+        #[derive(Deserialize)]
+        struct JobResponse {
+            status: Option<JobStatus>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct JobStatus {
+            error_result: Option<JobError>,
+        }
+        #[derive(Deserialize)]
+        struct JobError {
+            message: String,
+        }
+
+        let resp: JobResponse = self
+            .client
+            .post(&url)
+            .bearer_auth(&token)
+            .multipart(form)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if let Some(status) = resp.status {
+            if let Some(err) = status.error_result {
+                return Err(ConnectionError::QueryFailed(format!(
+                    "load job failed: {}",
+                    err.message
+                )));
+            }
+        }
+        Ok(())
     }
 }
 

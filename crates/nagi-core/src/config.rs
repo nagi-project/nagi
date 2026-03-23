@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::duration::Duration;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("io error: {0}")]
@@ -40,6 +42,9 @@ pub struct NagiConfig {
     /// Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.
     #[serde(default = "default_nagi_dir")]
     pub nagi_dir: PathBuf,
+    /// Log export configuration. When set, compile generates export Assets
+    /// and logs are transferred to the remote DWH.
+    pub export: Option<ExportConfig>,
 }
 
 impl Default for NagiConfig {
@@ -53,6 +58,7 @@ impl Default for NagiConfig {
             lock_retry_interval_seconds: default_lock_retry_interval_seconds(),
             lock_retry_max_attempts: default_lock_retry_max_attempts(),
             nagi_dir: default_nagi_dir(),
+            export: None,
         }
     }
 }
@@ -97,6 +103,46 @@ fn default_lock_retry_max_attempts() -> u32 {
 
 pub fn default_nagi_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".nagi")
+}
+
+/// Loads config from `project_dir` and returns the resolved `nagi_dir`.
+/// Falls back to the default if the config file is missing or unreadable.
+pub fn resolve_nagi_dir(project_dir: &Path) -> PathBuf {
+    load_config(project_dir)
+        .map(|c| c.nagi_dir)
+        .unwrap_or_else(|_| default_nagi_dir())
+}
+
+/// Export format for log data.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Jsonl,
+    #[serde(alias = "duckdb")]
+    DuckDb,
+}
+
+/// Configuration for exporting logs to a remote DWH.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+pub struct ExportConfig {
+    /// Reference to a `kind: Connection` resource name.
+    pub connection: String,
+    /// DWH dataset (BigQuery) or schema (Snowflake) to export into.
+    pub dataset: String,
+    /// Intermediate file format for export.
+    #[serde(default = "default_export_format")]
+    pub format: ExportFormat,
+    /// Condition evaluation interval and export throttling threshold.
+    #[serde(default = "default_export_interval")]
+    pub interval: Duration,
+}
+
+fn default_export_format() -> ExportFormat {
+    ExportFormat::Jsonl
+}
+
+fn default_export_interval() -> Duration {
+    serde_yaml::from_str("30m").expect("default export interval must parse")
 }
 
 fn default_backend_type() -> String {
@@ -393,5 +439,72 @@ notify:
             config.source_stats_dir(),
             PathBuf::from("/data/nagi/source_stats")
         );
+    }
+
+    #[test]
+    fn default_export_is_none() {
+        let config = NagiConfig::default();
+        assert!(config.export.is_none());
+    }
+
+    #[test]
+    fn load_export_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+export:
+  connection: my-bigquery
+  dataset: nagi_logs
+  format: jsonl
+  interval: 30m";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        let export = config.export.unwrap();
+        assert_eq!(export.connection, "my-bigquery");
+        assert_eq!(export.dataset, "nagi_logs");
+        assert_eq!(export.format, ExportFormat::Jsonl);
+        assert_eq!(
+            export.interval.as_std(),
+            std::time::Duration::from_secs(30 * 60)
+        );
+    }
+
+    #[test]
+    fn load_export_config_duckdb_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+export:
+  connection: my-bq
+  dataset: logs
+  format: duckdb";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        let export = config.export.unwrap();
+        assert_eq!(export.format, ExportFormat::DuckDb);
+    }
+
+    #[test]
+    fn load_export_config_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+export:
+  connection: my-bq
+  dataset: logs";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        let export = config.export.unwrap();
+        assert_eq!(export.format, ExportFormat::Jsonl);
+        assert_eq!(
+            export.interval.as_std(),
+            std::time::Duration::from_secs(30 * 60)
+        );
+    }
+
+    #[test]
+    fn load_without_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: local";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.export.is_none());
     }
 }
