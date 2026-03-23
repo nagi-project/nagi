@@ -25,6 +25,7 @@ target
 
 # Claude Code local settings
 .claude/settings.local.json
+.claude/worktrees/
 
 # Python
 __pycache__/
