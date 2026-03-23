@@ -386,15 +386,23 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
     // Track Asset names separately for overlay merge (max 2 allowed).
     let mut asset_indices: HashMap<String, usize> = HashMap::new();
 
+    let check_dup = |seen: &mut HashSet<(String, String)>,
+                     kind: String,
+                     name: String|
+     -> Result<(), CompileError> {
+        if !seen.insert((kind.clone(), name.clone())) {
+            return Err(CompileError::DuplicateName { kind, name });
+        }
+        Ok(())
+    };
+
     for resource in resources {
         let kind = resource.kind().to_string();
         let name = resource.metadata().name.clone();
         match resource {
             NagiKind::Asset { metadata, spec, .. } => {
                 if let Some(&idx) = asset_indices.get(&name) {
-                    if !seen.insert((kind.clone(), name.clone())) {
-                        return Err(CompileError::DuplicateName { kind, name });
-                    }
+                    check_dup(&mut seen, kind, name)?;
                     let overlay = std::mem::take(&mut result.assets[idx].1.on_drift);
                     result.assets[idx].1.on_drift =
                         asset::merge_on_drift_entries(overlay, spec.on_drift);
@@ -404,30 +412,22 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                 }
             }
             NagiKind::Connection { spec, .. } => {
-                if !seen.insert((kind.clone(), name.clone())) {
-                    return Err(CompileError::DuplicateName { kind, name });
-                }
+                check_dup(&mut seen, kind, name.clone())?;
                 result.connections.insert(name, spec);
             }
             NagiKind::Source { spec, .. } => {
-                if !seen.insert((kind.clone(), name.clone())) {
-                    return Err(CompileError::DuplicateName { kind, name });
-                }
+                check_dup(&mut seen, kind, name.clone())?;
                 result
                     .source_connections
                     .insert(name.clone(), spec.connection);
                 result.sources.insert(name);
             }
             NagiKind::Conditions { spec, .. } => {
-                if !seen.insert((kind.clone(), name.clone())) {
-                    return Err(CompileError::DuplicateName { kind, name });
-                }
+                check_dup(&mut seen, kind, name.clone())?;
                 result.conditions_groups.insert(name, spec.0.clone());
             }
             NagiKind::Sync { spec, .. } => {
-                if !seen.insert((kind.clone(), name.clone())) {
-                    return Err(CompileError::DuplicateName { kind, name });
-                }
+                check_dup(&mut seen, kind, name.clone())?;
                 result.syncs.insert(name, spec);
             }
             NagiKind::Origin { .. } => {}
