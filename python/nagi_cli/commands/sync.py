@@ -5,6 +5,7 @@ import click
 from nagi_cli._nagi_core import (
     execute_sync_proposal,
     propose_sync,
+    try_export,
 )
 
 
@@ -91,6 +92,9 @@ def _make_sync_command(sync_type: str) -> click.Command:
                 raise SystemExit(1)
 
             click.echo(result_json)
+
+        if not dry_run:
+            try_export()
 
     return cmd
 

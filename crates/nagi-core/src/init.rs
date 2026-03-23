@@ -49,13 +49,50 @@ pub fn ensure_log_store(db_path: &Path, logs_dir: &Path) -> Result<(), InitError
     Ok(())
 }
 
-/// Initialises the workspace: creates `resources/`, config, and log store.
+/// Initializes the log store. If the database file does not exist (fresh creation),
+/// resets watermarks to ensure consistency between SQLite rowids and export state.
+pub fn ensure_log_store_with_watermarks(
+    db_path: &Path,
+    logs_dir: &Path,
+    watermarks_dir: &Path,
+) -> Result<(), InitError> {
+    let is_new = !db_path.exists();
+    ensure_log_store(db_path, logs_dir)?;
+    if is_new {
+        reset_watermarks(watermarks_dir)?;
+    }
+    Ok(())
+}
+
+/// Removes all watermark files so that the next export re-transfers everything.
+pub fn reset_watermarks(watermarks_dir: &Path) -> Result<(), InitError> {
+    if watermarks_dir.exists() {
+        for entry in std::fs::read_dir(watermarks_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                std::fs::remove_file(&path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Creates the watermarks directory for export tracking.
+pub fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
+    std::fs::create_dir_all(watermarks_dir)?;
+    Ok(())
+}
+
+/// Initialises the workspace: creates `resources/`, config, log store, and watermarks directory.
 pub fn init_workspace(base_dir: &Path, nagi_dir: &Path) -> Result<(), InitError> {
     ensure_resources_dir(base_dir)?;
     ensure_config(nagi_dir)?;
     let db_path = nagi_dir.join("logs.db");
     let logs_dir = nagi_dir.join("logs");
-    ensure_log_store(&db_path, &logs_dir)?;
+    let watermarks_dir = nagi_dir.join("logs").join("watermarks");
+    ensure_log_store_with_watermarks(&db_path, &logs_dir, &watermarks_dir)?;
+    ensure_watermarks_dir(&watermarks_dir)?;
     Ok(())
 }
 
@@ -120,6 +157,8 @@ pub fn connection_name(profile: &str, target: Option<&str>) -> String {
 }
 
 /// A dbt project entry collected from user input.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DbtProjectEntry {
     pub project_dir: String,
     pub profile: String,
@@ -335,5 +374,43 @@ mod tests {
         init_workspace(dir.path(), &nagi_dir).unwrap();
         assert!(dir.path().join("resources").exists());
         assert!(nagi_dir.join("logs.db").exists());
+        assert!(nagi_dir.join("logs").join("watermarks").exists());
+    }
+
+    #[test]
+    fn init_workspace_resets_watermarks_on_new_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("logs.db");
+        let logs_dir = dir.path().join("logs");
+        let wm_dir = dir.path().join("watermarks");
+
+        ensure_resources_dir(dir.path()).unwrap();
+        ensure_log_store_with_watermarks(&db_path, &logs_dir, &wm_dir).unwrap();
+        ensure_watermarks_dir(&wm_dir).unwrap();
+
+        assert!(dir.path().join("resources").exists());
+        assert!(db_path.exists());
+        assert!(wm_dir.exists());
+    }
+
+    #[test]
+    fn reset_watermarks_removes_json_files() {
+        let wm_dir = tempfile::tempdir().unwrap();
+        let wm_file = wm_dir.path().join("evaluate_logs.json");
+        std::fs::write(&wm_file, r#"{"last_rowid":42}"#).unwrap();
+
+        let other_file = wm_dir.path().join("_last_export_time");
+        std::fs::write(&other_file, "12345").unwrap();
+
+        reset_watermarks(wm_dir.path()).unwrap();
+        assert!(!wm_file.exists());
+        assert!(other_file.exists());
+    }
+
+    #[test]
+    fn reset_watermarks_noop_when_dir_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nonexistent");
+        reset_watermarks(&missing).unwrap();
     }
 }

@@ -32,17 +32,17 @@ pub async fn evaluate_and_cache(
         .map(crate::evaluate::resolve_connection)
         .transpose()?;
 
-    let cache_path = cache_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::config::default_nagi_dir().join("cache"));
+    let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
+        crate::config::resolve_nagi_dir(std::path::Path::new(".")).join("cache")
+    });
     let eval_cache = LocalCache::new(cache_path);
 
     let has_sources = conn.is_some() && !compiled.spec.sources.is_empty();
     let stats_cache = if has_sources {
         Some(LocalSourceStatsCache::new(
-            source_stats_dir
-                .map(PathBuf::from)
-                .unwrap_or_else(|| crate::config::default_nagi_dir().join("source_stats")),
+            source_stats_dir.map(PathBuf::from).unwrap_or_else(|| {
+                crate::config::resolve_nagi_dir(std::path::Path::new(".")).join("source_stats")
+            }),
         ))
     } else {
         None
@@ -297,7 +297,7 @@ fn write_lock_log(
     status: &str,
     timestamp: &str,
 ) {
-    let nagi_dir = crate::config::default_nagi_dir();
+    let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
     let log_store = match LogStore::open(&nagi_dir.join("logs.db"), &nagi_dir.join("logs")) {
         Ok(s) => s,
         Err(e) => {
@@ -347,6 +347,19 @@ mod tests {
 
         async fn table_stats(&self, _table_name: &str) -> Result<TableStats, ConnectionError> {
             Ok(self.stats.clone())
+        }
+
+        async fn execute_sql(&self, _sql: &str) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+
+        async fn load_jsonl(
+            &self,
+            _dataset: &str,
+            _table: &str,
+            _jsonl_path: &std::path::Path,
+        ) -> Result<(), ConnectionError> {
+            Ok(())
         }
     }
 

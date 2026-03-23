@@ -235,9 +235,9 @@ pub async fn evaluate_from_compiled(
     )
     .await?;
 
-    let cache_path = cache_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::config::default_nagi_dir().join("cache"));
+    let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
+        crate::config::resolve_nagi_dir(std::path::Path::new(".")).join("cache")
+    });
     let cache = LocalCache::new(cache_path);
     cache
         .write(&result)
@@ -324,6 +324,19 @@ mod tests {
                 num_rows: 0,
                 num_bytes: 0,
             })
+        }
+
+        async fn execute_sql(&self, _sql: &str) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+
+        async fn load_jsonl(
+            &self,
+            _dataset: &str,
+            _table: &str,
+            _jsonl_path: &std::path::Path,
+        ) -> Result<(), ConnectionError> {
+            Ok(())
         }
     }
 
@@ -497,6 +510,19 @@ mod tests {
                     num_rows: 0,
                     num_bytes: 0,
                 })
+            }
+
+            async fn execute_sql(&self, _sql: &str) -> Result<(), ConnectionError> {
+                Ok(())
+            }
+
+            async fn load_jsonl(
+                &self,
+                _dataset: &str,
+                _table: &str,
+                _jsonl_path: &std::path::Path,
+            ) -> Result<(), ConnectionError> {
+                Ok(())
             }
         }
         let on_drift = on_drift_with(vec![

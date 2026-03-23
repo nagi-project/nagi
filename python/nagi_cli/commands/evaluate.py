@@ -1,6 +1,6 @@
 import click
 
-from nagi_cli._nagi_core import evaluate_all
+from nagi_cli._nagi_core import evaluate_all, try_export
 
 
 @click.command()
@@ -43,3 +43,6 @@ def evaluate(
         raise SystemExit(1)
 
     click.echo(result_json)
+
+    if not dry_run:
+        try_export()

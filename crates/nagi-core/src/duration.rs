@@ -17,6 +17,15 @@ impl Duration {
     pub fn as_std(&self) -> StdDuration {
         self.inner
     }
+
+    /// Creates a Duration from a number of seconds.
+    pub fn from_secs(secs: u64) -> Self {
+        let inner = StdDuration::from_secs(secs);
+        Self {
+            inner,
+            raw: humantime::format_duration(inner).to_string(),
+        }
+    }
 }
 
 impl PartialEq for Duration {

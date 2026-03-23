@@ -118,12 +118,22 @@ pub fn apply_dbt_cloud_job_mapping(
 }
 
 /// Compiles all YAML resources from `resources_dir` and writes resolved output to `target_dir`.
-pub fn compile(resources_dir: &Path, target_dir: &Path) -> Result<CompileOutput, CompileError> {
+/// When `export_config` is provided, auto-generates export Assets for log tables.
+pub fn compile(
+    resources_dir: &Path,
+    target_dir: &Path,
+    export_config: Option<&crate::config::ExportConfig>,
+) -> Result<CompileOutput, CompileError> {
     let resources = load_resources(resources_dir)?;
 
     let manifests = load_dbt_manifests(&resources)?;
 
-    let resources = expand_origins(resources, &manifests)?;
+    let mut resources = expand_origins(resources, &manifests)?;
+
+    if let Some(cfg) = export_config {
+        resources.extend(crate::export::generate_export_resources(cfg));
+    }
+
     let output = resolve(resources)?;
     write_output(&output, target_dir)?;
     Ok(output)
@@ -312,7 +322,7 @@ fn load_dbt_manifests(resources: &[NagiKind]) -> Result<HashMap<String, String>,
     Ok(manifests)
 }
 
-fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
+pub fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
     if !dir.exists() {
         return Err(CompileError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,

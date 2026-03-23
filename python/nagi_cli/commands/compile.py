@@ -36,7 +36,7 @@ def compile(resources_dir: str, target_dir: str, yes: bool) -> None:
             ):
                 return
 
-        click.echo(compile_assets(resources_dir, target_dir))
+        click.echo(compile_assets(resources_dir, target_dir, project_dir="."))
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)

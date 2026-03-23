@@ -31,7 +31,9 @@
       ],
       "allowWrite": [
         "~/.cache/uv",
-        "~/.cargo"
+        "~/.cargo",
+        "~/.local/state/mise",
+        ".git"
       ],
       "denyRead": [
         "~/.aws/credentials",

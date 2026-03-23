@@ -18,7 +18,7 @@ dirs = "5"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "sync", "signal"] }
 chrono = "0.4"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
 jsonwebtoken = "10"
 rusqlite = { version = "0.31", features = ["bundled"] }
 schemars = "0.8"

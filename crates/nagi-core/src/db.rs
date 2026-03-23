@@ -45,6 +45,18 @@ pub trait Connection: Send + Sync {
 
     /// Returns row count and byte size of a table via metadata API (no query cost).
     async fn table_stats(&self, table_name: &str) -> Result<TableStats, ConnectionError>;
+
+    /// Executes a DML/DDL statement (e.g. CREATE TABLE, MERGE).
+    async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError>;
+
+    /// Loads a JSONL file into a staging table via the DWH's bulk load mechanism.
+    /// `dataset` is the target dataset/schema, `table` is the staging table name.
+    async fn load_jsonl(
+        &self,
+        dataset: &str,
+        table: &str,
+        jsonl_path: &std::path::Path,
+    ) -> Result<(), ConnectionError>;
 }
 
 /// Creates a `Connection` implementation based on the adapter type in the profile output.

@@ -5,6 +5,7 @@ pub mod db;
 pub mod dbt;
 pub mod duration;
 pub mod evaluate;
+pub mod export;
 pub mod init;
 pub mod kind;
 pub mod log;
@@ -35,6 +36,9 @@ fn nagi_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py::propose_sync, m)?)?;
     m.add_function(wrap_pyfunction!(py::execute_sync_proposal, m)?)?;
     m.add_function(wrap_pyfunction!(py::asset_status, m)?)?;
+    m.add_function(wrap_pyfunction!(py::export_dry_run, m)?)?;
+    m.add_function(wrap_pyfunction!(py::export_logs, m)?)?;
+    m.add_function(wrap_pyfunction!(py::try_export, m)?)?;
     m.add_function(wrap_pyfunction!(py::init_workspace, m)?)?;
     m.add_function(wrap_pyfunction!(py::run_dbt_debug, m)?)?;
     m.add_function(wrap_pyfunction!(py::write_init_dbt_files, m)?)?;

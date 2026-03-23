@@ -56,6 +56,21 @@ impl RemoteObjectStore {
     fn lock_path(&self, sync_ref: &str) -> OsPath {
         self.resolve(&format!("locks/{sync_ref}.lock"))
     }
+
+    /// Uploads a local file to the remote store. Returns the object store URI.
+    pub async fn upload_file(
+        &self,
+        local_path: &std::path::Path,
+        remote_path: &str,
+    ) -> Result<String, StorageError> {
+        let content = std::fs::read(local_path)?;
+        let path = self.resolve(remote_path);
+        self.store
+            .put(&path, content.into())
+            .await
+            .map_err(|e| StorageError::Io(std::io::Error::other(format!("upload failed: {e}"))))?;
+        Ok(format!("{}", path))
+    }
 }
 
 /// Runs a future on the current tokio runtime from a sync context.
