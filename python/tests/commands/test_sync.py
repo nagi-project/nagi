@@ -2,11 +2,10 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
-from nagi_cli.commands.sync import resync, sync
+from nagi_cli.commands.sync import sync
 from tests.helper import (
     ASSET_NAME,
     write_valid_resources,
@@ -18,16 +17,6 @@ MOCK_PROPOSALS = json.dumps(
             "asset": ASSET_NAME,
             "syncType": "sync",
             "stages": ["pre", "run"],
-        }
-    ]
-)
-
-MOCK_RESYNC_PROPOSALS = json.dumps(
-    [
-        {
-            "asset": ASSET_NAME,
-            "syncType": "resync",
-            "stages": ["pre", "run", "post"],
         }
     ]
 )
@@ -46,19 +35,9 @@ def _compile_resources(tmp_path: Path) -> Path:
 
 
 class TestSyncDryRun:
-    @pytest.mark.parametrize(
-        "command, proposals, expected_sync_type",
-        [
-            pytest.param(sync, MOCK_PROPOSALS, "sync", id="sync"),
-            pytest.param(resync, MOCK_RESYNC_PROPOSALS, "resync", id="resync"),
-        ],
-    )
     def test_dry_run_shows_proposals_without_executing(
         self,
         tmp_path: Path,
-        command: click.Command,
-        proposals: str,
-        expected_sync_type: str,
     ) -> None:
         target_dir = _compile_resources(tmp_path)
 
@@ -66,36 +45,26 @@ class TestSyncDryRun:
         with (
             patch(
                 "nagi_cli.commands.sync.propose_sync",
-                return_value=proposals,
+                return_value=MOCK_PROPOSALS,
             ),
             patch(
                 "nagi_cli.commands.sync.execute_sync_proposal",
             ) as mock_exec,
         ):
             result = runner.invoke(
-                command,
+                sync,
                 ["--target-dir", str(target_dir), "--dry-run"],
             )
         assert result.exit_code == 0
         output = json.loads(result.output.strip())
-        assert output["syncType"] == expected_sync_type
+        assert output["syncType"] == "sync"
         mock_exec.assert_not_called()
 
 
 class TestSyncExecution:
-    @pytest.mark.parametrize(
-        "command, proposals, expected_sync_type",
-        [
-            pytest.param(sync, MOCK_PROPOSALS, "sync", id="sync"),
-            pytest.param(resync, MOCK_RESYNC_PROPOSALS, "resync", id="resync"),
-        ],
-    )
     def test_confirmed_sync_executes(
         self,
         tmp_path: Path,
-        command: click.Command,
-        proposals: str,
-        expected_sync_type: str,
     ) -> None:
         target_dir = _compile_resources(tmp_path)
 
@@ -103,7 +72,7 @@ class TestSyncExecution:
         with (
             patch(
                 "nagi_cli.commands.sync.propose_sync",
-                return_value=proposals,
+                return_value=MOCK_PROPOSALS,
             ),
             patch(
                 "nagi_cli.commands.sync.execute_sync_proposal",
@@ -111,14 +80,14 @@ class TestSyncExecution:
             ) as mock_exec,
         ):
             result = runner.invoke(
-                command,
+                sync,
                 ["--target-dir", str(target_dir)],
                 input="y\n",
             )
         assert result.exit_code == 0
         mock_exec.assert_called_once()
         args = mock_exec.call_args[0]
-        assert args[1] == expected_sync_type
+        assert args[1] == "sync"
 
     def test_declined_sync_is_skipped(self, tmp_path: Path) -> None:
         target_dir = _compile_resources(tmp_path)

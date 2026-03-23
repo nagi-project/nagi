@@ -26,7 +26,7 @@ def create_server(*, allow_sync: bool = False) -> FastMCP:
     """Build the MCP server instance.
 
     Args:
-        allow_sync: When True, also register sync/resync tools.
+        allow_sync: When True, also register sync tools.
     """
     mcp = FastMCP("nagi")
 
@@ -93,27 +93,6 @@ def _register_sync_tools(mcp: FastMCP) -> None:
             force: Skip pre-flight checks.
         """
         return _run_sync("sync", target_dir, selectors, stages, cache_dir, force)
-
-    @mcp.tool(annotations=WRITE)
-    def nagi_resync(
-        target_dir: str = "target",
-        selectors: list[str] | None = None,
-        stages: str | None = None,
-        cache_dir: str | None = None,
-        force: bool = False,
-    ) -> str:
-        """Execute resync (radical repair) convergence operation for assets.
-
-        Proposes resync plans and executes them. Returns JSON results.
-
-        Args:
-            target_dir: Directory containing compiled output.
-            selectors: Asset selector expressions (dbt-compatible).
-            stages: Comma-separated stages to execute (e.g. pre,run).
-            cache_dir: Cache directory (defaults to &lt;nagiDir&gt;/cache/).
-            force: Skip pre-flight checks.
-        """
-        return _run_sync("resync", target_dir, selectors, stages, cache_dir, force)
 
 
 def _run_sync(

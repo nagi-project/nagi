@@ -9,13 +9,10 @@ from nagi_cli._nagi_core import (
 
 
 def _make_sync_command(sync_type: str) -> click.Command:
-    help_text = (
-        "Execute sync convergence operation for assets."
-        if sync_type == "sync"
-        else "Execute resync (radical repair) convergence operation for assets."
+    @click.command(
+        name=sync_type,
+        help="Execute sync convergence operation for assets.",
     )
-
-    @click.command(name=sync_type, help=help_text)
     @click.option(
         "--select",
         "selectors",
@@ -99,4 +96,3 @@ def _make_sync_command(sync_type: str) -> click.Command:
 
 
 sync = _make_sync_command("sync")
-resync = _make_sync_command("resync")

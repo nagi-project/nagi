@@ -6,7 +6,7 @@ from nagi_cli.commands.init import init
 from nagi_cli.commands.mcp import mcp
 from nagi_cli.commands.serve import serve
 from nagi_cli.commands.status import status
-from nagi_cli.commands.sync import resync, sync
+from nagi_cli.commands.sync import sync
 
 
 @click.group()
@@ -19,7 +19,6 @@ cli.add_command(compile)
 cli.add_command(evaluate)
 cli.add_command(mcp)
 cli.add_command(sync)
-cli.add_command(resync)
 cli.add_command(serve)
 cli.add_command(status)
 

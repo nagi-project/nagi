@@ -49,7 +49,7 @@
       ]
     },
     "syncType": {
-      "description": "Whether this was a `sync` or `resync` operation.",
+      "description": "The sync operation type.",
       "type": "string"
     }
   },

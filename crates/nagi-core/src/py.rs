@@ -81,7 +81,7 @@ pub fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
     Ok(dirs.join(", "))
 }
 
-// ── Sync / Resync ────────────────────────────────────────────────────────────
+// ── Sync ─────────────────────────────────────────────────────────────────────
 
 /// Builds sync proposals for all compiled assets matching selectors.
 /// Returns JSON array of proposals. Each proposal contains an opaque `_index`

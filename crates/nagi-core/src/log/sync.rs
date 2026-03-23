@@ -25,7 +25,7 @@ pub struct SyncLogEntry {
     pub stage: String,
     /// Name of the Asset that was synced.
     pub asset_name: String,
-    /// Whether this was a `sync` or `resync` operation.
+    /// Whether this was a `sync` operation.
     pub sync_type: String,
     /// RFC 3339 timestamp when the stage started.
     pub started_at: String,

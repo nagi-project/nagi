@@ -33,14 +33,13 @@ class TestCreateServer:
     def test_readonly_excludes_sync_tools(self, readonly_server: object) -> None:
         names = self._tool_names(readonly_server)
         assert "nagi_sync" not in names
-        assert "nagi_resync" not in names
+        assert "nagi_sync" not in names
 
     def test_allow_sync_registers_all_tools(self, full_server: object) -> None:
         names = self._tool_names(full_server)
         assert "nagi_status" in names
         assert "nagi_evaluate" in names
         assert "nagi_sync" in names
-        assert "nagi_resync" in names
 
 
 class TestMcpToolExecution:

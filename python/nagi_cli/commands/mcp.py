@@ -6,7 +6,7 @@ import click
     "--allow-sync",
     is_flag=True,
     default=False,
-    help="Also expose nagi_sync and nagi_resync tools.",
+    help="Also expose nagi_sync tool.",
 )
 def mcp(allow_sync: bool) -> None:
     """Start MCP server on stdio (for AI agent integration)."""

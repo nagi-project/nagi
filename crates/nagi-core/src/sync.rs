@@ -47,14 +47,12 @@ pub enum SyncError {
 #[serde(rename_all = "lowercase")]
 pub enum SyncType {
     Sync,
-    Resync,
 }
 
 impl std::fmt::Display for SyncType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SyncType::Sync => write!(f, "sync"),
-            SyncType::Resync => write!(f, "resync"),
         }
     }
 }
@@ -289,7 +287,6 @@ pub(crate) fn generate_uuid() -> String {
 fn parse_sync_type(s: &str) -> Result<SyncType, SyncError> {
     match s {
         "sync" => Ok(SyncType::Sync),
-        "resync" => Ok(SyncType::Resync),
         other => Err(SyncError::InvalidSyncType(other.to_string())),
     }
 }
@@ -713,14 +710,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_resync_type() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Resync, None, None)
-            .await
-            .unwrap();
-        assert_eq!(result.sync_type, SyncType::Resync);
-    }
-
-    #[tokio::test]
     async fn execute_records_timestamps() {
         let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
             .await
@@ -783,9 +772,9 @@ mod tests {
 
     #[test]
     fn dry_run_run_only() {
-        let result = dry_run_sync("test-asset", &run_only_spec(), SyncType::Resync, None);
+        let result = dry_run_sync("test-asset", &run_only_spec(), SyncType::Sync, None);
         assert_eq!(result.asset_name, "test-asset");
-        assert_eq!(result.sync_type, SyncType::Resync);
+        assert_eq!(result.sync_type, SyncType::Sync);
         assert_eq!(result.stages.len(), 1);
     }
 
