@@ -7,7 +7,7 @@ use crate::evaluate::{AssetEvalResult, EvaluateError};
 use crate::storage::SuspendedStore;
 use crate::sync::SyncError;
 
-use super::graph::build_downstream_map;
+use super::graph::build_edge_maps;
 use super::guardrail::{GuardrailState, MAX_CONSECUTIVE_FAILURES};
 use super::queue::WorkQueue;
 use super::scheduler::SchedulerState;
@@ -97,6 +97,8 @@ pub struct ServeState {
     pub in_flight: HashSet<String>,
     /// asset name → list of downstream asset names.
     downstream_map: HashMap<String, Vec<String>>,
+    /// asset name → list of upstream asset names.
+    upstream_map: HashMap<String, Vec<String>>,
     /// Per-asset sync configuration.
     sync_configs: HashMap<String, AssetSyncConfig>,
     /// FIFO queue of assets waiting for sync execution.
@@ -115,12 +117,14 @@ pub struct ServeState {
 
 impl ServeState {
     pub fn new(edges: &[GraphEdge], suspended_store: Arc<dyn SuspendedStore>) -> Self {
+        let edge_maps = build_edge_maps(edges);
         Self {
             scheduler: SchedulerState::new(),
             work_queue: WorkQueue::new(),
             readiness: ReadinessState::new(),
             in_flight: HashSet::new(),
-            downstream_map: build_downstream_map(edges),
+            downstream_map: edge_maps.downstream,
+            upstream_map: edge_maps.upstream,
             sync_configs: HashMap::new(),
             sync_queue: WorkQueue::new(),
             syncing: HashSet::new(),
@@ -135,7 +139,9 @@ impl ServeState {
     /// + store sync configuration.
     pub fn init(&mut self, assets: &[AssetEntry]) {
         for asset in assets {
-            self.work_queue.enqueue(asset.name.clone());
+            if self.all_upstreams_ready(&asset.name) {
+                self.work_queue.enqueue(asset.name.clone());
+            }
             if let Some(dur) = asset.min_interval {
                 self.scheduler.register(asset.name.clone(), dur);
             }
@@ -156,14 +162,31 @@ impl ServeState {
         self.awaiting_post_sync_eval.contains(asset_name)
     }
 
+    /// Returns true if all upstream assets are Ready (or there are no upstreams).
+    fn all_upstreams_ready(&self, asset_name: &str) -> bool {
+        let Some(upstreams) = self.upstream_map.get(asset_name) else {
+            return true;
+        };
+        upstreams
+            .iter()
+            .all(|u| self.readiness.ready.get(u).copied().unwrap_or(false))
+    }
+
     /// Enqueues the next due asset (if any) when its timer fires.
+    /// Skips if any upstream is not Ready.
     pub fn enqueue_due(&mut self) {
-        if let Some((name, _)) = self.scheduler.next_due() {
-            let name = name.to_string();
-            if !self.in_flight.contains(&name) {
-                self.work_queue.enqueue(name);
-            }
+        let Some((name, _)) = self.scheduler.next_due() else {
+            return;
+        };
+        let name = name.to_string();
+        if self.in_flight.contains(&name) {
+            return;
         }
+        if !self.all_upstreams_ready(&name) {
+            tracing::debug!(asset = %name, "evaluate skipped: upstream not ready");
+            return;
+        }
+        self.work_queue.enqueue(name);
     }
 
     /// Dequeues the next asset to spawn, skipping those already in flight.
@@ -562,8 +585,8 @@ mod tests {
         ];
         state.init(&assets);
 
+        // Only root asset "a" is enqueued; "b" is blocked (upstream "a" not ready)
         assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
-        assert_eq!(state.work_queue.dequeue(), Some("b".to_string()));
         assert_eq!(state.work_queue.dequeue(), None);
         assert!(state.scheduler.intervals.contains_key("a"));
         assert!(!state.scheduler.intervals.contains_key("b"));
@@ -1203,5 +1226,99 @@ mod tests {
         state.init(&[asset_entry_with_sync("a")]);
 
         state.try_auto_unsuspend("a");
+    }
+
+    // ── upstream block tests ────────────────────────────────────────────
+
+    #[test]
+    fn all_upstreams_ready_no_upstreams() {
+        let state = ServeState::new(&[], susp_store());
+        assert!(state.all_upstreams_ready("a"));
+    }
+
+    #[test]
+    fn all_upstreams_ready_single_upstream_ready() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges, susp_store());
+        state.readiness.record("a", true);
+        assert!(state.all_upstreams_ready("b"));
+    }
+
+    #[test]
+    fn all_upstreams_ready_single_upstream_not_ready() {
+        let edges = vec![edge("a", "b")];
+        let state = ServeState::new(&edges, susp_store());
+        assert!(!state.all_upstreams_ready("b"));
+    }
+
+    #[test]
+    fn all_upstreams_ready_mixed() {
+        let edges = vec![edge("a", "c"), edge("b", "c")];
+        let mut state = ServeState::new(&edges, susp_store());
+        state.readiness.record("a", true);
+        // b is not ready
+        assert!(!state.all_upstreams_ready("c"));
+    }
+
+    #[test]
+    fn all_upstreams_ready_all_ready() {
+        let edges = vec![edge("a", "c"), edge("b", "c")];
+        let mut state = ServeState::new(&edges, susp_store());
+        state.readiness.record("a", true);
+        state.readiness.record("b", true);
+        assert!(state.all_upstreams_ready("c"));
+    }
+
+    #[test]
+    fn init_only_enqueues_root_assets() {
+        let edges = vec![edge("a", "b"), edge("b", "c")];
+        let mut state = ServeState::new(&edges, susp_store());
+        state.init(&[
+            asset_entry("a", None),
+            asset_entry("b", None),
+            asset_entry("c", None),
+        ]);
+        // Only "a" (no upstreams) should be enqueued
+        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
+        assert_eq!(state.work_queue.dequeue(), None);
+    }
+
+    #[test]
+    fn enqueue_due_skips_when_upstream_not_ready() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges, susp_store());
+        state.init(&[
+            asset_entry("a", None),
+            asset_entry("b", Some(StdDuration::from_secs(1))),
+        ]);
+        while state.work_queue.dequeue().is_some() {}
+
+        // Set b's next_eval_at to the past so it is due
+        state
+            .scheduler
+            .next_eval_at
+            .insert("b".to_string(), tokio::time::Instant::now());
+        state.enqueue_due();
+        // b should not be enqueued because a is not ready
+        assert_eq!(state.work_queue.dequeue(), None);
+    }
+
+    #[test]
+    fn enqueue_due_allows_when_upstream_ready() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges, susp_store());
+        state.init(&[
+            asset_entry("a", None),
+            asset_entry("b", Some(StdDuration::from_secs(1))),
+        ]);
+        while state.work_queue.dequeue().is_some() {}
+
+        state.readiness.record("a", true);
+        state
+            .scheduler
+            .next_eval_at
+            .insert("b".to_string(), tokio::time::Instant::now());
+        state.enqueue_due();
+        assert_eq!(state.work_queue.dequeue(), Some("b".to_string()));
     }
 }
