@@ -611,54 +611,50 @@ fn build_graph(
     Ok(DependencyGraph { nodes, edges })
 }
 
+/// Detects cycles using Kahn's algorithm (topological sort via BFS).
+/// If not all nodes are visited, at least one cycle exists.
 fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
-    let node_names: HashSet<&str> = graph.nodes.iter().map(|n| n.name.as_str()).collect();
-    let mut in_degree: HashMap<&str, usize> = HashMap::new();
-    let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
-
-    for name in &node_names {
-        in_degree.insert(name, 0);
-        adjacency.insert(name, vec![]);
-    }
+    let mut in_degree: HashMap<&str, usize> =
+        graph.nodes.iter().map(|n| (n.name.as_str(), 0)).collect();
+    let mut adjacency: HashMap<&str, Vec<&str>> = graph
+        .nodes
+        .iter()
+        .map(|n| (n.name.as_str(), vec![]))
+        .collect();
 
     for edge in &graph.edges {
-        if let Some(adj) = adjacency.get_mut(edge.from.as_str()) {
-            adj.push(&edge.to);
-        }
-        if let Some(deg) = in_degree.get_mut(edge.to.as_str()) {
-            *deg += 1;
-        }
+        adjacency
+            .get_mut(edge.from.as_str())
+            .unwrap()
+            .push(&edge.to);
+        *in_degree.get_mut(edge.to.as_str()).unwrap() += 1;
     }
 
-    let mut queue: VecDeque<&str> = VecDeque::new();
-    for (name, deg) in &in_degree {
-        if *deg == 0 {
-            queue.push_back(name);
-        }
-    }
+    let mut queue: VecDeque<&str> = in_degree
+        .iter()
+        .filter(|(_, &deg)| deg == 0)
+        .map(|(&name, _)| name)
+        .collect();
 
-    let mut visited = 0;
+    let mut visited = 0usize;
     while let Some(node) = queue.pop_front() {
         visited += 1;
-        if let Some(neighbors) = adjacency.get(node) {
-            for neighbor in neighbors {
-                if let Some(deg) = in_degree.get_mut(neighbor) {
-                    *deg -= 1;
-                    if *deg == 0 {
-                        queue.push_back(neighbor);
-                    }
-                }
+        for &neighbor in &adjacency[node] {
+            let deg = in_degree.get_mut(neighbor).unwrap();
+            *deg -= 1;
+            if *deg == 0 {
+                queue.push_back(neighbor);
             }
         }
     }
 
-    if visited < node_names.len() {
-        let cycle_node = in_degree
-            .iter()
-            .find(|(_, deg)| **deg > 0)
+    if visited < in_degree.len() {
+        let name = in_degree
+            .into_iter()
+            .find(|(_, deg)| *deg > 0)
             .map(|(name, _)| name.to_string())
             .unwrap_or_default();
-        return Err(CompileError::CycleDetected { name: cycle_node });
+        return Err(CompileError::CycleDetected { name });
     }
 
     Ok(())
