@@ -69,8 +69,7 @@ pub struct AssetEntry {
     pub auto_sync: bool,
     /// Whether this asset has a sync spec defined.
     pub has_sync: bool,
-    /// The sync ref name from the original asset spec. Assets sharing the same
-    /// sync ref are serialized; assets with different refs may sync concurrently.
+    /// The sync ref name from the original asset spec.
     pub sync_ref_name: Option<String>,
 }
 
@@ -79,6 +78,7 @@ pub struct AssetEntry {
 struct AssetSyncConfig {
     auto_sync: bool,
     has_sync: bool,
+    #[allow(dead_code)]
     sync_ref_name: Option<String>,
 }
 
@@ -101,9 +101,6 @@ pub struct ServeState {
     sync_configs: HashMap<String, AssetSyncConfig>,
     /// FIFO queue of assets waiting for sync execution.
     pub sync_queue: WorkQueue,
-    /// Sync refs currently being synced. Assets sharing the same sync ref
-    /// are serialized; different refs may run concurrently.
-    syncing_refs: HashSet<String>,
     /// Asset names currently being synced (for dedup and completion tracking).
     pub syncing: HashSet<String>,
     /// Tracks consecutive sync failures and exponential backoff.
@@ -113,7 +110,7 @@ pub struct ServeState {
     /// Ready condition count from the last evaluation, per asset.
     last_ready_count: HashMap<String, usize>,
     /// Assets awaiting post-sync re-evaluation for degradation detection.
-    pending_sync_reeval: HashSet<String>,
+    awaiting_post_sync_eval: HashSet<String>,
 }
 
 impl ServeState {
@@ -126,12 +123,11 @@ impl ServeState {
             downstream_map: build_downstream_map(edges),
             sync_configs: HashMap::new(),
             sync_queue: WorkQueue::new(),
-            syncing_refs: HashSet::new(),
             syncing: HashSet::new(),
             guardrail: GuardrailState::new(),
             suspended_store,
             last_ready_count: HashMap::new(),
-            pending_sync_reeval: HashSet::new(),
+            awaiting_post_sync_eval: HashSet::new(),
         }
     }
 
@@ -152,6 +148,12 @@ impl ServeState {
                 },
             );
         }
+    }
+
+    /// Returns true if the asset is awaiting post-sync re-evaluation.
+    /// Used to skip the condition TTL cache for re-evaluations after sync.
+    pub fn is_awaiting_post_sync_eval(&self, asset_name: &str) -> bool {
+        self.awaiting_post_sync_eval.contains(asset_name)
     }
 
     /// Enqueues the next due asset (if any) when its timer fires.
@@ -216,20 +218,17 @@ impl ServeState {
         }
     }
 
-    /// Returns the next asset whose sync ref is not currently in use.
-    /// Assets sharing the same sync ref are serialized; different refs may
-    /// run concurrently.
+    /// Returns the next asset that is not currently being synced.
+    /// Each asset is serialized individually by asset name.
     pub fn next_syncable(&mut self) -> Option<String> {
         let mut skipped = Vec::new();
         let result = loop {
             let Some(name) = self.sync_queue.dequeue() else {
                 break None;
             };
-            let ref_key = self.sync_ref_key(&name);
-            if self.syncing_refs.contains(&ref_key) {
+            if self.syncing.contains(&name) {
                 skipped.push(name);
             } else {
-                self.syncing_refs.insert(ref_key);
                 self.syncing.insert(name.clone());
                 break Some(name);
             }
@@ -238,15 +237,6 @@ impl ServeState {
             self.sync_queue.enqueue(name);
         }
         result
-    }
-
-    /// Returns the sync ref key for an asset. Falls back to the asset name
-    /// when no sync ref is defined, ensuring per-asset serialization.
-    fn sync_ref_key(&self, asset_name: &str) -> String {
-        self.sync_configs
-            .get(asset_name)
-            .and_then(|c| c.sync_ref_name.clone())
-            .unwrap_or_else(|| asset_name.to_string())
     }
 
     /// Processes a sync completion: clears the syncing slot, updates guardrail
@@ -272,16 +262,13 @@ impl ServeState {
         };
 
         // Re-evaluate after sync to check convergence (and detect degradation).
-        self.pending_sync_reeval.insert(asset_name.to_string());
+        self.awaiting_post_sync_eval.insert(asset_name.to_string());
         self.work_queue.enqueue(asset_name.to_string());
         suspended_reason
     }
 
     fn release_sync_slot(&mut self, asset_name: &str) {
-        if self.syncing.remove(asset_name) {
-            let ref_key = self.sync_ref_key(asset_name);
-            self.syncing_refs.remove(&ref_key);
-        }
+        self.syncing.remove(asset_name);
     }
 
     fn handle_sync_failure(
@@ -367,15 +354,15 @@ impl ServeState {
 
         // Degradation detection: if this is a post-sync re-evaluation and
         // the number of Ready conditions decreased, suspend the asset.
-        let suspended = if self.pending_sync_reeval.remove(asset_name) {
-            self.check_degradation(asset_name, ready_count)
-                .map(|reason| SuspendedEvent {
-                    asset_name: asset_name.to_string(),
-                    reason,
-                })
-        } else {
-            None
-        };
+        let suspended = self
+            .awaiting_post_sync_eval
+            .remove(asset_name)
+            .then(|| self.check_degradation(asset_name, ready_count))
+            .flatten()
+            .map(|reason| SuspendedEvent {
+                asset_name: asset_name.to_string(),
+                reason,
+            });
         self.last_ready_count
             .insert(asset_name.to_string(), ready_count);
 
@@ -708,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn next_syncable_serializes_same_sync_ref() {
+    fn next_syncable_allows_different_assets_with_same_sync_ref() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.init(&[
             asset_entry_with_sync_ref("a", "dbt-run"),
@@ -718,22 +705,7 @@ mod tests {
         state.request_sync("b");
 
         assert_eq!(state.next_syncable(), Some("a".to_string()));
-        // "b" shares the same sync ref, so it must wait.
-        assert_eq!(state.next_syncable(), None);
-    }
-
-    #[test]
-    fn next_syncable_allows_different_sync_refs() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
-        state.init(&[
-            asset_entry_with_sync_ref("a", "dbt-run"),
-            asset_entry_with_sync_ref("b", "bq-copy"),
-        ]);
-        state.request_sync("a");
-        state.request_sync("b");
-
-        assert_eq!(state.next_syncable(), Some("a".to_string()));
-        // "b" has a different sync ref, so it can run concurrently.
+        // "b" is a different asset, so it can run concurrently.
         assert_eq!(state.next_syncable(), Some("b".to_string()));
     }
 
@@ -751,21 +723,19 @@ mod tests {
     }
 
     #[test]
-    fn handle_sync_result_unblocks_same_sync_ref() {
+    fn next_syncable_prevents_same_asset_concurrent_sync() {
         let mut state = ServeState::new(&[], mem_suspended_store());
-        state.init(&[
-            asset_entry_with_sync_ref("a", "dbt-run"),
-            asset_entry_with_sync_ref("b", "dbt-run"),
-        ]);
+        state.init(&[asset_entry_with_sync("a")]);
         state.request_sync("a");
-        state.request_sync("b");
 
         assert_eq!(state.next_syncable(), Some("a".to_string()));
+        // Same asset cannot sync concurrently.
+        state.request_sync("a");
         assert_eq!(state.next_syncable(), None);
 
         state.handle_sync_result("a", true, None);
-        // Now "b" can proceed since "dbt-run" is no longer in use.
-        assert_eq!(state.next_syncable(), Some("b".to_string()));
+        state.request_sync("a");
+        assert_eq!(state.next_syncable(), Some("a".to_string()));
     }
 
     #[test]
@@ -946,7 +916,7 @@ mod tests {
 
         state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
-        assert!(state.pending_sync_reeval.contains("a"));
+        assert!(state.awaiting_post_sync_eval.contains("a"));
 
         state.in_flight.insert("a".to_string());
         let degraded = Ok(AssetEvalResult {
@@ -1049,16 +1019,14 @@ mod tests {
     // ── release_sync_slot tests ─────────────────────────────────────────
 
     #[test]
-    fn release_sync_slot_clears_syncing_and_ref() {
+    fn release_sync_slot_clears_syncing() {
         let mut state = ServeState::new(&[], susp_store());
-        state.init(&[asset_entry_with_sync_ref("a", "dbt-default")]);
+        state.init(&[asset_entry_with_sync("a")]);
         state.syncing.insert("a".to_string());
-        state.syncing_refs.insert("dbt-default".to_string());
 
         state.release_sync_slot("a");
 
         assert!(!state.syncing.contains("a"));
-        assert!(!state.syncing_refs.contains("dbt-default"));
     }
 
     #[test]

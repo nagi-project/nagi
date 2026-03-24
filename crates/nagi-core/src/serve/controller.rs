@@ -190,7 +190,7 @@ pub(super) async fn run_controller(
     //
     // Each iteration:
     //   1. Spawn: drain work_queue into eval JoinSet (concurrent).
-    //   2. Spawn: start syncs from sync_queue (serialized per sync ref).
+    //   2. Spawn: start syncs from sync_queue (serialized per asset).
     //   3. Wait:  select! on the first event that fires:
     //      a) Timer        — interval elapsed → enqueue the due asset.
     //      b) Eval done    — update readiness; if Ready, propagate to
@@ -206,11 +206,13 @@ pub(super) async fn run_controller(
         // (1) Spawn pending evaluations — multiple may run concurrently.
         while let Some(name) = state.next_spawnable() {
             if let Some(&yaml) = yaml_map.get(name.as_str()) {
+                let skip_cache = state.is_awaiting_post_sync_eval(&name);
                 eval_tasks.spawn(reconciler::spawn_evaluate(
                     name,
                     yaml.to_string(),
                     cache_dir.clone(),
                     source_stats_dir.clone(),
+                    skip_cache,
                 ));
             }
         }
