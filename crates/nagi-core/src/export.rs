@@ -235,40 +235,10 @@ pub async fn export_table(
 ) -> Result<ExportResult, ExportError> {
     let wm = read_watermark(watermarks_dir, table)?;
 
-    // Step 1: For sync_logs, upload files and build a local→remote path map
-    let path_map = if table == ExportTable::SyncLogs {
-        if let Some(rs) = remote_store {
-            upload_sync_log_files(store, rs, wm.last_rowid).await?
-        } else {
-            std::collections::HashMap::new()
-        }
-    } else {
-        std::collections::HashMap::new()
-    };
+    let path_map = upload_path_map(store, remote_store, table, wm.last_rowid).await?;
 
-    // Step 2: Extract to JSONL temp file
-    let tmp_dir = std::env::temp_dir().join("nagi-export");
-    std::fs::create_dir_all(&tmp_dir)?;
-    let jsonl_path = tmp_dir.join(format!("{}.jsonl", table.table_name()));
-
-    let transform: Option<Box<crate::log::RowTransform>> = if !path_map.is_empty() {
-        Some(Box::new(
-            move |row: &mut serde_json::Map<String, serde_json::Value>| {
-                for field in &["stdout_path", "stderr_path"] {
-                    if let Some(serde_json::Value::String(local_path)) = row.get(*field) {
-                        if let Some(remote_uri) = path_map.get(local_path.as_str()) {
-                            row.insert(
-                                field.to_string(),
-                                serde_json::Value::String(remote_uri.clone()),
-                            );
-                        }
-                    }
-                }
-            },
-        ))
-    } else {
-        None
-    };
+    let jsonl_path = prepare_jsonl_path(table)?;
+    let transform = build_path_rewrite_transform(path_map);
 
     let mut file = std::fs::File::create(&jsonl_path)?;
     let (max_rowid, count) = store.extract_rows_jsonl(
@@ -285,16 +255,13 @@ pub async fn export_table(
         });
     }
 
-    // Step 3: Load JSONL into staging table
     let staging_table = format!("_staging_{}", table.table_name());
     conn.load_jsonl(&config.dataset, &staging_table, &jsonl_path)
         .await?;
 
-    // Step 4: MERGE into target table
     let merge_sql = build_merge_sql(&config.dataset, table);
     conn.execute_sql(&merge_sql).await?;
 
-    // Step 5: Update watermark
     write_watermark(
         watermarks_dir,
         table,
@@ -303,13 +270,58 @@ pub async fn export_table(
         },
     )?;
 
-    // Cleanup temp file
     let _ = std::fs::remove_file(&jsonl_path);
 
     Ok(ExportResult {
         table: table.table_name().to_string(),
         rows_exported: count,
     })
+}
+
+/// Uploads sync_log stdout/stderr files and returns a local→remote path map.
+/// For non-sync_logs tables or when no remote store is configured, returns an empty map.
+async fn upload_path_map(
+    store: &LogStore,
+    remote_store: Option<&crate::storage::remote::RemoteObjectStore>,
+    table: ExportTable,
+    last_rowid: i64,
+) -> Result<std::collections::HashMap<String, String>, ExportError> {
+    if table != ExportTable::SyncLogs {
+        return Ok(std::collections::HashMap::new());
+    }
+    let Some(rs) = remote_store else {
+        return Ok(std::collections::HashMap::new());
+    };
+    upload_sync_log_files(store, rs, last_rowid).await
+}
+
+/// Creates the tmp directory and returns the JSONL file path for the given table.
+fn prepare_jsonl_path(table: ExportTable) -> Result<PathBuf, ExportError> {
+    let tmp_dir = std::env::temp_dir().join("nagi-export");
+    std::fs::create_dir_all(&tmp_dir)?;
+    Ok(tmp_dir.join(format!("{}.jsonl", table.table_name())))
+}
+
+/// Builds an optional row transform that rewrites local file paths to remote URIs.
+fn build_path_rewrite_transform(
+    path_map: std::collections::HashMap<String, String>,
+) -> Option<Box<crate::log::RowTransform>> {
+    if path_map.is_empty() {
+        return None;
+    }
+    Some(Box::new(
+        move |row: &mut serde_json::Map<String, serde_json::Value>| {
+            for field in &["stdout_path", "stderr_path"] {
+                let remote_uri = row
+                    .get(*field)
+                    .and_then(|v| v.as_str())
+                    .and_then(|local| path_map.get(local));
+                if let Some(uri) = remote_uri {
+                    row.insert(field.to_string(), serde_json::Value::String(uri.clone()));
+                }
+            }
+        },
+    ))
 }
 
 /// Uploads stdout/stderr files referenced by unexported sync_logs rows.
@@ -917,6 +929,79 @@ mod tests {
                 assert!(spec.auto_sync);
             }
         }
+    }
+
+    #[test]
+    fn build_path_rewrite_transform_none_when_empty() {
+        let map = std::collections::HashMap::new();
+        assert!(build_path_rewrite_transform(map).is_none());
+    }
+
+    #[test]
+    fn build_path_rewrite_transform_rewrites_stdout() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("/local/out".to_string(), "gs://bucket/out".to_string());
+        let transform = build_path_rewrite_transform(map).unwrap();
+
+        let mut row = serde_json::Map::new();
+        row.insert(
+            "stdout_path".to_string(),
+            serde_json::Value::String("/local/out".to_string()),
+        );
+        row.insert(
+            "stderr_path".to_string(),
+            serde_json::Value::String("/other/err".to_string()),
+        );
+        transform(&mut row);
+
+        assert_eq!(row["stdout_path"], "gs://bucket/out");
+        assert_eq!(row["stderr_path"], "/other/err");
+    }
+
+    #[test]
+    fn build_path_rewrite_transform_rewrites_both() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("/local/out".to_string(), "gs://bucket/out".to_string());
+        map.insert("/local/err".to_string(), "gs://bucket/err".to_string());
+        let transform = build_path_rewrite_transform(map).unwrap();
+
+        let mut row = serde_json::Map::new();
+        row.insert(
+            "stdout_path".to_string(),
+            serde_json::Value::String("/local/out".to_string()),
+        );
+        row.insert(
+            "stderr_path".to_string(),
+            serde_json::Value::String("/local/err".to_string()),
+        );
+        transform(&mut row);
+
+        assert_eq!(row["stdout_path"], "gs://bucket/out");
+        assert_eq!(row["stderr_path"], "gs://bucket/err");
+    }
+
+    #[test]
+    fn build_path_rewrite_transform_ignores_missing_fields() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("/local/out".to_string(), "gs://bucket/out".to_string());
+        let transform = build_path_rewrite_transform(map).unwrap();
+
+        let mut row = serde_json::Map::new();
+        row.insert(
+            "other_field".to_string(),
+            serde_json::Value::String("value".to_string()),
+        );
+        transform(&mut row);
+
+        assert_eq!(row.len(), 1);
+        assert_eq!(row["other_field"], "value");
+    }
+
+    #[test]
+    fn prepare_jsonl_path_contains_table_name() {
+        let path = prepare_jsonl_path(ExportTable::SyncLogs).unwrap();
+        assert_eq!(path.file_name().unwrap(), "sync_logs.jsonl");
+        assert!(path.parent().unwrap().ends_with("nagi-export"));
     }
 
     #[test]
