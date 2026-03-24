@@ -11,7 +11,8 @@
 | SyncLockSkipped | Sync のロック取得がリトライ上限に達し、Sync がスキップされた場合 |
 | Halted | [`nagi serve halt`](../cli.md#serve-halt) による全 Asset 一括停止 |
 
-> **💡** 通知が未設定の場合や通知の送信に失敗した場合でも、serve ループの動作には影響しません。
+!!! tip
+    通知が未設定の場合や通知の送信に失敗した場合でも、serve ループの動作には影響しません。
 
 ## Slack
 

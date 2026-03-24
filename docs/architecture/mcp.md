@@ -12,7 +12,8 @@ Nagi は [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) サー
 | `nagi_evaluate` | [`nagi evaluate`](../cli.md#evaluate) | 読み取り専用 | 不要 |
 | `nagi_sync` | [`nagi sync`](../cli.md#sync) | 書き込み | 必要 |
 
-> **💡** デフォルトでは読み取り専用ツール（`nagi_status`、`nagi_evaluate`）のみが公開されます。`--allow-sync` を指定すると、`nagi_sync` も公開されます。
+!!! tip
+    デフォルトでは読み取り専用ツール（`nagi_status`、`nagi_evaluate`）のみが公開されます。`--allow-sync` を指定すると、`nagi_sync` も公開されます。
 
 ## Setup
 

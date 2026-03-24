@@ -18,12 +18,13 @@ nagi init
 
 対話形式で以下を行います。
 
-- dbt プロジェクトのパスと profile / target の設定
 - `resources/` ディレクトリと `nagi.yaml` の生成
+
+dbt を使用している場合は、続けて以下も設定します。
+
+- dbt プロジェクトのパスと profile / target の設定
 - Connection / Origin リソースの生成
 - dbt による接続確認
-
-完了すると、`resources/` に Connection と Origin の YAML ファイルが生成されます。
 
 ### 2. Compile
 

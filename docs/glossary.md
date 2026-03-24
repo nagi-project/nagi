@@ -81,13 +81,13 @@ Guardrails
 : Sync 実行後の状態悪化（Ready な条件が減少）や連続失敗を検知し、Asset の Sync を自動停止する安全装置。
 
 Upstream Propagation
-: 上流 Asset が Drifted → Ready に遷移したとき、下流 Asset の Evaluate を即座にトリガーする仕組み。
+: 上流 Asset が Drifted → Ready に遷移したとき、下流 Asset の Evaluate を即座に起動する仕組み。
 
 Source Change Detection
 : Source テーブルの統計値（行数・バイト数）が前回から変化していない場合にキャッシュ済みの評価結果を返し、データウェアハウスへのクエリを省略するための最適化。
 
 SyncLock
-: 同じ Sync を参照する Asset 間で Sync の同時実行を防ぐ排他ロック。TTL 付きでデッドロックを防止する。
+: 同じ Asset に対する Sync の同時実行を防ぐ排他ロック。TTL 付きでデッドロックを防止する。
 
 Graceful Shutdown
 : `Ctrl-C` による停止時に新規タスクの発行を停止し、実行中の Sync サブプロセスの完了を待つ。待機上限は `terminationGracePeriodSeconds` で設定。

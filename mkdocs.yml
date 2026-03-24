@@ -54,6 +54,7 @@ nav:
       - "kind: Origin": configurations/resources/origin.md
   - Architecture:
     - Serve: architecture/serve.md
+    - Serve Scenarios: architecture/serve-scenarios.md
     - Storage: architecture/storage.md
     - Notifications: architecture/notifications.md
     - MCP Server: architecture/mcp.md

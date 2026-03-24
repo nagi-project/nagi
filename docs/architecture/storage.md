@@ -4,7 +4,7 @@ Nagi は以下のデータを保存します。[nagi.yaml](../configurations/pro
 
 | データ | 説明 | ローカル（デフォルト） | リモート（GCS / S3） |
 | --- | --- | --- | --- |
-| cache | evaluate 結果のキャッシュ | `~/.nagi/cache/` | `{bucket}/cache/` |
+| cache/evaluate | evaluate 結果のキャッシュ | `~/.nagi/cache/evaluate/` | `{bucket}/cache/evaluate/` |
 | locks | sync の排他ロック | `~/.nagi/locks/` | `{bucket}/locks/` |
 | suspended | Guardrails による停止フラグ | `~/.nagi/suspended/` | `{bucket}/suspended/` |
 | logs.db | 実行履歴を保存する SQLite ファイル | `~/.nagi/logs.db` | `~/.nagi/logs.db` |
@@ -18,13 +18,17 @@ Nagi は以下のデータを保存します。[nagi.yaml](../configurations/pro
 
 ## Caches
 
-Evaluate の結果を Asset ごとにファイルとして保存します。[`nagi status`](../cli.md#status) はこのキャッシュを読み取るため、評価は実行しません。複数の Asset の評価が並行して行われても、ファイルが分かれているため競合を回避できます。
+Evaluate の結果を Asset・条件ごとにファイルとして保存します。[`nagi status`](../cli.md#status) はこのキャッシュを読み取るため、評価は実行しません。`nagi serve` では条件ごとの `evaluateCacheTtl` に基づき、TTL 内であればキャッシュ済みの結果を再利用してクエリの実行をスキップします。
 
 ```text
-~/.nagi/cache/
-├── daily-sales.json
-├── raw-sales.json
-└── monthly-report.json
+~/.nagi/cache/evaluate/
+├── daily-sales/
+│   ├── freshness-check.json
+│   └── data-test.json
+├── raw-sales/
+│   └── freshness-check.json
+└── monthly-report/
+    └── freshness-check.json
 ```
 
 <!-- schema:auto-generated:start:AssetEvalResult -->
@@ -40,16 +44,17 @@ Evaluate の結果を Asset ごとにファイルとして保存します。[`na
 
 ## Locks
 
-同じ [kind: Sync](../configurations/resources/sync.md) を参照する Asset が sync を直列実行するための排他ロックです。同じ Sync を参照するということは、同じ外部コマンドの実行手順を共有しているため、並列実行すると外部ツールの内部状態が競合する可能性があります。これを回避するために、排他ロック用のファイルを作成します。
+Asset ごとの sync 同時実行を防ぐ排他ロックです。同じ Asset に対する sync が並列実行されると操作対象のデータが競合するため、排他ロック用のファイルを作成します。
 
-> **💡** すべてのロックは TTL（有効期限）付きで、プロセスが異常終了した場合でも期限切れにより自動で解放されます。TTL は [`nagi.yaml`](../configurations/project.md) の `lockTtlSeconds` で変更できます（デフォルト: 3600秒）。
+!!! tip
+    すべてのロックは TTL（有効期限）付きで、プロセスが異常終了した場合でも期限切れにより自動で解放されます。TTL は [`nagi.yaml`](../configurations/project.md) の `lockTtlSeconds` で変更できます（デフォルト: 3600秒）。
 
-ファイル名は [kind: Sync](../configurations/resources/sync.md) の `metadata.name` に対応します。
+ファイル名は [kind: Asset](../configurations/resources/asset.md) の `metadata.name` に対応します。
 
 ```text
 ~/.nagi/locks/
-├── {sync-name-01}.lock
-└── {sync-name-02}.lock
+├── {asset-name-01}.lock
+└── {asset-name-02}.lock
 ```
 
 <!-- schema:auto-generated:start:LockInfo -->
@@ -64,7 +69,7 @@ Evaluate の結果を Asset ごとにファイルとして保存します。[`na
 
 ## Suspended
 
-Guardrails が sync を停止した Asset のフラグです。停止理由、停止時刻、トリガーとなった sync の実行 ID を含みます。[`nagi serve resume`](../cli.md#serve-resume) で解除します。
+Guardrails が sync を停止した Asset のフラグです。停止理由、停止時刻、起動元となった sync の実行 ID を含みます。[`nagi serve resume`](../cli.md#serve-resume) で解除します。
 
 ファイル名は [kind: Asset](../configurations/resources/asset.md) の `metadata.name` に対応します。
 

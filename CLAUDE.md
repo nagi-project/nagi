@@ -83,6 +83,10 @@ parse_duration_test! {
 }
 ```
 
+### Documentation
+
+- All headings in documentation files (`docs/`) must be in English.
+
 ### General
 
 - When using external tools, libraries, or SDKs, always refer to the official documentation to verify correct usage.
