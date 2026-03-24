@@ -297,18 +297,20 @@ impl ServeState {
         }
     }
 
-    /// If a Not Ready → Ready transition occurred, enqueues downstream assets
-    /// for re-evaluation and returns their names.
+    /// If a Not Ready → Ready transition occurred, requests sync on downstream
+    /// assets directly (skipping evaluate) and returns their names.
+    /// The upstream Drifted → Ready transition means upstream data changed,
+    /// which is sufficient grounds to sync downstreams without evaluating first.
     fn propagate_downstream(&mut self, asset_name: &str, ready: bool) -> Vec<String> {
         if !self.readiness.record(asset_name, ready) {
             return Vec::new();
         }
-        let Some(downstreams) = self.downstream_map.get(asset_name) else {
+        let Some(downstreams) = self.downstream_map.get(asset_name).cloned() else {
             return Vec::new();
         };
         let mut propagated = Vec::new();
-        for ds in downstreams {
-            if !self.in_flight.contains(ds) && self.work_queue.enqueue(ds.clone()) {
+        for ds in &downstreams {
+            if self.request_sync(ds) {
                 propagated.push(ds.clone());
             }
         }
@@ -612,19 +614,24 @@ mod tests {
     // ── propagate_downstream tests ───────────────────────────────────────
 
     #[test]
-    fn propagate_downstream_enqueues_on_transition() {
+    fn propagate_downstream_requests_sync_on_transition() {
         let edges = vec![edge("a", "b"), edge("a", "c")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
+        state.init(&[asset_entry_with_sync("b"), asset_entry_with_sync("c")]);
         state.readiness.record("a", false);
 
         let propagated = state.propagate_downstream("a", true);
         assert_eq!(propagated, vec!["b".to_string(), "c".to_string()]);
+        // Downstreams should be in sync_queue, not work_queue
+        assert_eq!(state.sync_queue.dequeue(), Some("b".to_string()));
+        assert_eq!(state.sync_queue.dequeue(), Some("c".to_string()));
     }
 
     #[test]
     fn propagate_downstream_skips_without_transition() {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
+        state.init(&[asset_entry_with_sync("b")]);
         state.readiness.record("a", false);
         state.propagate_downstream("a", true);
 
@@ -633,11 +640,12 @@ mod tests {
     }
 
     #[test]
-    fn propagate_downstream_skips_in_flight() {
+    fn propagate_downstream_skips_when_already_syncing() {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
+        state.init(&[asset_entry_with_sync("b")]);
         state.readiness.record("a", false);
-        state.in_flight.insert("b".to_string());
+        state.syncing.insert("b".to_string());
 
         let propagated = state.propagate_downstream("a", true);
         assert!(propagated.is_empty());
@@ -649,6 +657,44 @@ mod tests {
         state.readiness.record("a", false);
 
         let propagated = state.propagate_downstream("a", true);
+        assert!(propagated.is_empty());
+    }
+
+    #[test]
+    fn propagate_downstream_does_not_enqueue_evaluate() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges, mem_suspended_store());
+        state.init(&[asset_entry_with_sync("b")]);
+        // Drain initial work_queue entries from init
+        while state.work_queue.dequeue().is_some() {}
+        state.readiness.record("a", false);
+
+        state.propagate_downstream("a", true);
+
+        // work_queue (evaluate) must remain empty; only sync_queue is used.
+        assert!(state.work_queue.dequeue().is_none());
+        assert_eq!(state.sync_queue.dequeue(), Some("b".to_string()));
+    }
+
+    #[test]
+    fn propagate_downstream_diamond_syncs_once_when_concurrent() {
+        // A → B → X, A → C → X
+        let edges = vec![edge("b", "x"), edge("c", "x")];
+        let mut state = ServeState::new(&edges, mem_suspended_store());
+        state.init(&[asset_entry_with_sync("x")]);
+        while state.work_queue.dequeue().is_some() {}
+
+        // B becomes Ready → X sync requested
+        state.readiness.record("b", false);
+        let propagated = state.propagate_downstream("b", true);
+        assert_eq!(propagated, vec!["x".to_string()]);
+
+        // Start X's sync
+        assert_eq!(state.next_syncable(), Some("x".to_string()));
+
+        // C becomes Ready while X is syncing → X sync rejected
+        state.readiness.record("c", false);
+        let propagated = state.propagate_downstream("c", true);
         assert!(propagated.is_empty());
     }
 
@@ -816,7 +862,7 @@ mod tests {
     fn on_eval_complete_updates_state() {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
-        state.init(&[asset_entry("a", None), asset_entry("b", None)]);
+        state.init(&[asset_entry("a", None), asset_entry_with_sync("b")]);
         state.in_flight.insert("a".to_string());
         while state.work_queue.dequeue().is_some() {}
 
@@ -826,7 +872,8 @@ mod tests {
         state.on_eval_complete(join_result);
 
         assert!(!state.in_flight.contains("a"));
-        assert_eq!(state.work_queue.dequeue(), Some("b".to_string()));
+        // Downstream "b" is enqueued for sync (not evaluate) on upstream Ready.
+        assert_eq!(state.sync_queue.dequeue(), Some("b".to_string()));
     }
 
     #[test]
