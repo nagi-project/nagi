@@ -49,7 +49,7 @@
       ]
     },
     "syncType": {
-      "description": "The sync operation type.",
+      "description": "Whether this was a `sync` operation.",
       "type": "string"
     }
   },

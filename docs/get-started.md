@@ -67,6 +67,22 @@ nagi sync --dry-run                  # 実行されるコマンドを確認。Sy
 
 `nagi sync` は実行前にプランを表示し、ユーザーの承認を求めます。完了後は自動で evaluate を実行します。
 
+### Resource List
+
+```bash
+nagi ls                              # コンパイル済みリソースを一覧表示
+```
+
+### Export
+
+[`nagi.yaml`](./configurations/project.md) の `export` を設定すると、実行ログをリモート DWH にエクスポートできます。
+
+```bash
+nagi export                          # 全テーブルの差分を転送
+nagi export --dry-run                # 未エクスポートの行数を確認
+nagi export --select sync_logs       # 指定テーブルのみ転送
+```
+
 ### Serve Control
 
 [`nagi serve`](./cli.md#serve) の実行中に Guardrails によって停止された Asset を管理できます。

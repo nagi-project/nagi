@@ -260,6 +260,14 @@
       "format": "duration",
       "type": "string"
     },
+    "MergePosition": {
+      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries during Asset overlay merge.",
+      "enum": [
+        "beforeOrigin",
+        "afterOrigin"
+      ],
+      "type": "string"
+    },
     "Metadata": {
       "description": "Common metadata shared by all resource kinds.",
       "properties": {
@@ -278,6 +286,15 @@
         "conditions": {
           "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
           "type": "string"
+        },
+        "mergePosition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MergePosition"
+            }
+          ],
+          "default": "beforeOrigin",
+          "description": "Controls insertion position during overlay merge. Not included in compiled output."
         },
         "sync": {
           "description": "Name of the Sync resource to execute when drift is detected.",

@@ -97,6 +97,12 @@ Graceful Shutdown
 compile
 : `resources/` のリソース定義を検証・解決し、`target/` にコンパイル済み Asset と依存グラフを出力するコマンド。
 
+ls
+: コンパイル済みリソースを JSON で一覧表示するコマンド。
+
+export
+: 実行ログ（`logs.db`）をリモート DWH にエクスポートするコマンド。ウォーターマークによる差分転送を行う。
+
 resources
 : ユーザーが定義するリソース YAML の配置ディレクトリ。
 

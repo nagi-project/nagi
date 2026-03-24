@@ -1,7 +1,7 @@
 site_name: Nagi Documentation
-site_url: https://tosh2230.github.io/nagi/
-repo_url: https://github.com/tosh2230/nagi
-repo_name: tosh2230/nagi
+site_url: https://nagi-project.github.io/nagi/
+repo_url: https://github.com/nagi-project/nagi
+repo_name: nagi-project/nagi
 edit_uri: edit/main/docs/
 
 theme:
