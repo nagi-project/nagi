@@ -53,7 +53,7 @@ dbt CLI をサブプロセスとして実行します（例: `dbt run --select d
     - 関連ジョブが実行中でなければ、Sync を実行する
     - 関連ジョブが実行中であれば、エラーを返す
 
-### 使用する API
+### API
 
 Nagi は以下の dbt Cloud Administrative API エンドポイントを使用します。
 
@@ -62,7 +62,7 @@ Nagi は以下の dbt Cloud Administrative API エンドポイントを使用し
 | compile | `GET /api/v2/accounts/{account_id}/jobs/` | 全ジョブの `execute_steps` を取得し、Asset とジョブの対応を構築する |
 | sync | `GET /api/v2/accounts/{account_id}/runs/?status=3` | 実行中のジョブ（status=3: Running）を取得し、対象 Asset に関連するジョブが実行中か確認する |
 
-### 必要な権限
+### Required Permissions
 
 dbt Cloud の API トークンには以下の権限が必要です。
 
@@ -71,21 +71,7 @@ dbt Cloud の API トークンには以下の権限が必要です。
 | Jobs の読み取り（Read） | ジョブ定義と `execute_steps` の取得 |
 | Runs の読み取り（Read） | 実行中ジョブの確認 |
 
-`~/.dbt/dbt_cloud.yml` に含まれる `token-value` がこの API 認証に使用されます。トークンは API 呼び出し時にファイルから読み取られ、メモリに保持されません。
-
-```text
-dbt Cloud has running jobs that include asset 'daily-sales':
-  job-42 (Running)
-Use --force to override.
-```
-
-`--force` フラグを指定すると、実行中ジョブの有無にかかわらず Sync を実行します。
-
-```bash
-nagi sync --select daily-sales --force
-```
-
-`nagi serve` では `--force` は指定できません。実行中ジョブがある場合はその Sync がエラーとなり、次の評価サイクルで再試行されます。
+`~/.dbt/dbt_cloud.yml` に含まれる `token-value` がこの API 認証に使用されます。トークンは API 呼び出し時にファイルから読み取られますが、メモリには保持されません。
 
 ## Customization
 
