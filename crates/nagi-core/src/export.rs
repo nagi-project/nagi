@@ -75,11 +75,6 @@ pub struct Watermark {
     pub last_rowid: i64,
 }
 
-/// Returns the watermarks directory under the given nagi dir.
-pub fn watermarks_dir(nagi_dir: &Path) -> PathBuf {
-    nagi_dir.join("logs").join("watermarks")
-}
-
 /// Reads the watermark for a table. Returns `last_rowid = 0` if no watermark file exists.
 pub fn read_watermark(watermarks_dir: &Path, table: ExportTable) -> Result<Watermark, ExportError> {
     let path = watermarks_dir.join(format!("{}.json", table.table_name()));
@@ -157,9 +152,9 @@ pub fn dry_run_for_config(
         None => vec![],
     };
     dry_run_all(
-        &config.db_path(),
-        &config.logs_dir(),
-        &watermarks_dir(&config.nagi_dir),
+        &config.nagi_dir.db_path(),
+        &config.nagi_dir.logs_dir(),
+        &config.nagi_dir.watermarks_dir(),
         &tables,
     )
 }
@@ -389,10 +384,10 @@ pub async fn export_for_config(
         None => vec![],
     };
 
-    let log_store = LogStore::open(&config.db_path(), &config.logs_dir())?;
+    let log_store = LogStore::open(&config.nagi_dir.db_path(), &config.nagi_dir.logs_dir())?;
     let conn = resolve_export_connection(resources_dir, &export_config.connection)?;
     let remote_store = crate::storage::remote::create_remote_store(&config.backend).ok();
-    let wm_dir = watermarks_dir(&config.nagi_dir);
+    let wm_dir = config.nagi_dir.watermarks_dir();
 
     Ok(export_all(
         &log_store,
@@ -585,13 +580,13 @@ pub async fn try_export(resources_dir: &Path, project_dir: &Path) {
         None => return,
     };
 
-    let wm_dir = watermarks_dir(&config.nagi_dir);
+    let wm_dir = config.nagi_dir.watermarks_dir();
     if !should_export(&wm_dir, &export_config.interval) {
         return;
     }
 
-    let db_path = config.db_path();
-    let logs_dir = config.logs_dir();
+    let db_path = config.nagi_dir.db_path();
+    let logs_dir = config.nagi_dir.logs_dir();
 
     let log_store = match LogStore::open(&db_path, &logs_dir) {
         Ok(s) => s,

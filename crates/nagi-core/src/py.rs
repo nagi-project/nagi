@@ -49,7 +49,7 @@ pub fn evaluate_all(
     let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
     let resolved_cache = cache_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| nagi_dir.join("cache"));
+        .unwrap_or_else(|| nagi_dir.cache_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::evaluate::evaluate_all(
         std::path::Path::new(target_dir),
@@ -197,10 +197,10 @@ pub fn asset_status(
     let config = crate::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
     let db = db_path
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| config.db_path());
+        .unwrap_or_else(|| config.nagi_dir.db_path());
     let logs = logs_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| config.logs_dir());
+        .unwrap_or_else(|| config.nagi_dir.logs_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::status::asset_status(
         std::path::Path::new(target_dir),
@@ -208,7 +208,7 @@ pub fn asset_status(
         Some(
             cache_dir
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| config.cache_dir())
+                .unwrap_or_else(|| config.nagi_dir.cache_dir())
                 .as_path(),
         ),
         &db,
@@ -216,7 +216,7 @@ pub fn asset_status(
         Some(
             suspended_dir
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| config.suspended_dir())
+                .unwrap_or_else(|| config.nagi_dir.suspended_dir())
                 .as_path(),
         ),
     )
@@ -271,9 +271,11 @@ pub fn try_export(resources_dir: &str, project_dir: &str) {
 #[pyfunction]
 #[pyo3(signature = (base_dir=".", nagi_dir=None))]
 pub fn init_workspace(base_dir: &str, nagi_dir: Option<&str>) -> PyResult<()> {
-    let nd = nagi_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::config::default_nagi_dir);
+    let nd = crate::config::NagiDir::new(
+        nagi_dir
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(crate::config::default_nagi_dir),
+    );
     crate::init::init_workspace(std::path::Path::new(base_dir), &nd).map_err(to_py_err)
 }
 

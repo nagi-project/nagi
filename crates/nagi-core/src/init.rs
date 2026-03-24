@@ -4,11 +4,6 @@ use thiserror::Error;
 
 use crate::log::{LogError, LogStore};
 
-/// Returns the default nagi home directory (`~/.nagi`).
-pub fn default_nagi_dir() -> std::path::PathBuf {
-    crate::config::default_nagi_dir()
-}
-
 #[derive(Debug, Error)]
 pub enum InitError {
     #[error("I/O error: {0}")]
@@ -85,12 +80,12 @@ pub fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
 }
 
 /// Initialises the workspace: creates `resources/`, config, log store, and watermarks directory.
-pub fn init_workspace(base_dir: &Path, nagi_dir: &Path) -> Result<(), InitError> {
+pub fn init_workspace(base_dir: &Path, nagi_dir: &crate::config::NagiDir) -> Result<(), InitError> {
     ensure_resources_dir(base_dir)?;
-    ensure_config(nagi_dir)?;
-    let db_path = nagi_dir.join("logs.db");
-    let logs_dir = nagi_dir.join("logs");
-    let watermarks_dir = nagi_dir.join("logs").join("watermarks");
+    ensure_config(nagi_dir.root())?;
+    let db_path = nagi_dir.db_path();
+    let logs_dir = nagi_dir.logs_dir();
+    let watermarks_dir = nagi_dir.watermarks_dir();
     ensure_log_store_with_watermarks(&db_path, &logs_dir, &watermarks_dir)?;
     ensure_watermarks_dir(&watermarks_dir)?;
     Ok(())
@@ -370,11 +365,11 @@ mod tests {
     #[test]
     fn init_workspace_creates_all() {
         let dir = tempfile::tempdir().unwrap();
-        let nagi_dir = dir.path().join(".nagi");
+        let nagi_dir = crate::config::NagiDir::new(dir.path().join(".nagi"));
         init_workspace(dir.path(), &nagi_dir).unwrap();
         assert!(dir.path().join("resources").exists());
-        assert!(nagi_dir.join("logs.db").exists());
-        assert!(nagi_dir.join("logs").join("watermarks").exists());
+        assert!(nagi_dir.db_path().exists());
+        assert!(nagi_dir.watermarks_dir().exists());
     }
 
     #[test]

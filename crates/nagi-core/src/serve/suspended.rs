@@ -20,10 +20,6 @@ pub struct SuspendedInfo {
     pub execution_id: Option<String>,
 }
 
-pub fn suspended_dir(nagi_dir: &Path) -> PathBuf {
-    nagi_dir.join("suspended")
-}
-
 /// Validates that the asset name is a safe filename component (no path
 /// separators, no `.` or `..`, no null bytes).
 fn validate_asset_name(asset_name: &str) -> std::io::Result<()> {

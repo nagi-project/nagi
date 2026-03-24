@@ -235,9 +235,9 @@ pub async fn evaluate_from_compiled(
     )
     .await?;
 
-    let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
-        crate::config::resolve_nagi_dir(std::path::Path::new(".")).join("cache")
-    });
+    let cache_path = cache_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::config::resolve_nagi_dir(std::path::Path::new(".")).cache_dir());
     let cache = LocalCache::new(cache_path);
     cache
         .write(&result)

@@ -41,7 +41,7 @@ use controller::{
     await_controller_shutdown, build_controller_inputs, build_notifier, run_controller,
     BackendStores,
 };
-use suspended::{list_suspended, remove_suspended, suspended_dir, suspended_path};
+use suspended::{list_suspended, remove_suspended, suspended_path};
 
 use crate::storage::local::{LocalSuspendedStore, LocalSyncLock};
 use crate::storage::SuspendedStore;
@@ -140,9 +140,9 @@ fn load_controller_inputs(
     let resolved_cache = Some(
         cache_dir
             .map(PathBuf::from)
-            .unwrap_or_else(|| config.cache_dir()),
+            .unwrap_or_else(|| config.nagi_dir.cache_dir()),
     );
-    let resolved_stats = Some(config.source_stats_dir());
+    let resolved_stats = Some(config.nagi_dir.source_stats_dir());
     for input in &mut inputs {
         input.cache_dir = resolved_cache.clone();
         input.source_stats_dir = resolved_stats.clone();
@@ -161,8 +161,8 @@ fn spawn_controllers(
 ) -> Result<(watch::Sender<bool>, Vec<ControllerHandle>), ServeError> {
     let notifier = build_notifier(project_dir);
     let base_backend = build_backend_stores(config)?;
-    let db_path = config.db_path();
-    let logs_dir = config.logs_dir();
+    let db_path = config.nagi_dir.db_path();
+    let logs_dir = config.nagi_dir.logs_dir();
 
     let lc = reconciler::LockConfig {
         ttl_seconds: config.lock_ttl_seconds,
@@ -201,9 +201,9 @@ async fn run_final_export(config: &crate::config::NagiConfig, resources_dir: &Pa
     };
 
     tracing::info!("running final export...");
-    let db_path = config.db_path();
-    let logs_dir = config.logs_dir();
-    let wm_dir = crate::export::watermarks_dir(&config.nagi_dir);
+    let db_path = config.nagi_dir.db_path();
+    let logs_dir = config.nagi_dir.logs_dir();
+    let wm_dir = config.nagi_dir.watermarks_dir();
 
     let log_store = match crate::log::LogStore::open(&db_path, &logs_dir) {
         Ok(s) => s,
@@ -246,9 +246,9 @@ fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendSto
     match config.backend.r#type.as_str() {
         "local" => {
             let sync_lock: Arc<dyn crate::storage::SyncLock> =
-                Arc::new(LocalSyncLock::new(config.locks_dir()));
+                Arc::new(LocalSyncLock::new(config.nagi_dir.locks_dir()));
             let suspended_store: Arc<dyn SuspendedStore> =
-                Arc::new(LocalSuspendedStore::new(config.suspended_dir()));
+                Arc::new(LocalSuspendedStore::new(config.nagi_dir.suspended_dir()));
             Ok(BackendStores {
                 sync_lock,
                 suspended_store,
@@ -267,16 +267,21 @@ fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendSto
 }
 
 /// Lists all currently suspended assets.
-pub fn list_suspended_assets(nagi_dir: &Path) -> Result<Vec<SuspendedInfo>, std::io::Error> {
-    list_suspended(&suspended_dir(nagi_dir))
+pub fn list_suspended_assets(
+    nagi_dir: &crate::config::NagiDir,
+) -> Result<Vec<SuspendedInfo>, std::io::Error> {
+    list_suspended(&nagi_dir.suspended_dir())
 }
 
 /// Resumes suspended assets by removing their flag files.
 ///
 /// If `selectors` is empty, lists suspended assets without removing.
 /// If `selectors` is non-empty, removes the suspended flag for each matching asset.
-pub fn resume(selectors: &[&str], nagi_dir: &Path) -> Result<Vec<String>, std::io::Error> {
-    let dir = suspended_dir(nagi_dir);
+pub fn resume(
+    selectors: &[&str],
+    nagi_dir: &crate::config::NagiDir,
+) -> Result<Vec<String>, std::io::Error> {
+    let dir = nagi_dir.suspended_dir();
     if selectors.is_empty() {
         let items = list_suspended(&dir)?;
         return Ok(items.into_iter().map(|i| i.asset_name).collect());
@@ -295,12 +300,16 @@ pub fn resume(selectors: &[&str], nagi_dir: &Path) -> Result<Vec<String>, std::i
 ///
 /// Returns the list of asset names that were halted (newly suspended).
 /// Assets already suspended are skipped.
-pub fn halt(target_dir: &Path, reason: &str, nagi_dir: &Path) -> Result<Vec<String>, ServeError> {
+pub fn halt(
+    target_dir: &Path,
+    reason: &str,
+    nagi_dir: &crate::config::NagiDir,
+) -> Result<Vec<String>, ServeError> {
     use crate::storage::local::LocalSuspendedStore;
     use crate::storage::SuspendedStore;
 
     let asset_names = crate::compile::resolve_compiled_asset_names(target_dir, &[])?;
-    let store = LocalSuspendedStore::new(suspended_dir(nagi_dir));
+    let store = LocalSuspendedStore::new(nagi_dir.suspended_dir());
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut halted = Vec::new();

@@ -46,10 +46,10 @@ pub fn asset_status_for_config(
     asset_status(
         target_dir,
         selectors,
-        Some(config.cache_dir().as_path()),
-        &config.db_path(),
-        &config.logs_dir(),
-        Some(config.suspended_dir().as_path()),
+        Some(config.nagi_dir.cache_dir().as_path()),
+        &config.nagi_dir.db_path(),
+        &config.nagi_dir.logs_dir(),
+        Some(config.nagi_dir.suspended_dir().as_path()),
     )
 }
 
@@ -67,7 +67,7 @@ pub fn asset_status(
     let cache = LocalCache::new(
         cache_dir
             .map(PathBuf::from)
-            .unwrap_or_else(|| crate::config::resolve_nagi_dir(Path::new(".")).join("cache")),
+            .unwrap_or_else(|| crate::config::resolve_nagi_dir(Path::new(".")).cache_dir()),
     );
 
     let store = if db_path.exists() {

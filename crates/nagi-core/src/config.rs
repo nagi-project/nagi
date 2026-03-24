@@ -40,9 +40,9 @@ pub struct NagiConfig {
     #[serde(default = "default_lock_retry_max_attempts")]
     pub lock_retry_max_attempts: u32,
     /// Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.
-    #[serde(default = "default_nagi_dir")]
+    #[serde(default)]
     #[schemars(default = "schema_default_nagi_dir")]
-    pub nagi_dir: PathBuf,
+    pub nagi_dir: NagiDir,
     /// Log export configuration. When set, compile generates export Assets
     /// and logs are transferred to the remote DWH.
     pub export: Option<ExportConfig>,
@@ -58,35 +58,9 @@ impl Default for NagiConfig {
             lock_ttl_seconds: default_lock_ttl_seconds(),
             lock_retry_interval_seconds: default_lock_retry_interval_seconds(),
             lock_retry_max_attempts: default_lock_retry_max_attempts(),
-            nagi_dir: default_nagi_dir(),
+            nagi_dir: NagiDir::default(),
             export: None,
         }
-    }
-}
-
-impl NagiConfig {
-    pub fn db_path(&self) -> PathBuf {
-        self.nagi_dir.join("logs.db")
-    }
-
-    pub fn logs_dir(&self) -> PathBuf {
-        self.nagi_dir.join("logs")
-    }
-
-    pub fn cache_dir(&self) -> PathBuf {
-        self.nagi_dir.join("cache")
-    }
-
-    pub fn locks_dir(&self) -> PathBuf {
-        self.nagi_dir.join("locks")
-    }
-
-    pub fn suspended_dir(&self) -> PathBuf {
-        self.nagi_dir.join("suspended")
-    }
-
-    pub fn source_stats_dir(&self) -> PathBuf {
-        self.nagi_dir.join("source_stats")
     }
 }
 
@@ -102,20 +76,78 @@ fn default_lock_retry_max_attempts() -> u32 {
     3
 }
 
-pub fn default_nagi_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".nagi")
+/// Newtype wrapper around the Nagi state directory path.
+/// Provides accessors for all well-known subdirectories.
+///
+/// Deserializes from a plain string path (e.g. `"~/.nagi"` in YAML).
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct NagiDir(PathBuf);
+
+impl NagiDir {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.0.join("logs.db")
+    }
+
+    pub fn logs_dir(&self) -> PathBuf {
+        self.0.join("logs")
+    }
+
+    pub fn cache_dir(&self) -> PathBuf {
+        self.0.join("cache")
+    }
+
+    pub fn locks_dir(&self) -> PathBuf {
+        self.0.join("locks")
+    }
+
+    pub fn suspended_dir(&self) -> PathBuf {
+        self.0.join("suspended")
+    }
+
+    pub fn source_stats_dir(&self) -> PathBuf {
+        self.0.join("source_stats")
+    }
+
+    pub fn watermarks_dir(&self) -> PathBuf {
+        self.0.join("watermarks")
+    }
 }
 
-fn schema_default_nagi_dir() -> PathBuf {
-    PathBuf::from("~/.nagi")
+impl Default for NagiDir {
+    fn default() -> Self {
+        Self(dirs::home_dir().unwrap_or_default().join(".nagi"))
+    }
 }
 
-/// Loads config from `project_dir` and returns the resolved `nagi_dir`.
+impl AsRef<Path> for NagiDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+pub fn default_nagi_dir() -> NagiDir {
+    NagiDir::default()
+}
+
+fn schema_default_nagi_dir() -> NagiDir {
+    NagiDir::new(PathBuf::from("~/.nagi"))
+}
+
+/// Loads config from `project_dir` and returns the resolved `NagiDir`.
 /// Falls back to the default if the config file is missing or unreadable.
-pub fn resolve_nagi_dir(project_dir: &Path) -> PathBuf {
+pub fn resolve_nagi_dir(project_dir: &Path) -> NagiDir {
     load_config(project_dir)
         .map(|c| c.nagi_dir)
-        .unwrap_or_else(|_| default_nagi_dir())
+        .unwrap_or_default()
 }
 
 /// Export format for log data.
@@ -405,7 +437,7 @@ notify:
     #[test]
     fn default_nagi_dir_is_dot_nagi() {
         let config = NagiConfig::default();
-        assert!(config.nagi_dir.ends_with(".nagi"));
+        assert!(config.nagi_dir.root().ends_with(".nagi"));
     }
 
     #[test]
@@ -414,7 +446,7 @@ notify:
         let yaml = "nagiDir: /tmp/my-nagi";
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.nagi_dir, PathBuf::from("/tmp/my-nagi"));
+        assert_eq!(config.nagi_dir, NagiDir::new(PathBuf::from("/tmp/my-nagi")));
     }
 
     #[test]
@@ -423,26 +455,39 @@ notify:
         let yaml = "backend:\n  type: local";
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.nagi_dir, default_nagi_dir());
+        assert_eq!(config.nagi_dir, NagiDir::default());
     }
 
     #[test]
     fn config_derived_paths() {
         let config = NagiConfig {
-            nagi_dir: PathBuf::from("/data/nagi"),
+            nagi_dir: NagiDir::new(PathBuf::from("/data/nagi")),
             ..NagiConfig::default()
         };
-        assert_eq!(config.db_path(), PathBuf::from("/data/nagi/logs.db"));
-        assert_eq!(config.logs_dir(), PathBuf::from("/data/nagi/logs"));
-        assert_eq!(config.cache_dir(), PathBuf::from("/data/nagi/cache"));
-        assert_eq!(config.locks_dir(), PathBuf::from("/data/nagi/locks"));
         assert_eq!(
-            config.suspended_dir(),
+            config.nagi_dir.db_path(),
+            PathBuf::from("/data/nagi/logs.db")
+        );
+        assert_eq!(config.nagi_dir.logs_dir(), PathBuf::from("/data/nagi/logs"));
+        assert_eq!(
+            config.nagi_dir.cache_dir(),
+            PathBuf::from("/data/nagi/cache")
+        );
+        assert_eq!(
+            config.nagi_dir.locks_dir(),
+            PathBuf::from("/data/nagi/locks")
+        );
+        assert_eq!(
+            config.nagi_dir.suspended_dir(),
             PathBuf::from("/data/nagi/suspended")
         );
         assert_eq!(
-            config.source_stats_dir(),
+            config.nagi_dir.source_stats_dir(),
             PathBuf::from("/data/nagi/source_stats")
+        );
+        assert_eq!(
+            config.nagi_dir.watermarks_dir(),
+            PathBuf::from("/data/nagi/watermarks")
         );
     }
 
@@ -511,5 +556,54 @@ export:
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(config.export.is_none());
+    }
+
+    // ── NagiDir ──────────────────────────────────────────────────────────
+
+    macro_rules! nagi_dir_path_test {
+        ($($name:ident: $method:ident => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let nd = NagiDir::new(PathBuf::from("/state"));
+                    assert_eq!(nd.$method(), PathBuf::from($expected));
+                }
+            )*
+        };
+    }
+
+    nagi_dir_path_test! {
+        nagi_dir_db_path:        db_path        => "/state/logs.db";
+        nagi_dir_logs_dir:       logs_dir       => "/state/logs";
+        nagi_dir_cache_dir:      cache_dir      => "/state/cache";
+        nagi_dir_locks_dir:      locks_dir      => "/state/locks";
+        nagi_dir_suspended_dir:  suspended_dir  => "/state/suspended";
+        nagi_dir_source_stats:   source_stats_dir => "/state/source_stats";
+        nagi_dir_watermarks:     watermarks_dir => "/state/watermarks";
+    }
+
+    #[test]
+    fn nagi_dir_root() {
+        let nd = NagiDir::new(PathBuf::from("/state"));
+        assert_eq!(nd.root(), Path::new("/state"));
+    }
+
+    #[test]
+    fn nagi_dir_default_ends_with_dot_nagi() {
+        let nd = NagiDir::default();
+        assert!(nd.root().ends_with(".nagi"));
+    }
+
+    #[test]
+    fn nagi_dir_as_ref_returns_root() {
+        let nd = NagiDir::new(PathBuf::from("/state"));
+        let p: &Path = nd.as_ref();
+        assert_eq!(p, Path::new("/state"));
+    }
+
+    #[test]
+    fn nagi_dir_deserializes_from_string() {
+        let nd: NagiDir = serde_yaml::from_str("/custom/path").unwrap();
+        assert_eq!(nd, NagiDir::new(PathBuf::from("/custom/path")));
     }
 }

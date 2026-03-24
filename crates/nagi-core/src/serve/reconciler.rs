@@ -32,16 +32,16 @@ pub async fn evaluate_and_cache(
         .map(crate::evaluate::resolve_connection)
         .transpose()?;
 
-    let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
-        crate::config::resolve_nagi_dir(std::path::Path::new(".")).join("cache")
-    });
+    let cache_path = cache_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::config::resolve_nagi_dir(std::path::Path::new(".")).cache_dir());
     let eval_cache = LocalCache::new(cache_path);
 
     let has_sources = conn.is_some() && !compiled.spec.sources.is_empty();
     let stats_cache = if has_sources {
         Some(LocalSourceStatsCache::new(
             source_stats_dir.map(PathBuf::from).unwrap_or_else(|| {
-                crate::config::resolve_nagi_dir(std::path::Path::new(".")).join("source_stats")
+                crate::config::resolve_nagi_dir(std::path::Path::new(".")).source_stats_dir()
             }),
         ))
     } else {
@@ -298,7 +298,7 @@ fn write_lock_log(
     timestamp: &str,
 ) {
     let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
-    let log_store = match LogStore::open(&nagi_dir.join("logs.db"), &nagi_dir.join("logs")) {
+    let log_store = match LogStore::open(&nagi_dir.db_path(), &nagi_dir.logs_dir()) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(error = %e, "failed to open log store for lock skip log");
