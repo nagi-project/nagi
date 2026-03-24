@@ -22,7 +22,6 @@ fn require_select_only(query: &str, dialect: &dyn Dialect) -> Result<(), Evaluat
 
 pub(super) async fn evaluate_condition(
     name: &str,
-    _index: usize,
     asset_name: &str,
     condition: &DesiredCondition,
     conn: Option<&dyn Connection>,

@@ -454,6 +454,7 @@ fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig
                 config.interval.as_std().as_secs(),
             )),
             env: Default::default(),
+            evaluate_cache_ttl: None,
         }]),
     };
 
@@ -493,6 +494,7 @@ fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig
             }],
             auto_sync: true,
             tags: vec![],
+            evaluate_cache_ttl: None,
         },
     };
 

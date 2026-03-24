@@ -60,7 +60,35 @@ pub trait SourceStatsCache: Send + Sync {
     fn write(&self, source_name: &str, stats: &TableStats) -> Result<(), StorageError>;
 }
 
-/// Distributed lock for serializing sync execution per sync ref.
+/// Per-condition evaluate result with a timestamp, used for TTL-based caching.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConditionCacheEntry {
+    pub result: crate::evaluate::ConditionResult,
+    pub cached_at: String,
+}
+
+/// Per-asset map of condition name → cached result with timestamp.
+pub type ConditionCacheMap = std::collections::HashMap<String, ConditionCacheEntry>;
+
+/// Caches per-condition evaluate results with timestamps for TTL-based reuse.
+/// Each condition is stored as a separate file under `{asset_name}/{condition_name}.json`.
+pub trait ConditionCache: Send + Sync {
+    fn read_condition(
+        &self,
+        asset_name: &str,
+        condition_name: &str,
+    ) -> Result<Option<ConditionCacheEntry>, StorageError>;
+    fn write_condition(
+        &self,
+        asset_name: &str,
+        condition_name: &str,
+        entry: &ConditionCacheEntry,
+    ) -> Result<(), StorageError>;
+    fn read(&self, asset_name: &str) -> Result<Option<ConditionCacheMap>, StorageError>;
+    fn write(&self, asset_name: &str, map: &ConditionCacheMap) -> Result<(), StorageError>;
+}
+
+/// Distributed lock for serializing sync execution per asset.
 pub trait SyncLock: Send + Sync {
     /// Attempts to acquire the lock. Returns `true` if acquired.
     /// If the lock is held but its TTL has expired, it is stolen.

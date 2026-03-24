@@ -140,7 +140,7 @@ fn load_controller_inputs(
     let resolved_cache = Some(
         cache_dir
             .map(PathBuf::from)
-            .unwrap_or_else(|| config.nagi_dir.cache_dir()),
+            .unwrap_or_else(|| config.nagi_dir.evaluate_cache_dir()),
     );
     let resolved_stats = Some(config.nagi_dir.source_stats_dir());
     for input in &mut inputs {

@@ -689,6 +689,8 @@ struct CompiledAssetSpecYaml<'a> {
     auto_sync: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     dbt_cloud_job_ids: &'a Option<HashSet<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evaluate_cache_ttl: &'a Option<crate::duration::Duration>,
 }
 
 /// Deserialization struct for reading compiled asset YAML from `target/`.
@@ -717,6 +719,9 @@ pub struct CompiledAssetSpec {
     /// Resolved at compile time. Used for running-job checks before sync.
     #[serde(default)]
     pub dbt_cloud_job_ids: Option<HashSet<i64>>,
+    /// Asset-level default evaluate cache TTL.
+    #[serde(default, rename = "evaluateCacheTtl")]
+    pub evaluate_cache_ttl: Option<crate::duration::Duration>,
 }
 
 fn default_true() -> bool {
@@ -738,6 +743,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
                 on_drift: &asset.resolved_on_drift,
                 auto_sync: asset.spec.auto_sync,
                 dbt_cloud_job_ids: &asset.dbt_cloud_job_ids,
+                evaluate_cache_ttl: &asset.spec.evaluate_cache_ttl,
             },
             connection: &asset.connection,
         };

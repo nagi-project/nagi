@@ -6,7 +6,10 @@ use crate::evaluate::AssetEvalResult;
 use crate::serve::SuspendedInfo;
 
 use super::lock::LockInfo;
-use super::{Cache, SourceStatsCache, StorageError, SuspendedStore, SyncLock};
+use super::{
+    Cache, ConditionCache, ConditionCacheEntry, ConditionCacheMap, SourceStatsCache, StorageError,
+    SuspendedStore, SyncLock,
+};
 
 /// Local file-based cache backend.
 /// Stores evaluate results as `{cache_dir}/{asset_name}.json`.
@@ -174,6 +177,96 @@ impl SourceStatsCache for LocalSourceStatsCache {
     }
 }
 
+// ── LocalConditionCache ────────────────────────────────────────────────────
+
+/// Local file-based cache for per-condition evaluate results with timestamps.
+/// Stores as `{dir}/{asset_name}.json` containing a map of condition name → entry.
+pub struct LocalConditionCache {
+    dir: PathBuf,
+}
+
+impl LocalConditionCache {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    fn asset_dir(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
+        super::validate_asset_name(asset_name)?;
+        Ok(self.dir.join(asset_name))
+    }
+
+    fn condition_path(
+        &self,
+        asset_name: &str,
+        condition_name: &str,
+    ) -> Result<PathBuf, StorageError> {
+        let dir = self.asset_dir(asset_name)?;
+        Ok(dir.join(format!("{condition_name}.json")))
+    }
+}
+
+impl ConditionCache for LocalConditionCache {
+    fn read_condition(
+        &self,
+        asset_name: &str,
+        condition_name: &str,
+    ) -> Result<Option<ConditionCacheEntry>, StorageError> {
+        let path = self.condition_path(asset_name, condition_name)?;
+        match std::fs::read_to_string(path) {
+            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn write_condition(
+        &self,
+        asset_name: &str,
+        condition_name: &str,
+        entry: &ConditionCacheEntry,
+    ) -> Result<(), StorageError> {
+        let dir = self.asset_dir(asset_name)?;
+        std::fs::create_dir_all(&dir)?;
+        let json = serde_json::to_string_pretty(entry)?;
+        std::fs::write(self.condition_path(asset_name, condition_name)?, json)?;
+        Ok(())
+    }
+
+    fn read(&self, asset_name: &str) -> Result<Option<ConditionCacheMap>, StorageError> {
+        let dir = self.asset_dir(asset_name)?;
+        if !dir.exists() {
+            return Ok(None);
+        }
+        let mut map = ConditionCacheMap::new();
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json") {
+                let name = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let data = std::fs::read_to_string(&path)?;
+                let cached: ConditionCacheEntry = serde_json::from_str(&data)?;
+                map.insert(name, cached);
+            }
+        }
+        if map.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(map))
+        }
+    }
+
+    fn write(&self, asset_name: &str, map: &ConditionCacheMap) -> Result<(), StorageError> {
+        for (condition_name, entry) in map {
+            self.write_condition(asset_name, condition_name, entry)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::evaluate::{ConditionResult, ConditionStatus};
@@ -267,6 +360,119 @@ mod tests {
         cache.write(&sample_result("asset", true)).unwrap();
         let second = cache.read("asset").unwrap().unwrap();
         assert!(second.ready);
+    }
+
+    // ── LocalConditionCache tests ──────────────────────────────────────
+
+    fn sample_condition_entry(name: &str, ready: bool) -> (String, ConditionCacheEntry) {
+        use crate::evaluate::{ConditionResult, ConditionStatus};
+        (
+            name.to_string(),
+            ConditionCacheEntry {
+                result: ConditionResult {
+                    condition_name: name.to_string(),
+                    condition_type: "SQL".to_string(),
+                    status: if ready {
+                        ConditionStatus::Ready
+                    } else {
+                        ConditionStatus::Drifted {
+                            reason: "failed".to_string(),
+                        }
+                    },
+                },
+                cached_at: "2025-01-01T00:00:00Z".to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn condition_cache_write_and_read_single() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+        let (name, entry) = sample_condition_entry("freshness", true);
+
+        cache.write_condition("daily-sales", &name, &entry).unwrap();
+        let loaded = cache
+            .read_condition("daily-sales", "freshness")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(loaded.result.condition_name, "freshness");
+        assert_eq!(loaded.cached_at, "2025-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn condition_cache_read_returns_none_for_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+
+        assert!(cache
+            .read_condition("no-asset", "no-cond")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn condition_cache_read_aggregates_all_conditions() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+        let (n1, e1) = sample_condition_entry("freshness", true);
+        let (n2, e2) = sample_condition_entry("data-test", false);
+
+        cache.write_condition("asset-a", &n1, &e1).unwrap();
+        cache.write_condition("asset-a", &n2, &e2).unwrap();
+
+        let map = cache.read("asset-a").unwrap().unwrap();
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("freshness"));
+        assert!(map.contains_key("data-test"));
+    }
+
+    #[test]
+    fn condition_cache_read_returns_none_for_missing_asset() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+
+        assert!(cache.read("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn condition_cache_write_map_creates_per_condition_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+        let map: ConditionCacheMap = [
+            sample_condition_entry("check-a", true),
+            sample_condition_entry("check-b", false),
+        ]
+        .into_iter()
+        .collect();
+
+        cache.write("my-asset", &map).unwrap();
+
+        assert!(dir.path().join("my-asset").join("check-a.json").exists());
+        assert!(dir.path().join("my-asset").join("check-b.json").exists());
+    }
+
+    #[test]
+    fn condition_cache_overwrites_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+        let (name, entry1) = sample_condition_entry("check", false);
+
+        cache.write_condition("asset", &name, &entry1).unwrap();
+        let loaded = cache.read_condition("asset", "check").unwrap().unwrap();
+        assert!(matches!(
+            loaded.result.status,
+            crate::evaluate::ConditionStatus::Drifted { .. }
+        ));
+
+        let (_, entry2) = sample_condition_entry("check", true);
+        cache.write_condition("asset", "check", &entry2).unwrap();
+        let loaded = cache.read_condition("asset", "check").unwrap().unwrap();
+        assert!(matches!(
+            loaded.result.status,
+            crate::evaluate::ConditionStatus::Ready
+        ));
     }
 
     // ── LocalSuspendedStore tests ────────────────────────────────────────
@@ -403,7 +609,7 @@ mod tests {
 // ── LocalSyncLock ────────────────────────────────────────────────────────────
 
 /// Local file-based sync lock.
-/// Each sync ref gets a lock file at `{dir}/{sync_ref}.lock`.
+/// Each asset gets a lock file at `{dir}/{asset_name}.lock`.
 /// Uses atomic file creation for mutual exclusion and TTL for deadlock prevention.
 pub struct LocalSyncLock {
     dir: PathBuf,

@@ -38,6 +38,10 @@ pub struct AssetSpec {
     /// Controls automatic sync execution in `nagi serve`. Defaults to `true`.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
+    /// Default evaluate cache TTL for all conditions in this Asset.
+    /// Conditions can override this with their own `evaluateCacheTtl`.
+    #[serde(default, rename = "evaluateCacheTtl")]
+    pub evaluate_cache_ttl: Option<Duration>,
 }
 
 fn default_auto_sync() -> bool {
@@ -81,6 +85,9 @@ pub enum DesiredCondition {
         check_at: Option<CronSchedule>,
         /// If omitted, freshness is determined from table metadata instead of a column value.
         column: Option<String>,
+        /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
+        #[serde(default, rename = "evaluateCacheTtl")]
+        evaluate_cache_ttl: Option<Duration>,
     },
     /// Query must return a scalar boolean. Ready when the result is true.
     SQL {
@@ -91,6 +98,9 @@ pub enum DesiredCondition {
         /// Optional polling interval. If omitted, only evaluated on upstream state change or after sync.
         #[serde(default)]
         interval: Option<Duration>,
+        /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
+        #[serde(default, rename = "evaluateCacheTtl")]
+        evaluate_cache_ttl: Option<Duration>,
     },
     /// Runs an external command. Ready when the process exits with code 0.
     /// `run` is argv: the first element is the program, the rest are arguments.
@@ -105,6 +115,9 @@ pub enum DesiredCondition {
         /// Environment variables to set for the subprocess.
         #[serde(default)]
         env: HashMap<String, String>,
+        /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
+        #[serde(default, rename = "evaluateCacheTtl")]
+        evaluate_cache_ttl: Option<Duration>,
     },
 }
 
@@ -187,6 +200,21 @@ impl DesiredCondition {
             DesiredCondition::Freshness { interval, .. } => Some(interval),
             DesiredCondition::SQL { interval, .. } => interval.as_ref(),
             DesiredCondition::Command { interval, .. } => interval.as_ref(),
+        }
+    }
+
+    /// Returns the per-condition evaluate cache TTL if configured.
+    pub fn evaluate_cache_ttl(&self) -> Option<&Duration> {
+        match self {
+            DesiredCondition::Freshness {
+                evaluate_cache_ttl, ..
+            } => evaluate_cache_ttl.as_ref(),
+            DesiredCondition::SQL {
+                evaluate_cache_ttl, ..
+            } => evaluate_cache_ttl.as_ref(),
+            DesiredCondition::Command {
+                evaluate_cache_ttl, ..
+            } => evaluate_cache_ttl.as_ref(),
         }
     }
 
@@ -316,6 +344,7 @@ autoSync: false
             sources: vec![],
             on_drift: vec![],
             auto_sync: true,
+            evaluate_cache_ttl: None,
         };
         assert!(spec.validate().is_ok(), "empty onDrift means always Ready");
     }
@@ -332,6 +361,7 @@ autoSync: false
                 merge_position: MergePosition::BeforeOrigin,
             }],
             auto_sync: true,
+            evaluate_cache_ttl: None,
         };
         assert!(spec.validate().is_ok());
     }
@@ -348,6 +378,7 @@ autoSync: false
                 merge_position: MergePosition::BeforeOrigin,
             }],
             auto_sync: true,
+            evaluate_cache_ttl: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -365,6 +396,7 @@ autoSync: false
                 merge_position: MergePosition::BeforeOrigin,
             }],
             auto_sync: true,
+            evaluate_cache_ttl: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -377,11 +409,13 @@ autoSync: false
                 name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             },
             DesiredCondition::SQL {
                 name: "check-b".to_string(),
                 query: "SELECT false".to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             },
         ];
         assert!(validate_no_duplicate_condition_names(&conditions).is_ok());
@@ -394,11 +428,13 @@ autoSync: false
                 name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             },
             DesiredCondition::SQL {
                 name: "check-a".to_string(),
                 query: "SELECT false".to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             },
         ];
         let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
@@ -414,6 +450,7 @@ autoSync: false
             interval: serde_yaml::from_str("6h").unwrap(),
             check_at: None,
             column: None,
+            evaluate_cache_ttl: None,
         };
         let conditions = vec![condition.clone(), condition];
         let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
@@ -427,6 +464,7 @@ autoSync: false
             name: "".to_string(),
             query: "SELECT true".to_string(),
             interval: None,
+            evaluate_cache_ttl: None,
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -451,6 +489,7 @@ column: updated_at
                 interval,
                 check_at: Some(check_at),
                 column: Some(column),
+                ..
             } if name == "data-freshness"
                 && max_age.as_std() == StdDuration::from_secs(24 * 3600)
                 && interval.as_std() == StdDuration::from_secs(6 * 3600)
@@ -524,6 +563,7 @@ run: [dbt, test, --select, my_model]
             run: vec![],
             interval: None,
             env: HashMap::new(),
+            evaluate_cache_ttl: None,
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -536,6 +576,7 @@ run: [dbt, test, --select, my_model]
             run: vec!["".to_string()],
             interval: None,
             env: HashMap::new(),
+            evaluate_cache_ttl: None,
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));

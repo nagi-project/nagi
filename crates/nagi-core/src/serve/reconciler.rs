@@ -1,12 +1,18 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use crate::compile::CompiledAsset;
-use crate::evaluate::{AssetEvalResult, EvaluateError};
+use crate::evaluate::{AssetEvalResult, ConditionResult, EvaluateError};
 use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
-use crate::storage::local::{LocalCache, LocalSourceStatsCache};
-use crate::storage::{Cache, SourceStatsCache, StorageError, SyncLock};
+use crate::storage::local::{LocalCache, LocalConditionCache, LocalSourceStatsCache};
+use crate::storage::{
+    Cache, ConditionCache, ConditionCacheEntry, ConditionCacheMap, SourceStatsCache, StorageError,
+    SyncLock,
+};
 use crate::sync::SyncError;
 
 /// Evaluates a single compiled asset and writes the result to the local cache.
@@ -19,10 +25,14 @@ use crate::sync::SyncError;
 /// connection, checks `table_stats` for each source. If all source stats are
 /// unchanged from the cached values, returns the cached eval result (skipping
 /// the actual evaluation queries).
+///
+/// When `skip_cache` is false, conditions with a valid TTL cache entry are
+/// reused without executing the actual query/command.
 pub async fn evaluate_and_cache(
     yaml: &str,
     cache_dir: Option<&Path>,
     source_stats_dir: Option<&Path>,
+    skip_cache: bool,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
@@ -32,17 +42,18 @@ pub async fn evaluate_and_cache(
         .map(crate::evaluate::resolve_connection)
         .transpose()?;
 
+    let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));
     let cache_path = cache_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| crate::config::resolve_nagi_dir(std::path::Path::new(".")).cache_dir());
+        .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
     let eval_cache = LocalCache::new(cache_path);
 
     let has_sources = conn.is_some() && !compiled.spec.sources.is_empty();
     let stats_cache = if has_sources {
         Some(LocalSourceStatsCache::new(
-            source_stats_dir.map(PathBuf::from).unwrap_or_else(|| {
-                crate::config::resolve_nagi_dir(std::path::Path::new(".")).source_stats_dir()
-            }),
+            source_stats_dir
+                .map(PathBuf::from)
+                .unwrap_or_else(|| nagi_dir.source_stats_dir()),
         ))
     } else {
         None
@@ -57,10 +68,19 @@ pub async fn evaluate_and_cache(
         }
     }
 
-    let result = crate::evaluate::evaluate_asset_no_log(
+    // Condition-level TTL cache: collect still-valid cached results.
+    let condition_cache = LocalConditionCache::new(nagi_dir.evaluate_cache_dir());
+    let cached_conditions = if skip_cache {
+        HashMap::new()
+    } else {
+        resolve_cached_conditions(&compiled, &condition_cache)
+    };
+
+    let result = crate::evaluate::evaluate_asset_cached(
         &compiled.metadata.name,
         &compiled.spec.on_drift,
         conn.as_deref(),
+        &cached_conditions,
     )
     .await?;
 
@@ -68,11 +88,82 @@ pub async fn evaluate_and_cache(
         .write(&result)
         .map_err(|e| EvaluateError::Cache(e.to_string()))?;
 
+    // Update condition cache with fresh results.
+    update_condition_cache(&compiled, &result, &condition_cache);
+
     if let (Some(conn_ref), Some(sc)) = (conn.as_deref(), stats_cache.as_ref()) {
         update_source_stats(&compiled, conn_ref, sc).await;
     }
 
     Ok(result)
+}
+
+/// For each condition in the asset, checks the condition cache and returns
+/// entries that are still within their effective TTL.
+fn resolve_cached_conditions(
+    compiled: &CompiledAsset,
+    cache: &dyn ConditionCache,
+) -> HashMap<String, ConditionResult> {
+    let cached_map = match cache.read(&compiled.metadata.name) {
+        Ok(Some(m)) => m,
+        _ => return HashMap::new(),
+    };
+
+    let now = Utc::now();
+    let asset_ttl = compiled.spec.evaluate_cache_ttl.as_ref();
+    let mut valid = HashMap::new();
+
+    for entry in &compiled.spec.on_drift {
+        for cond in &entry.conditions {
+            let effective_ttl = cond.evaluate_cache_ttl().or(asset_ttl).map(|d| d.as_std());
+            let Some(ttl) = effective_ttl else {
+                continue;
+            };
+            let Some(cached) = cached_map.get(cond.name()) else {
+                continue;
+            };
+            let Ok(cached_at) = DateTime::parse_from_rfc3339(&cached.cached_at) else {
+                continue;
+            };
+            let elapsed = now.signed_duration_since(cached_at);
+            if elapsed >= chrono::Duration::zero()
+                && elapsed < chrono::Duration::from_std(ttl).unwrap_or(chrono::TimeDelta::MAX)
+            {
+                valid.insert(cond.name().to_string(), cached.result.clone());
+            }
+        }
+    }
+
+    valid
+}
+
+/// Writes all condition results from the evaluation to the condition cache.
+fn update_condition_cache(
+    compiled: &CompiledAsset,
+    result: &AssetEvalResult,
+    cache: &dyn ConditionCache,
+) {
+    let now = Utc::now().to_rfc3339();
+    let map: ConditionCacheMap = result
+        .conditions
+        .iter()
+        .map(|cr| {
+            (
+                cr.condition_name.clone(),
+                ConditionCacheEntry {
+                    result: cr.clone(),
+                    cached_at: now.clone(),
+                },
+            )
+        })
+        .collect();
+    if let Err(e) = cache.write(&compiled.metadata.name, &map) {
+        tracing::warn!(
+            asset = %compiled.metadata.name,
+            error = %e,
+            "failed to write condition cache"
+        );
+    }
 }
 
 /// Returns the cached eval result if all sources have unchanged stats.
@@ -129,9 +220,16 @@ pub async fn spawn_evaluate(
     yaml: String,
     cache_dir: Option<PathBuf>,
     source_stats_dir: Option<PathBuf>,
+    skip_cache: bool,
 ) -> (String, EvalOutcome) {
     let started_at = chrono::Utc::now().to_rfc3339();
-    let result = evaluate_and_cache(&yaml, cache_dir.as_deref(), source_stats_dir.as_deref()).await;
+    let result = evaluate_and_cache(
+        &yaml,
+        cache_dir.as_deref(),
+        source_stats_dir.as_deref(),
+        skip_cache,
+    )
+    .await;
     let finished_at = chrono::Utc::now().to_rfc3339();
     (
         asset_name,
@@ -189,12 +287,11 @@ async fn resolve_and_sync(
     let sync_spec = &first_entry.sync;
 
     let execution_id = crate::sync::generate_uuid();
-    let sync_ref = &first_entry.sync_ref_name;
     let ttl = std::time::Duration::from_secs(lock_config.ttl_seconds);
 
     if !acquire_with_retry(
         lock.as_ref(),
-        sync_ref,
+        asset_name,
         ttl,
         &lock_config,
         asset_name,
@@ -205,7 +302,7 @@ async fn resolve_and_sync(
         if let Some(n) = &notifier {
             let event = NotifyEvent::SyncLockSkipped {
                 asset_name: asset_name.to_string(),
-                sync_ref: sync_ref.to_string(),
+                sync_ref: asset_name.to_string(),
             };
             if let Err(e) = n.notify(&event).await {
                 tracing::warn!(error = %e, "notification failed");
@@ -228,8 +325,8 @@ async fn resolve_and_sync(
     )
     .await;
 
-    if let Err(e) = lock.release(sync_ref) {
-        tracing::warn!(sync_ref = %sync_ref, error = %e, "failed to release sync lock");
+    if let Err(e) = lock.release(asset_name) {
+        tracing::warn!(asset_name = %asset_name, error = %e, "failed to release sync lock");
     }
 
     result
@@ -442,6 +539,7 @@ mod tests {
                 on_drift: vec![],
                 auto_sync: true,
                 dbt_cloud_job_ids: None,
+                evaluate_cache_ttl: None,
             },
             connection: None,
         }
@@ -645,5 +743,271 @@ mod tests {
         let cached = stats_cache.read("src_table").unwrap().unwrap();
         assert_eq!(cached.num_rows, 500);
         assert_eq!(cached.num_bytes, 8192);
+    }
+
+    // ── TTL cache tests ────────────────────────────────────────────────────
+
+    struct MockConditionCache {
+        inner: Mutex<std::collections::HashMap<String, ConditionCacheMap>>,
+    }
+
+    impl MockConditionCache {
+        fn new() -> Self {
+            Self {
+                inner: Mutex::new(std::collections::HashMap::new()),
+            }
+        }
+
+        fn set(&self, asset_name: &str, map: ConditionCacheMap) {
+            self.inner
+                .lock()
+                .unwrap()
+                .insert(asset_name.to_string(), map);
+        }
+    }
+
+    impl ConditionCache for MockConditionCache {
+        fn read_condition(
+            &self,
+            asset_name: &str,
+            condition_name: &str,
+        ) -> Result<Option<ConditionCacheEntry>, StorageError> {
+            Ok(self
+                .inner
+                .lock()
+                .unwrap()
+                .get(asset_name)
+                .and_then(|map| map.get(condition_name).cloned()))
+        }
+
+        fn write_condition(
+            &self,
+            asset_name: &str,
+            condition_name: &str,
+            entry: &ConditionCacheEntry,
+        ) -> Result<(), StorageError> {
+            self.inner
+                .lock()
+                .unwrap()
+                .entry(asset_name.to_string())
+                .or_default()
+                .insert(condition_name.to_string(), entry.clone());
+            Ok(())
+        }
+
+        fn read(&self, asset_name: &str) -> Result<Option<ConditionCacheMap>, StorageError> {
+            Ok(self.inner.lock().unwrap().get(asset_name).cloned())
+        }
+
+        fn write(&self, asset_name: &str, map: &ConditionCacheMap) -> Result<(), StorageError> {
+            self.inner
+                .lock()
+                .unwrap()
+                .insert(asset_name.to_string(), map.clone());
+            Ok(())
+        }
+    }
+
+    fn sample_compiled_with_conditions(
+        asset_ttl: Option<&str>,
+        conditions: Vec<crate::kind::asset::DesiredCondition>,
+    ) -> CompiledAsset {
+        use crate::compile::ResolvedOnDriftEntry;
+        use crate::kind::sync::{StepType, SyncSpec, SyncStep};
+        CompiledAsset {
+            api_version: "v1".to_string(),
+            metadata: Metadata {
+                name: "test-asset".to_string(),
+            },
+            spec: CompiledAssetSpec {
+                tags: vec![],
+                sources: vec![],
+                on_drift: vec![ResolvedOnDriftEntry {
+                    conditions,
+                    conditions_ref: "test-cond".to_string(),
+                    sync: SyncSpec {
+                        pre: None,
+                        run: SyncStep {
+                            step_type: StepType::Command,
+                            args: vec!["true".to_string()],
+                            env: std::collections::HashMap::new(),
+                        },
+                        post: None,
+                    },
+                    sync_ref_name: "test-sync".to_string(),
+                }],
+                auto_sync: true,
+                dbt_cloud_job_ids: None,
+                evaluate_cache_ttl: asset_ttl.map(|s| serde_yaml::from_str(s).unwrap()),
+            },
+            connection: None,
+        }
+    }
+
+    fn condition_cache_entry(
+        name: &str,
+        ready: bool,
+        seconds_ago: i64,
+    ) -> (String, ConditionCacheEntry) {
+        let cached_at = (chrono::Utc::now() - chrono::Duration::seconds(seconds_ago)).to_rfc3339();
+        (
+            name.to_string(),
+            ConditionCacheEntry {
+                result: ConditionResult {
+                    condition_name: name.to_string(),
+                    condition_type: "SQL".to_string(),
+                    status: if ready {
+                        ConditionStatus::Ready
+                    } else {
+                        ConditionStatus::Drifted {
+                            reason: "cached".to_string(),
+                        }
+                    },
+                },
+                cached_at,
+            },
+        )
+    }
+
+    #[test]
+    fn resolve_cached_returns_valid_entry_within_ttl() {
+        let cache = MockConditionCache::new();
+        let map: ConditionCacheMap = [condition_cache_entry("check", true, 60)]
+            .into_iter()
+            .collect();
+        cache.set("test-asset", map);
+
+        let compiled = sample_compiled_with_conditions(
+            Some("5m"),
+            vec![crate::kind::asset::DesiredCondition::SQL {
+                name: "check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            }],
+        );
+
+        let result = resolve_cached_conditions(&compiled, &cache);
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key("check"));
+    }
+
+    #[test]
+    fn resolve_cached_skips_expired_entry() {
+        let cache = MockConditionCache::new();
+        // Cached 10 minutes ago, TTL is 5 minutes → expired
+        let map: ConditionCacheMap = [condition_cache_entry("check", true, 600)]
+            .into_iter()
+            .collect();
+        cache.set("test-asset", map);
+
+        let compiled = sample_compiled_with_conditions(
+            Some("5m"),
+            vec![crate::kind::asset::DesiredCondition::SQL {
+                name: "check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            }],
+        );
+
+        let result = resolve_cached_conditions(&compiled, &cache);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_cached_condition_ttl_overrides_asset_ttl() {
+        let cache = MockConditionCache::new();
+        // Cached 3 minutes ago
+        let map: ConditionCacheMap = [condition_cache_entry("check", true, 180)]
+            .into_iter()
+            .collect();
+        cache.set("test-asset", map);
+
+        // Asset TTL = 5m, but condition TTL = 2m → should be expired
+        let compiled = sample_compiled_with_conditions(
+            Some("5m"),
+            vec![crate::kind::asset::DesiredCondition::SQL {
+                name: "check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: Some(serde_yaml::from_str("2m").unwrap()),
+            }],
+        );
+
+        let result = resolve_cached_conditions(&compiled, &cache);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_cached_no_ttl_means_no_caching() {
+        let cache = MockConditionCache::new();
+        let map: ConditionCacheMap = [condition_cache_entry("check", true, 10)]
+            .into_iter()
+            .collect();
+        cache.set("test-asset", map);
+
+        // No TTL on asset or condition → always re-evaluate
+        let compiled = sample_compiled_with_conditions(
+            None,
+            vec![crate::kind::asset::DesiredCondition::SQL {
+                name: "check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            }],
+        );
+
+        let result = resolve_cached_conditions(&compiled, &cache);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_cached_empty_cache_returns_empty() {
+        let cache = MockConditionCache::new();
+        let compiled = sample_compiled_with_conditions(
+            Some("5m"),
+            vec![crate::kind::asset::DesiredCondition::SQL {
+                name: "check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            }],
+        );
+
+        let result = resolve_cached_conditions(&compiled, &cache);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn update_condition_cache_writes_all_results() {
+        let cache = MockConditionCache::new();
+        let compiled = sample_compiled_with_conditions(None, vec![]);
+        let result = AssetEvalResult {
+            asset_name: "test-asset".to_string(),
+            ready: true,
+            conditions: vec![
+                ConditionResult {
+                    condition_name: "a".to_string(),
+                    condition_type: "SQL".to_string(),
+                    status: ConditionStatus::Ready,
+                },
+                ConditionResult {
+                    condition_name: "b".to_string(),
+                    condition_type: "Command".to_string(),
+                    status: ConditionStatus::Drifted {
+                        reason: "exit 1".to_string(),
+                    },
+                },
+            ],
+            evaluation_id: None,
+        };
+
+        update_condition_cache(&compiled, &result, &cache);
+
+        let map = cache.read("test-asset").unwrap().unwrap();
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("a"));
+        assert!(map.contains_key("b"));
     }
 }

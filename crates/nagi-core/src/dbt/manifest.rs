@@ -93,6 +93,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
                 sources: sources_refs,
                 on_drift,
                 auto_sync: true,
+                evaluate_cache_ttl: None,
             },
         });
     }
@@ -230,6 +231,7 @@ fn tests_to_conditions(tests: &[&DbtNode]) -> Vec<DesiredCondition> {
                 ],
                 interval: None,
                 env: HashMap::new(),
+                evaluate_cache_ttl: None,
             });
         }
     }

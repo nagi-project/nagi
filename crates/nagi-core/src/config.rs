@@ -105,6 +105,10 @@ impl NagiDir {
         self.0.join("cache")
     }
 
+    pub fn evaluate_cache_dir(&self) -> PathBuf {
+        self.0.join("cache").join("evaluate")
+    }
+
     pub fn locks_dir(&self) -> PathBuf {
         self.0.join("locks")
     }
@@ -470,8 +474,8 @@ notify:
         );
         assert_eq!(config.nagi_dir.logs_dir(), PathBuf::from("/data/nagi/logs"));
         assert_eq!(
-            config.nagi_dir.cache_dir(),
-            PathBuf::from("/data/nagi/cache")
+            config.nagi_dir.evaluate_cache_dir(),
+            PathBuf::from("/data/nagi/cache/evaluate")
         );
         assert_eq!(
             config.nagi_dir.locks_dir(),

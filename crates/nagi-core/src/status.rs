@@ -46,7 +46,7 @@ pub fn asset_status_for_config(
     asset_status(
         target_dir,
         selectors,
-        Some(config.nagi_dir.cache_dir().as_path()),
+        Some(config.nagi_dir.evaluate_cache_dir().as_path()),
         &config.nagi_dir.db_path(),
         &config.nagi_dir.logs_dir(),
         Some(config.nagi_dir.suspended_dir().as_path()),
@@ -64,11 +64,10 @@ pub fn asset_status(
 ) -> Result<StatusResult, StatusError> {
     let asset_names = compile::resolve_compiled_asset_names(target_dir, selectors)?;
 
-    let cache = LocalCache::new(
-        cache_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(|| crate::config::resolve_nagi_dir(Path::new(".")).cache_dir()),
-    );
+    let cache =
+        LocalCache::new(cache_dir.map(PathBuf::from).unwrap_or_else(|| {
+            crate::config::resolve_nagi_dir(Path::new(".")).evaluate_cache_dir()
+        }));
 
     let store = if db_path.exists() {
         Some(LogStore::open(db_path, logs_dir)?)

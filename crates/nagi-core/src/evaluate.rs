@@ -77,6 +77,37 @@ pub enum EvaluateError {
     Serialize(String),
 }
 
+/// Evaluates all conditions and collects results.
+async fn evaluate_conditions(
+    asset_name: &str,
+    on_drift: &[ResolvedOnDriftEntry],
+    conn: Option<&dyn Connection>,
+    cached_conditions: &std::collections::HashMap<String, ConditionResult>,
+) -> Result<AssetEvalResult, EvaluateError> {
+    let conditions = on_drift.iter().flat_map(|e| &e.conditions);
+    let mut results = Vec::new();
+    for cond in conditions {
+        if let Some(cached) = cached_conditions.get(cond.name()) {
+            tracing::debug!(
+                asset = %asset_name,
+                condition = %cond.name(),
+                "using cached condition result (TTL valid)"
+            );
+            results.push(cached.clone());
+        } else {
+            let result = condition::evaluate_condition(cond.name(), asset_name, cond, conn).await?;
+            results.push(result);
+        }
+    }
+    let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
+    Ok(AssetEvalResult {
+        asset_name: asset_name.to_string(),
+        ready,
+        conditions: results,
+        evaluation_id: None,
+    })
+}
+
 /// Evaluates all conditions across all on_drift entries.
 ///
 /// `conn` is required only for SQL-based conditions (Freshness, SQL).
@@ -90,25 +121,7 @@ pub async fn evaluate_asset(
     log_store: Option<&LogStore>,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let started_at = Utc::now();
-
-    let mut results = Vec::new();
-    let mut i = 0;
-    for entry in on_drift {
-        for cond in &entry.conditions {
-            let result =
-                condition::evaluate_condition(cond.name(), i, asset_name, cond, conn).await?;
-            results.push(result);
-            i += 1;
-        }
-    }
-    let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
-
-    let mut result = AssetEvalResult {
-        asset_name: asset_name.to_string(),
-        ready,
-        conditions: results,
-        evaluation_id: None,
-    };
+    let mut result = evaluate_conditions(asset_name, on_drift, conn, &Default::default()).await?;
 
     if let Some(store) = log_store {
         let id = crate::sync::generate_uuid();
@@ -122,30 +135,15 @@ pub async fn evaluate_asset(
     Ok(result)
 }
 
-/// Evaluates all conditions without logging.
+/// Evaluates conditions with TTL-based caching support.
 /// Produces a `Send` future (unlike `evaluate_asset` which takes `&LogStore`).
-pub(crate) async fn evaluate_asset_no_log(
+pub(crate) async fn evaluate_asset_cached(
     asset_name: &str,
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
+    cached_conditions: &std::collections::HashMap<String, ConditionResult>,
 ) -> Result<AssetEvalResult, EvaluateError> {
-    let mut results = Vec::new();
-    let mut i = 0;
-    for entry in on_drift {
-        for cond in &entry.conditions {
-            let result =
-                condition::evaluate_condition(cond.name(), i, asset_name, cond, conn).await?;
-            results.push(result);
-            i += 1;
-        }
-    }
-    let ready = results.iter().all(|r| r.status == ConditionStatus::Ready);
-    Ok(AssetEvalResult {
-        asset_name: asset_name.to_string(),
-        ready,
-        conditions: results,
-        evaluation_id: None,
-    })
+    evaluate_conditions(asset_name, on_drift, conn, cached_conditions).await
 }
 
 /// A single condition from an asset's on_drift entries, with its name.
@@ -235,9 +233,9 @@ pub async fn evaluate_from_compiled(
     )
     .await?;
 
-    let cache_path = cache_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::config::resolve_nagi_dir(std::path::Path::new(".")).cache_dir());
+    let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
+        crate::config::resolve_nagi_dir(std::path::Path::new(".")).evaluate_cache_dir()
+    });
     let cache = LocalCache::new(cache_path);
     cache
         .write(&result)
@@ -379,6 +377,7 @@ mod tests {
             interval: duration(3600),
             check_at: None,
             column: column.map(str::to_string),
+            evaluate_cache_ttl: None,
         }
     }
 
@@ -454,6 +453,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT true".to_string(),
             interval: None,
+            evaluate_cache_ttl: None,
         }]);
         let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
             .await
@@ -470,6 +470,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT false".to_string(),
             interval: None,
+            evaluate_cache_ttl: None,
         }]);
         let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
             .await
@@ -530,11 +531,13 @@ mod tests {
                 name: "check-a".to_string(),
                 query: "SELECT true".to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             },
             DesiredCondition::SQL {
                 name: "check-b".to_string(),
                 query: "SELECT false".to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             },
         ]);
         let result = evaluate_asset(
@@ -578,6 +581,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT COUNT(*) > 0 FROM orders".to_string(),
             interval: None,
+            evaluate_cache_ttl: None,
         };
         let on_drift = on_drift_with(vec![condition.clone()]);
         let result = dry_run_asset("my_table", &on_drift);
@@ -591,6 +595,7 @@ mod tests {
             run: vec!["dbt".to_string(), "test".to_string()],
             interval: None,
             env: HashMap::new(),
+            evaluate_cache_ttl: None,
         };
         let on_drift = on_drift_with(vec![condition.clone()]);
         let result = dry_run_asset("my_table", &on_drift);
@@ -613,6 +618,7 @@ mod tests {
             run: vec!["true".to_string()],
             interval: None,
             env: HashMap::new(),
+            evaluate_cache_ttl: None,
         }]);
         let result = evaluate_asset("my_table", &on_drift, None, None)
             .await
@@ -626,6 +632,7 @@ mod tests {
             name: "check".to_string(),
             query: "SELECT 1".to_string(),
             interval: None,
+            evaluate_cache_ttl: None,
         }]);
         let result = evaluate_asset("my_table", &on_drift, None, None).await;
         assert!(matches!(
@@ -654,6 +661,7 @@ mod tests {
                 name: "bad".to_string(),
                 query: query.to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             }]);
             let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
             assert!(
@@ -679,6 +687,7 @@ mod tests {
                 name: "check".to_string(),
                 query: query.to_string(),
                 interval: None,
+                evaluate_cache_ttl: None,
             }]);
             let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
             assert!(
@@ -696,5 +705,93 @@ mod tests {
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "freshness"
         ));
+    }
+
+    // ── cached conditions ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cached_condition_skips_evaluation() {
+        // SQL condition that would need a connection — but it's cached, so no error.
+        let on_drift = on_drift_with(vec![DesiredCondition::SQL {
+            name: "check".to_string(),
+            query: "SELECT true".to_string(),
+            interval: None,
+            evaluate_cache_ttl: None,
+        }]);
+        let cached: HashMap<String, ConditionResult> = [(
+            "check".to_string(),
+            ConditionResult {
+                condition_name: "check".to_string(),
+                condition_type: "SQL".to_string(),
+                status: ConditionStatus::Ready,
+            },
+        )]
+        .into();
+        // No connection provided — would fail without cache.
+        let result = evaluate_asset_cached("my_table", &on_drift, None, &cached)
+            .await
+            .unwrap();
+        assert!(result.ready);
+        assert_eq!(result.conditions[0].status, ConditionStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn uncached_condition_is_evaluated_normally() {
+        let conn = MockConnection {
+            response: Value::Bool(false),
+        };
+        let on_drift = on_drift_with(vec![DesiredCondition::SQL {
+            name: "check".to_string(),
+            query: "SELECT false".to_string(),
+            interval: None,
+            evaluate_cache_ttl: None,
+        }]);
+        let cached = HashMap::new();
+        let result = evaluate_asset_cached("my_table", &on_drift, Some(&conn), &cached)
+            .await
+            .unwrap();
+        assert!(!result.ready);
+    }
+
+    #[tokio::test]
+    async fn mixed_cached_and_uncached_conditions() {
+        let conn = MockConnection {
+            response: Value::Bool(true),
+        };
+        let on_drift = on_drift_with(vec![
+            DesiredCondition::SQL {
+                name: "cached-check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            },
+            DesiredCondition::SQL {
+                name: "live-check".to_string(),
+                query: "SELECT true".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            },
+        ]);
+        let cached: HashMap<String, ConditionResult> = [(
+            "cached-check".to_string(),
+            ConditionResult {
+                condition_name: "cached-check".to_string(),
+                condition_type: "SQL".to_string(),
+                status: ConditionStatus::Drifted {
+                    reason: "from cache".to_string(),
+                },
+            },
+        )]
+        .into();
+        let result = evaluate_asset_cached("my_table", &on_drift, Some(&conn), &cached)
+            .await
+            .unwrap();
+        // cached-check is Drifted (from cache), live-check is Ready (evaluated)
+        assert!(!result.ready);
+        assert!(matches!(
+            &result.conditions[0].status,
+            ConditionStatus::Drifted { reason } if reason == "from cache"
+        ));
+        assert_eq!(result.conditions[1].status, ConditionStatus::Ready);
     }
 }
