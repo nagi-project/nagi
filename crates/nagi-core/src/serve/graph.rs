@@ -54,14 +54,28 @@ pub fn connected_components(graph: &DependencyGraph) -> Vec<Vec<String>> {
     result
 }
 
-pub fn build_downstream_map(edges: &[GraphEdge]) -> HashMap<String, Vec<String>> {
-    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+pub struct EdgeMaps {
+    pub downstream: HashMap<String, Vec<String>>,
+    pub upstream: HashMap<String, Vec<String>>,
+}
+
+pub fn build_edge_maps(edges: &[GraphEdge]) -> EdgeMaps {
+    let mut downstream: HashMap<String, Vec<String>> = HashMap::new();
+    let mut upstream: HashMap<String, Vec<String>> = HashMap::new();
     for edge in edges {
-        map.entry(edge.from.clone())
+        downstream
+            .entry(edge.from.clone())
             .or_default()
             .push(edge.to.clone());
+        upstream
+            .entry(edge.to.clone())
+            .or_default()
+            .push(edge.from.clone());
     }
-    map
+    EdgeMaps {
+        downstream,
+        upstream,
+    }
 }
 
 #[cfg(test)]
@@ -142,20 +156,28 @@ mod tests {
     }
 
     #[test]
-    fn downstream_map_basic() {
+    fn edge_maps_basic() {
         let edges = vec![edge("a", "b"), edge("a", "c"), edge("b", "c")];
-        let map = build_downstream_map(&edges);
+        let maps = build_edge_maps(&edges);
         assert_eq!(
-            map.get("a").unwrap(),
+            maps.downstream.get("a").unwrap(),
             &vec!["b".to_string(), "c".to_string()]
         );
-        assert_eq!(map.get("b").unwrap(), &vec!["c".to_string()]);
-        assert!(!map.contains_key("c"));
+        assert_eq!(maps.downstream.get("b").unwrap(), &vec!["c".to_string()]);
+        assert!(!maps.downstream.contains_key("c"));
+
+        assert_eq!(maps.upstream.get("b").unwrap(), &vec!["a".to_string()]);
+        assert_eq!(
+            maps.upstream.get("c").unwrap(),
+            &vec!["a".to_string(), "b".to_string()]
+        );
+        assert!(!maps.upstream.contains_key("a"));
     }
 
     #[test]
-    fn downstream_map_empty() {
-        let map = build_downstream_map(&[]);
-        assert!(map.is_empty());
+    fn edge_maps_empty() {
+        let maps = build_edge_maps(&[]);
+        assert!(maps.downstream.is_empty());
+        assert!(maps.upstream.is_empty());
     }
 }
