@@ -179,7 +179,7 @@ pub(super) async fn run_controller(
     let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
 
-    state.init(&assets);
+    state.register_assets(&assets);
 
     let yaml_map: HashMap<&str, &str> = assets
         .iter()
