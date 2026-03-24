@@ -38,3 +38,14 @@ spec:
 | `tags` | list[string] | — | [] | Tags for filtering with `--select tag:X`. |
 
 <!-- schema:auto-generated:end:AssetSpec -->
+
+<!-- schema:auto-generated:start:OnDriftEntry -->
+
+| Attribute | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `conditions` | string | Yes | - | Name of the `kind: Conditions` resource whose conditions define drift. |
+| `sync` | string | Yes | - | Name of the Sync resource to execute when drift is detected. |
+| `mergePosition` | any | — | beforeOrigin | Controls insertion position during overlay merge. Not included in compiled output. |
+| `with` | map[string, string] | — | {} | Template variables passed to the Sync resource for argument interpolation. |
+
+<!-- schema:auto-generated:end:OnDriftEntry -->

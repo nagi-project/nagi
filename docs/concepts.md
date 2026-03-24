@@ -96,7 +96,7 @@ onDrift:
 
 この例では、鮮度条件（`daily-sla`）が Drifted であれば `dbt-incremental` が実行されます。鮮度が Ready で品質条件（`sales-quality`）が Drifted であれば `dbt-full-refresh` が実行されます。両方 Ready であれば Sync は実行されません。
 
-Sync 完了後に再度 Evaluate を行い、まだ Drifted であれば再び Sync を実行します。状態の悪化や連続で失敗する場合は [Guardrails](#guardrails) が Sync を停止します。
+Sync 完了後に Evaluate を行い、まだ Drifted であれば再び Sync を実行します。状態の悪化や連続で失敗する場合は [Guardrails](#guardrails) が Sync を停止します。
 
 #### autoSync
 
@@ -166,12 +166,14 @@ my-project/
     │   └── ...
     └── graph.json     # 依存グラフ
 
-~/.nagi/                   # ストレージ（デフォルト）
+~/.nagi/                   # ストレージ（デフォルト、nagiDir で変更可）
 ├── cache/                 # evaluate 結果のキャッシュ
 ├── locks/                 # sync の排他ロック
 ├── suspended/             # Guardrails による停止フラグ
 ├── logs.db                # 実行履歴を保存する SQLite ファイル
-└── logs/                  # sync の stdout/stderr を保存するログファイル
+├── logs/                  # sync の stdout/stderr を保存するログファイル
+├── watermarks/            # DWH エクスポートのウォーターマーク
+└── source_stats/          # Source テーブルの統計値キャッシュ
 ```
 
 [`nagi.yaml`](./configurations/project.md) はプロジェクト全体の設定（ストレージバックエンド、通知先など）を担います。

@@ -56,3 +56,13 @@ onDrift:
 | `pre` | SyncStep | — | - | Optional step executed before the main sync command. |
 
 <!-- schema:auto-generated:end:SyncSpec -->
+
+<!-- schema:auto-generated:start:SyncStep -->
+
+| Attribute | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `args` | list[string] | Yes | - | Command and arguments in argv format. |
+| `type` | any | Yes | - | Execution type for this step (currently only `Command`). |
+| `env` | map[string, string] | — | {} | Environment variables to set for the subprocess. |
+
+<!-- schema:auto-generated:end:SyncStep -->

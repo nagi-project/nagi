@@ -1,12 +1,29 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "MergePosition": {
+      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries during Asset overlay merge.",
+      "enum": [
+        "beforeOrigin",
+        "afterOrigin"
+      ],
+      "type": "string"
+    },
     "OnDriftEntry": {
       "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference. The conditions are evaluated as a group (all must pass for no drift).",
       "properties": {
         "conditions": {
           "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
           "type": "string"
+        },
+        "mergePosition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MergePosition"
+            }
+          ],
+          "default": "beforeOrigin",
+          "description": "Controls insertion position during overlay merge. Not included in compiled output."
         },
         "sync": {
           "description": "Name of the Sync resource to execute when drift is detected.",

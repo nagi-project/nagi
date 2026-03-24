@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "StepType": {
+      "description": "Currently only `Command` (subprocess execution) is supported.",
+      "enum": [
+        "Command"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "args": {
+      "description": "Command and arguments in argv format.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "Environment variables to set for the subprocess.",
+      "type": "object"
+    },
+    "type": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/StepType"
+        }
+      ],
+      "description": "Execution type for this step (currently only `Command`)."
+    }
+  },
+  "required": [
+    "args",
+    "type"
+  ],
+  "title": "SyncStep",
+  "type": "object"
+}

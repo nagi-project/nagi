@@ -32,6 +32,54 @@
       },
       "type": "object"
     },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
+    "ExportConfig": {
+      "description": "Configuration for exporting logs to a remote DWH.",
+      "properties": {
+        "connection": {
+          "description": "Reference to a `kind: Connection` resource name.",
+          "type": "string"
+        },
+        "dataset": {
+          "description": "DWH dataset (BigQuery) or schema (Snowflake) to export into.",
+          "type": "string"
+        },
+        "format": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExportFormat"
+            }
+          ],
+          "description": "Intermediate file format for export."
+        },
+        "interval": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Duration"
+            }
+          ],
+          "default": "30m",
+          "description": "Condition evaluation interval and export throttling threshold."
+        }
+      },
+      "required": [
+        "connection",
+        "dataset"
+      ],
+      "type": "object"
+    },
+    "ExportFormat": {
+      "description": "Export format for log data.",
+      "enum": [
+        "jsonl",
+        "duckdb"
+      ],
+      "type": "string"
+    },
     "NotifyConfig": {
       "properties": {
         "slack": {
@@ -70,16 +118,27 @@
       ],
       "description": "State storage backend configuration."
     },
+    "export": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExportConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Log export configuration. When set, compile generates export Assets and logs are transferred to the remote DWH."
+    },
     "lockRetryIntervalSeconds": {
       "default": 900,
-      "description": "Interval in seconds between lock acquisition retry attempts. Defaults to 10.",
+      "description": "Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes).",
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
     },
     "lockRetryMaxAttempts": {
       "default": 3,
-      "description": "Maximum number of lock acquisition retry attempts before skipping. Defaults to 30.",
+      "description": "Maximum number of lock acquisition retry attempts before skipping. Defaults to 3.",
       "format": "uint32",
       "minimum": 0.0,
       "type": "integer"
@@ -99,6 +158,11 @@
         "integer",
         "null"
       ]
+    },
+    "nagiDir": {
+      "default": "~/.nagi",
+      "description": "Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.",
+      "type": "string"
     },
     "notify": {
       "allOf": [

@@ -14,12 +14,14 @@
 | --- | --- |
 | `init` | 環境を準備し、`compile` が実行できる状態にする |
 | `compile` | Asset 定義をコンパイルし、`target/` に出力する |
+| `ls` | コンパイル済みリソースの一覧を表示する |
 | `evaluate` | Asset の条件を評価する |
 | `status` | キャッシュされた評価結果と直近の sync ログを表示する |
 | `sync` | Asset の sync を実行する |
 | `serve` | Asset をコンパイルし、reconciliation loop を開始する |
 | `serve resume` | 停止した Asset を再開する |
 | `serve halt` | 全 Asset を一括停止する |
+| `export` | 実行ログをリモート DWH にエクスポートする |
 | `mcp` | MCP サーバーを stdio で起動する |
 
 ## init
@@ -45,6 +47,18 @@ nagi compile [OPTIONS]
 | `--resources-dir` | `resources` | 入力ディレクトリ |
 | `--target-dir` | `target` | 出力ディレクトリ |
 | `-y, --yes` | — | 上書き確認をスキップする |
+
+## ls
+
+コンパイル済みの全リソースを JSON で一覧表示します。
+
+```bash
+nagi ls [OPTIONS]
+```
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--target-dir` | `target` | コンパイル済みディレクトリ |
 
 ## evaluate
 
@@ -73,7 +87,7 @@ nagi sync [OPTIONS]
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
-| `--stage` | — | 実行するステージ（カンマ区切り: `pre`, `run`, `post`）。指定時は完了後の re-evaluate を行わない |
+| `--stage` | — | 実行するステージ（カンマ区切り: `pre`, `run`, `post`）。指定時は完了後の evaluate を行わない |
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 実行されるコマンドを表示（副作用なし） |
 | `--force` | — | dbt Cloud の実行中ジョブチェックをスキップする |
@@ -131,6 +145,19 @@ nagi serve halt [OPTIONS]
 | オプション | 説明 |
 | --- | --- |
 | `--reason` | 停止理由 |
+
+## export
+
+実行ログ（`logs.db`）をリモート DWH にエクスポートします。[`nagi.yaml`](./configurations/project.md) の `export` 設定が必要です。
+
+```bash
+nagi export [OPTIONS]
+```
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--select` | — | エクスポート対象のテーブル名を指定（`evaluate_logs`, `sync_logs`, `sync_evaluations`） |
+| `--dry-run` | — | 未エクスポートの行数を表示（転送は行わない） |
 
 ## mcp
 

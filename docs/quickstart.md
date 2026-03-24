@@ -99,7 +99,7 @@ nagi evaluate
 nagi sync
 ```
 
-プランが表示され、承認すると `greeting.txt` が作成されます。Sync 完了後に自動で re-evaluate が行われます。
+プランが表示され、承認すると `greeting.txt` が作成されます。Sync 完了後に自動で evaluate が行われます。
 
 ### Step 4: Verify
 
