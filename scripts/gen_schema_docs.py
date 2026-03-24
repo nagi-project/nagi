@@ -14,9 +14,11 @@ from pathlib import Path
 # table_only=True suppresses ## Attributes heading (for embedding in existing sections)
 SCHEMA_MAP = {
     "AssetSpec": ("configurations/resources/asset.md", "kind: Asset", False),
+    "OnDriftEntry": ("configurations/resources/asset.md", "OnDriftEntry", True),
     "SourceSpec": ("configurations/resources/source.md", "kind: Source", False),
     "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection", False),
     "SyncSpec": ("configurations/resources/sync.md", "kind: Sync", False),
+    "SyncStep": ("configurations/resources/sync.md", "SyncStep", True),
     "ConditionsSpec": ("configurations/resources/conditions.md", "kind: Conditions", False),
     "OriginSpec": ("configurations/resources/origin.md", "kind: Origin", False),
     "NagiConfig": ("configurations/project.md", "nagi.yaml", False),

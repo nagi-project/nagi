@@ -33,14 +33,15 @@ pub struct NagiConfig {
     /// preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).
     #[serde(default = "default_lock_ttl_seconds")]
     pub lock_ttl_seconds: u64,
-    /// Interval in seconds between lock acquisition retry attempts. Defaults to 10.
+    /// Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes).
     #[serde(default = "default_lock_retry_interval_seconds")]
     pub lock_retry_interval_seconds: u64,
-    /// Maximum number of lock acquisition retry attempts before skipping. Defaults to 30.
+    /// Maximum number of lock acquisition retry attempts before skipping. Defaults to 3.
     #[serde(default = "default_lock_retry_max_attempts")]
     pub lock_retry_max_attempts: u32,
     /// Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.
     #[serde(default = "default_nagi_dir")]
+    #[schemars(default = "schema_default_nagi_dir")]
     pub nagi_dir: PathBuf,
     /// Log export configuration. When set, compile generates export Assets
     /// and logs are transferred to the remote DWH.
@@ -103,6 +104,10 @@ fn default_lock_retry_max_attempts() -> u32 {
 
 pub fn default_nagi_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".nagi")
+}
+
+fn schema_default_nagi_dir() -> PathBuf {
+    PathBuf::from("~/.nagi")
 }
 
 /// Loads config from `project_dir` and returns the resolved `nagi_dir`.

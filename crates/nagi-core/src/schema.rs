@@ -2,6 +2,8 @@ use schemars::schema_for;
 
 use crate::config::NagiConfig;
 use crate::evaluate::AssetEvalResult;
+use crate::kind::asset::OnDriftEntry;
+use crate::kind::sync::SyncStep;
 use crate::kind::{
     AssetSpec, ConditionsSpec, ConnectionSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
 };
@@ -41,6 +43,14 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
         (
             "OriginSpec",
             serde_json::to_value(schema_for!(OriginSpec)).unwrap(),
+        ),
+        (
+            "SyncStep",
+            serde_json::to_value(schema_for!(SyncStep)).unwrap(),
+        ),
+        (
+            "OnDriftEntry",
+            serde_json::to_value(schema_for!(OnDriftEntry)).unwrap(),
         ),
         (
             "NagiConfig",
@@ -106,6 +116,8 @@ mod tests {
             "SyncSpec.json",
             "ConditionsSpec.json",
             "OriginSpec.json",
+            "SyncStep.json",
+            "OnDriftEntry.json",
             "NagiConfig.json",
             "AssetEvalResult.json",
             "LockInfo.json",
