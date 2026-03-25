@@ -39,7 +39,7 @@ pub use suspended::SuspendedInfo;
 
 use controller::{
     await_controller_shutdown, build_controller_inputs, build_notifier, run_controller,
-    BackendStores,
+    BackendStores, ConcurrencyLimits,
 };
 use suspended::{list_suspended, remove_suspended, suspended_path};
 
@@ -170,6 +170,11 @@ fn spawn_controllers(
         retry_max_attempts: config.lock_retry_max_attempts,
     };
 
+    let concurrency = ConcurrencyLimits {
+        max_evaluate: config.max_evaluate_concurrency,
+        max_sync: config.max_sync_concurrency,
+    };
+
     let (shutdown_tx, _) = watch::channel(false);
 
     let mut handles = Vec::new();
@@ -185,6 +190,7 @@ fn spawn_controllers(
             n,
             Some(store),
             lc,
+            concurrency,
             rx,
         )));
     }

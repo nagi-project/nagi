@@ -16,7 +16,7 @@ pub enum NotifyError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NotifyEvent {
-    EvalFailed {
+    EvaluateFailed {
         asset_name: String,
         error: String,
     },
@@ -38,7 +38,7 @@ impl NotifyEvent {
     /// Used for per-asset thread grouping.
     pub fn asset_name(&self) -> Option<&str> {
         match self {
-            NotifyEvent::EvalFailed { asset_name, .. }
+            NotifyEvent::EvaluateFailed { asset_name, .. }
             | NotifyEvent::Suspended { asset_name, .. }
             | NotifyEvent::SyncLockSkipped { asset_name, .. } => Some(asset_name),
             NotifyEvent::Halted { .. } => None,
@@ -49,7 +49,7 @@ impl NotifyEvent {
 impl fmt::Display for NotifyEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NotifyEvent::EvalFailed { asset_name, error } => {
+            NotifyEvent::EvaluateFailed { asset_name, error } => {
                 write!(f, "[nagi] Asset `{asset_name}` evaluation failed: {error}")
             }
             NotifyEvent::Suspended { asset_name, reason } => {
@@ -81,8 +81,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn event_display_eval_failed() {
-        let event = NotifyEvent::EvalFailed {
+    fn event_display_evaluate_failed() {
+        let event = NotifyEvent::EvaluateFailed {
             asset_name: "daily-sales".to_string(),
             error: "parse error".to_string(),
         };

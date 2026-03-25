@@ -39,6 +39,12 @@ pub struct NagiConfig {
     /// Maximum number of lock acquisition retry attempts before skipping. Defaults to 3.
     #[serde(default = "default_lock_retry_max_attempts")]
     pub lock_retry_max_attempts: u32,
+    /// Maximum number of concurrent evaluate tasks per Controller.
+    /// When omitted, no limit is applied.
+    pub max_evaluate_concurrency: Option<usize>,
+    /// Maximum number of concurrent sync tasks per Controller.
+    /// When omitted, no limit is applied.
+    pub max_sync_concurrency: Option<usize>,
     /// Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.
     #[serde(default)]
     #[schemars(default = "schema_default_nagi_dir")]
@@ -58,6 +64,8 @@ impl Default for NagiConfig {
             lock_ttl_seconds: default_lock_ttl_seconds(),
             lock_retry_interval_seconds: default_lock_retry_interval_seconds(),
             lock_retry_max_attempts: default_lock_retry_max_attempts(),
+            max_evaluate_concurrency: None,
+            max_sync_concurrency: None,
             nagi_dir: NagiDir::default(),
             export: None,
         }
@@ -560,6 +568,35 @@ export:
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(config.export.is_none());
+    }
+
+    // ── Concurrency ──────────────────────────────────────────────────────
+
+    #[test]
+    fn default_concurrency_is_none() {
+        let config = NagiConfig::default();
+        assert!(config.max_evaluate_concurrency.is_none());
+        assert!(config.max_sync_concurrency.is_none());
+    }
+
+    #[test]
+    fn load_concurrency_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "maxEvaluateConcurrency: 5\nmaxSyncConcurrency: 2";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.max_evaluate_concurrency, Some(5));
+        assert_eq!(config.max_sync_concurrency, Some(2));
+    }
+
+    #[test]
+    fn load_without_concurrency_uses_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "backend:\n  type: local";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.max_evaluate_concurrency.is_none());
+        assert!(config.max_sync_concurrency.is_none());
     }
 
     // ── NagiDir ──────────────────────────────────────────────────────────

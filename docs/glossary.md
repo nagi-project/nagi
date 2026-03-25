@@ -81,7 +81,7 @@ Guardrails
 : Sync 実行後の状態悪化（Ready な条件が減少）や連続失敗を検知し、Asset の Sync を自動停止する安全装置。
 
 Upstream Propagation
-: 上流 Asset が Drifted → Ready に遷移したとき、下流 Asset の Evaluate を即座に起動する仕組み。
+: 上流 Asset が Drifted → Ready に遷移したとき、下流 Asset の Sync を Evaluate をスキップして直接起動する仕組み。Sync 完了後に re-evaluate で収束結果を確認する。上流が Drifted の間、下流の Evaluate と Sync はすべてブロックされる。
 
 Source Change Detection
 : Source テーブルの統計値（行数・バイト数）が前回から変化していない場合にキャッシュ済みの評価結果を返し、データウェアハウスへのクエリを省略するための最適化。

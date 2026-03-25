@@ -23,7 +23,7 @@ pub struct SuspendedEvent {
 
 // ── Type aliases for JoinSet results ─────────────────────────────────────────
 
-pub type EvalJoinResult =
+pub type EvaluateJoinResult =
     Option<Result<(String, Result<AssetEvalResult, EvaluateError>), tokio::task::JoinError>>;
 pub type SyncJoinResult = Option<
     Result<(String, Result<crate::sync::SyncExecutionResult, SyncError>), tokio::task::JoinError>,
@@ -91,7 +91,7 @@ struct AssetSyncConfig {
 #[derive(Debug)]
 pub struct ServeState {
     pub scheduler: SchedulerState,
-    pub work_queue: WorkQueue,
+    pub evaluate_queue: WorkQueue,
     pub readiness: ReadinessState,
     /// Assets currently being evaluated in the JoinSet.
     pub in_flight: HashSet<String>,
@@ -112,7 +112,7 @@ pub struct ServeState {
     /// Ready condition count from the last evaluation, per asset.
     last_ready_count: HashMap<String, usize>,
     /// Assets awaiting post-sync re-evaluation for degradation detection.
-    awaiting_post_sync_eval: HashSet<String>,
+    awaiting_post_sync_evaluate: HashSet<String>,
 }
 
 impl ServeState {
@@ -120,7 +120,7 @@ impl ServeState {
         let edge_maps = build_edge_maps(edges);
         Self {
             scheduler: SchedulerState::new(),
-            work_queue: WorkQueue::new(),
+            evaluate_queue: WorkQueue::new(),
             readiness: ReadinessState::new(),
             in_flight: HashSet::new(),
             downstream_map: edge_maps.downstream,
@@ -131,7 +131,7 @@ impl ServeState {
             guardrail: GuardrailState::new(),
             suspended_store,
             last_ready_count: HashMap::new(),
-            awaiting_post_sync_eval: HashSet::new(),
+            awaiting_post_sync_evaluate: HashSet::new(),
         }
     }
 
@@ -140,7 +140,7 @@ impl ServeState {
     pub fn register_assets(&mut self, assets: &[AssetEntry]) {
         for asset in assets {
             if self.all_upstreams_ready(&asset.name) {
-                self.work_queue.enqueue(asset.name.clone());
+                self.evaluate_queue.enqueue(asset.name.clone());
             }
             if let Some(dur) = asset.min_interval {
                 self.scheduler.register(asset.name.clone(), dur);
@@ -158,8 +158,8 @@ impl ServeState {
 
     /// Returns true if the asset is awaiting post-sync re-evaluation.
     /// Used to skip the condition TTL cache for re-evaluations after sync.
-    pub fn is_awaiting_post_sync_eval(&self, asset_name: &str) -> bool {
-        self.awaiting_post_sync_eval.contains(asset_name)
+    pub fn is_awaiting_post_sync_evaluate(&self, asset_name: &str) -> bool {
+        self.awaiting_post_sync_evaluate.contains(asset_name)
     }
 
     /// Returns true if all upstream assets are Ready (or there are no upstreams).
@@ -186,12 +186,17 @@ impl ServeState {
             tracing::debug!(asset = %name, "evaluate skipped: upstream not ready");
             return;
         }
-        self.work_queue.enqueue(name);
+        self.evaluate_queue.enqueue(name);
     }
 
     /// Dequeues the next asset to spawn, skipping those already in flight.
-    pub fn next_spawnable(&mut self) -> Option<String> {
-        while let Some(name) = self.work_queue.dequeue() {
+    /// When `max` is `Some(n)`, returns `None` if `n` evaluations are already
+    /// in flight, leaving remaining items in the queue for the next iteration.
+    pub fn next_spawnable(&mut self, max: Option<usize>) -> Option<String> {
+        if max.is_some_and(|m| self.in_flight.len() >= m) {
+            return None;
+        }
+        while let Some(name) = self.evaluate_queue.dequeue() {
             if !self.in_flight.contains(&name) {
                 self.in_flight.insert(name.clone());
                 return Some(name);
@@ -243,7 +248,12 @@ impl ServeState {
 
     /// Returns the next asset that is not currently being synced.
     /// Each asset is serialized individually by asset name.
-    pub fn next_syncable(&mut self) -> Option<String> {
+    /// When `max` is `Some(n)`, returns `None` if `n` syncs are already
+    /// running, leaving remaining items in the queue for the next iteration.
+    pub fn next_syncable(&mut self, max: Option<usize>) -> Option<String> {
+        if max.is_some_and(|m| self.syncing.len() >= m) {
+            return None;
+        }
         let mut skipped = Vec::new();
         let result = loop {
             let Some(name) = self.sync_queue.dequeue() else {
@@ -285,8 +295,9 @@ impl ServeState {
         };
 
         // Re-evaluate after sync to check convergence (and detect degradation).
-        self.awaiting_post_sync_eval.insert(asset_name.to_string());
-        self.work_queue.enqueue(asset_name.to_string());
+        self.awaiting_post_sync_evaluate
+            .insert(asset_name.to_string());
+        self.evaluate_queue.enqueue(asset_name.to_string());
         suspended_reason
     }
 
@@ -357,7 +368,7 @@ impl ServeState {
     /// in-flight tracking.  Returns names of downstream assets that were
     /// enqueued due to a Not Ready → Ready transition.
     /// Returns (propagated downstream names, optional suspension reason).
-    pub fn handle_eval_result(
+    pub fn handle_evaluate_result(
         &mut self,
         asset_name: &str,
         result: &Result<AssetEvalResult, EvaluateError>,
@@ -380,7 +391,7 @@ impl ServeState {
         // Degradation detection: if this is a post-sync re-evaluation and
         // the number of Ready conditions decreased, suspend the asset.
         let suspended = self
-            .awaiting_post_sync_eval
+            .awaiting_post_sync_evaluate
             .remove(asset_name)
             .then(|| self.check_degradation(asset_name, ready_count))
             .flatten()
@@ -400,17 +411,20 @@ impl ServeState {
         (self.propagate_downstream(asset_name, ready), suspended)
     }
 
-    /// Handles a JoinSet result from an eval task.
+    /// Handles a JoinSet result from an evaluate task.
     /// Logs the outcome, updates state, and returns downstream propagations.
-    pub fn on_eval_complete(&mut self, join_result: EvalJoinResult) -> Option<SuspendedEvent> {
-        let Some(Ok((asset_name, eval_result))) = join_result else {
+    pub fn on_evaluate_complete(
+        &mut self,
+        join_result: EvaluateJoinResult,
+    ) -> Option<SuspendedEvent> {
+        let Some(Ok((asset_name, evaluate_result))) = join_result else {
             return None;
         };
-        match &eval_result {
+        match &evaluate_result {
             Ok(r) => tracing::info!(asset = %r.asset_name, ready = r.ready, "evaluated"),
             Err(e) => tracing::error!(asset = %asset_name, error = %e, "evaluation failed"),
         }
-        let (propagated, suspended) = self.handle_eval_result(&asset_name, &eval_result);
+        let (propagated, suspended) = self.handle_evaluate_result(&asset_name, &evaluate_result);
         for ds in &propagated {
             tracing::debug!(downstream = %ds, "propagating to downstream");
         }
@@ -535,7 +549,7 @@ mod tests {
         }
     }
 
-    fn eval_ok(name: &str, ready: bool) -> Result<AssetEvalResult, EvaluateError> {
+    fn evaluate_ok(name: &str, ready: bool) -> Result<AssetEvalResult, EvaluateError> {
         Ok(AssetEvalResult {
             asset_name: name.to_string(),
             ready,
@@ -586,8 +600,8 @@ mod tests {
         state.register_assets(&assets);
 
         // Only root asset "a" is enqueued; "b" is blocked (upstream "a" not ready)
-        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
-        assert_eq!(state.work_queue.dequeue(), None);
+        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
+        assert_eq!(state.evaluate_queue.dequeue(), None);
         assert!(state.scheduler.intervals.contains_key("a"));
         assert!(!state.scheduler.intervals.contains_key("b"));
     }
@@ -595,41 +609,41 @@ mod tests {
     #[test]
     fn next_spawnable_skips_in_flight() {
         let mut state = ServeState::new(&[], mem_suspended_store());
-        state.work_queue.enqueue("a".to_string());
-        state.work_queue.enqueue("b".to_string());
+        state.evaluate_queue.enqueue("a".to_string());
+        state.evaluate_queue.enqueue("b".to_string());
         state.in_flight.insert("a".to_string());
 
-        assert_eq!(state.next_spawnable(), Some("b".to_string()));
-        assert_eq!(state.next_spawnable(), None);
+        assert_eq!(state.next_spawnable(None), Some("b".to_string()));
+        assert_eq!(state.next_spawnable(None), None);
         assert!(state.in_flight.contains("b"));
     }
 
-    // ── handle_eval_result tests ─────────────────────────────────────────
+    // ── handle_evaluate_result tests ─────────────────────────────────────────
 
     #[test]
-    fn handle_eval_result_clears_in_flight_and_reschedules() {
+    fn handle_evaluate_result_clears_in_flight_and_reschedules() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry("a", Some(StdDuration::from_secs(60)))]);
         state.in_flight.insert("a".to_string());
 
-        let result = eval_ok("a", true);
-        state.handle_eval_result("a", &result);
+        let result = evaluate_ok("a", true);
+        state.handle_evaluate_result("a", &result);
 
         assert!(!state.in_flight.contains("a"));
         assert!(state.scheduler.next_eval_at.contains_key("a"));
     }
 
     #[test]
-    fn handle_eval_result_error_marks_not_ready() {
+    fn handle_evaluate_result_error_marks_not_ready() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.in_flight.insert("a".to_string());
 
-        state.handle_eval_result("a", &eval_ok("a", true));
+        state.handle_evaluate_result("a", &evaluate_ok("a", true));
 
         state.in_flight.insert("a".to_string());
         let err: Result<AssetEvalResult, EvaluateError> =
             Err(EvaluateError::Parse("test error".to_string()));
-        state.handle_eval_result("a", &err);
+        state.handle_evaluate_result("a", &err);
 
         assert!(!state.readiness.ready.get("a").copied().unwrap_or(false));
     }
@@ -645,7 +659,7 @@ mod tests {
 
         let propagated = state.propagate_downstream("a", true);
         assert_eq!(propagated, vec!["b".to_string(), "c".to_string()]);
-        // Downstreams should be in sync_queue, not work_queue
+        // Downstreams should be in sync_queue, not evaluate_queue
         assert_eq!(state.sync_queue.dequeue(), Some("b".to_string()));
         assert_eq!(state.sync_queue.dequeue(), Some("c".to_string()));
     }
@@ -688,14 +702,14 @@ mod tests {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("b")]);
-        // Drain initial work_queue entries from init
-        while state.work_queue.dequeue().is_some() {}
+        // Drain initial evaluate_queue entries from init
+        while state.evaluate_queue.dequeue().is_some() {}
         state.readiness.record("a", false);
 
         state.propagate_downstream("a", true);
 
-        // work_queue (evaluate) must remain empty; only sync_queue is used.
-        assert!(state.work_queue.dequeue().is_none());
+        // evaluate_queue (evaluate) must remain empty; only sync_queue is used.
+        assert!(state.evaluate_queue.dequeue().is_none());
         assert_eq!(state.sync_queue.dequeue(), Some("b".to_string()));
     }
 
@@ -705,7 +719,7 @@ mod tests {
         let edges = vec![edge("b", "x"), edge("c", "x")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("x")]);
-        while state.work_queue.dequeue().is_some() {}
+        while state.evaluate_queue.dequeue().is_some() {}
 
         // B becomes Ready → X sync requested
         state.readiness.record("b", false);
@@ -713,7 +727,7 @@ mod tests {
         assert_eq!(propagated, vec!["x".to_string()]);
 
         // Start X's sync
-        assert_eq!(state.next_syncable(), Some("x".to_string()));
+        assert_eq!(state.next_syncable(None), Some("x".to_string()));
 
         // C becomes Ready while X is syncing → X sync rejected
         state.readiness.record("c", false);
@@ -727,7 +741,7 @@ mod tests {
     fn request_sync_enqueues_when_auto_sync_enabled() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
+        state.evaluate_queue.dequeue();
 
         assert!(state.request_sync("a"));
         assert_eq!(state.sync_queue.dequeue(), Some("a".to_string()));
@@ -737,7 +751,7 @@ mod tests {
     fn request_sync_skips_when_auto_sync_false() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry("a", None)]);
-        state.work_queue.dequeue();
+        state.evaluate_queue.dequeue();
 
         assert!(!state.request_sync("a"));
         assert!(state.sync_queue.is_empty());
@@ -747,7 +761,7 @@ mod tests {
     fn request_sync_skips_when_already_syncing() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
+        state.evaluate_queue.dequeue();
 
         state.syncing.insert("a".to_string());
         assert!(!state.request_sync("a"));
@@ -757,7 +771,7 @@ mod tests {
     fn request_sync_dedup() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
+        state.evaluate_queue.dequeue();
 
         assert!(state.request_sync("a"));
         assert!(!state.request_sync("a")); // duplicate rejected
@@ -773,22 +787,22 @@ mod tests {
         state.request_sync("a");
         state.request_sync("b");
 
-        assert_eq!(state.next_syncable(), Some("a".to_string()));
+        assert_eq!(state.next_syncable(None), Some("a".to_string()));
         // "b" is a different asset, so it can run concurrently.
-        assert_eq!(state.next_syncable(), Some("b".to_string()));
+        assert_eq!(state.next_syncable(None), Some("b".to_string()));
     }
 
     #[test]
     fn handle_sync_result_clears_syncing_and_enqueues_re_eval() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
+        state.evaluate_queue.dequeue();
 
         state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
 
         assert!(state.syncing.is_empty());
-        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
+        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
     }
 
     #[test]
@@ -797,36 +811,36 @@ mod tests {
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.request_sync("a");
 
-        assert_eq!(state.next_syncable(), Some("a".to_string()));
+        assert_eq!(state.next_syncable(None), Some("a".to_string()));
         // Same asset cannot sync concurrently.
         state.request_sync("a");
-        assert_eq!(state.next_syncable(), None);
+        assert_eq!(state.next_syncable(None), None);
 
         state.handle_sync_result("a", true, None);
         state.request_sync("a");
-        assert_eq!(state.next_syncable(), Some("a".to_string()));
+        assert_eq!(state.next_syncable(None), Some("a".to_string()));
     }
 
     #[test]
-    fn handle_eval_not_ready_with_auto_sync_requests_sync() {
+    fn handle_evaluate_not_ready_with_auto_sync_requests_sync() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
-        let result = eval_ok("a", false);
-        state.handle_eval_result("a", &result);
+        let result = evaluate_ok("a", false);
+        state.handle_evaluate_result("a", &result);
 
         assert_eq!(state.sync_queue.dequeue(), Some("a".to_string()));
     }
 
     #[test]
-    fn handle_eval_ready_does_not_request_sync() {
+    fn handle_evaluate_ready_does_not_request_sync() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
-        let result = eval_ok("a", true);
-        state.handle_eval_result("a", &result);
+        let result = evaluate_ok("a", true);
+        state.handle_evaluate_result("a", &result);
 
         assert!(state.sync_queue.is_empty());
     }
@@ -837,7 +851,7 @@ mod tests {
     fn handle_sync_failure_applies_backoff() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
-        state.work_queue.dequeue();
+        state.evaluate_queue.dequeue();
 
         state.syncing.insert("a".to_string());
         state.handle_sync_result("a", false, None);
@@ -879,20 +893,20 @@ mod tests {
         assert!(!state.request_sync("a"));
     }
 
-    // ── on_eval_complete / on_sync_complete tests ──────────────────────
+    // ── on_evaluate_complete / on_sync_complete tests ──────────────────────
 
     #[test]
-    fn on_eval_complete_updates_state() {
+    fn on_evaluate_complete_updates_state() {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
         state.register_assets(&[asset_entry("a", None), asset_entry_with_sync("b")]);
         state.in_flight.insert("a".to_string());
-        while state.work_queue.dequeue().is_some() {}
+        while state.evaluate_queue.dequeue().is_some() {}
 
         state.readiness.record("a", false);
 
-        let join_result = Some(Ok(("a".to_string(), eval_ok("a", true))));
-        state.on_eval_complete(join_result);
+        let join_result = Some(Ok(("a".to_string(), evaluate_ok("a", true))));
+        state.on_evaluate_complete(join_result);
 
         assert!(!state.in_flight.contains("a"));
         // Downstream "b" is enqueued for sync (not evaluate) on upstream Ready.
@@ -900,20 +914,20 @@ mod tests {
     }
 
     #[test]
-    fn on_eval_complete_ignores_none() {
+    fn on_evaluate_complete_ignores_none() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry("a", None)]);
-        while state.work_queue.dequeue().is_some() {}
+        while state.evaluate_queue.dequeue().is_some() {}
 
-        state.on_eval_complete(None);
-        assert!(state.work_queue.dequeue().is_none());
+        state.on_evaluate_complete(None);
+        assert!(state.evaluate_queue.dequeue().is_none());
     }
 
     #[test]
     fn on_sync_complete_success_resets_guardrail() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
-        while state.work_queue.dequeue().is_some() {}
+        while state.evaluate_queue.dequeue().is_some() {}
 
         state.syncing.insert("a".to_string());
         state.handle_sync_result("a", false, None);
@@ -981,12 +995,12 @@ mod tests {
             conditions: vec![ready_condition("c1"), ready_condition("c2")],
             evaluation_id: None,
         });
-        state.handle_eval_result("a", &result);
+        state.handle_evaluate_result("a", &result);
         assert_eq!(state.last_ready_count["a"], 2);
 
         state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
-        assert!(state.awaiting_post_sync_eval.contains("a"));
+        assert!(state.awaiting_post_sync_evaluate.contains("a"));
 
         state.in_flight.insert("a".to_string());
         let degraded = Ok(AssetEvalResult {
@@ -995,7 +1009,7 @@ mod tests {
             conditions: vec![ready_condition("c1"), not_ready_condition("c2")],
             evaluation_id: None,
         });
-        state.handle_eval_result("a", &degraded);
+        state.handle_evaluate_result("a", &degraded);
 
         assert!(susp.exists("a").unwrap());
     }
@@ -1014,7 +1028,7 @@ mod tests {
             conditions: vec![ready_condition("c1"), not_ready_condition("c2")],
             evaluation_id: None,
         });
-        state.handle_eval_result("a", &result);
+        state.handle_evaluate_result("a", &result);
 
         state.syncing.insert("a".to_string());
         state.handle_sync_result("a", true, None);
@@ -1025,7 +1039,7 @@ mod tests {
             conditions: vec![ready_condition("c1"), not_ready_condition("c2")],
             evaluation_id: None,
         });
-        state.handle_eval_result("a", &same);
+        state.handle_evaluate_result("a", &same);
 
         assert!(!susp.exists("a").unwrap());
     }
@@ -1053,7 +1067,7 @@ mod tests {
             conditions: vec![ready_condition("c1")],
             evaluation_id: None,
         });
-        state.handle_eval_result("a", &result);
+        state.handle_evaluate_result("a", &result);
 
         assert!(!susp.exists("a").unwrap());
         assert_eq!(state.guardrail.consecutive_failures.get("a").copied(), None);
@@ -1081,7 +1095,7 @@ mod tests {
             conditions: vec![not_ready_condition("c1")],
             evaluation_id: None,
         });
-        state.handle_eval_result("a", &result);
+        state.handle_evaluate_result("a", &result);
 
         assert!(susp.exists("a").unwrap());
     }
@@ -1279,8 +1293,8 @@ mod tests {
             asset_entry("c", None),
         ]);
         // Only "a" (no upstreams) should be enqueued
-        assert_eq!(state.work_queue.dequeue(), Some("a".to_string()));
-        assert_eq!(state.work_queue.dequeue(), None);
+        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
+        assert_eq!(state.evaluate_queue.dequeue(), None);
     }
 
     #[test]
@@ -1291,7 +1305,7 @@ mod tests {
             asset_entry("a", None),
             asset_entry("b", Some(StdDuration::from_secs(1))),
         ]);
-        while state.work_queue.dequeue().is_some() {}
+        while state.evaluate_queue.dequeue().is_some() {}
 
         // Set b's next_eval_at to the past so it is due
         state
@@ -1300,7 +1314,7 @@ mod tests {
             .insert("b".to_string(), tokio::time::Instant::now());
         state.enqueue_due();
         // b should not be enqueued because a is not ready
-        assert_eq!(state.work_queue.dequeue(), None);
+        assert_eq!(state.evaluate_queue.dequeue(), None);
     }
 
     #[test]
@@ -1311,7 +1325,7 @@ mod tests {
             asset_entry("a", None),
             asset_entry("b", Some(StdDuration::from_secs(1))),
         ]);
-        while state.work_queue.dequeue().is_some() {}
+        while state.evaluate_queue.dequeue().is_some() {}
 
         state.readiness.record("a", true);
         state
@@ -1319,6 +1333,47 @@ mod tests {
             .next_eval_at
             .insert("b".to_string(), tokio::time::Instant::now());
         state.enqueue_due();
-        assert_eq!(state.work_queue.dequeue(), Some("b".to_string()));
+        assert_eq!(state.evaluate_queue.dequeue(), Some("b".to_string()));
+    }
+
+    // ── Concurrency limit tests ──────────────────────────────────────────
+
+    #[test]
+    fn next_spawnable_respects_max_eval_concurrency() {
+        let mut state = ServeState::new(&[], mem_suspended_store());
+        state.evaluate_queue.enqueue("a".to_string());
+        state.evaluate_queue.enqueue("b".to_string());
+        state.evaluate_queue.enqueue("c".to_string());
+
+        // Limit to 2 concurrent evaluations.
+        assert_eq!(state.next_spawnable(Some(2)), Some("a".to_string()));
+        assert_eq!(state.next_spawnable(Some(2)), Some("b".to_string()));
+        // At limit → None; "c" stays in queue.
+        assert_eq!(state.next_spawnable(Some(2)), None);
+        assert_eq!(state.evaluate_queue.dequeue(), Some("c".to_string()));
+    }
+
+    #[test]
+    fn next_syncable_respects_max_sync_concurrency() {
+        let mut state = ServeState::new(&[], mem_suspended_store());
+        state.register_assets(&[
+            asset_entry_with_sync("a"),
+            asset_entry_with_sync("b"),
+            asset_entry_with_sync("c"),
+        ]);
+        state.request_sync("a");
+        state.request_sync("b");
+        state.request_sync("c");
+
+        // Limit to 1 concurrent sync.
+        assert_eq!(state.next_syncable(Some(1)), Some("a".to_string()));
+        // At limit → None; "b" and "c" stay in queue.
+        assert_eq!(state.next_syncable(Some(1)), None);
+
+        // Complete "a" → slot opens.
+        state.handle_sync_result("a", true, None);
+        state.request_sync("b");
+        state.request_sync("c");
+        assert_eq!(state.next_syncable(Some(1)), Some("b".to_string()));
     }
 }

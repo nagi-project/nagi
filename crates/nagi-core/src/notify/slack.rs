@@ -96,8 +96,8 @@ impl Notifier for SlackNotifier {
 mod tests {
     use super::*;
 
-    fn eval_failed_event(name: &str) -> NotifyEvent {
-        NotifyEvent::EvalFailed {
+    fn evaluate_failed_event(name: &str) -> NotifyEvent {
+        NotifyEvent::EvaluateFailed {
             asset_name: name.to_string(),
             error: "test".to_string(),
         }
@@ -122,13 +122,15 @@ mod tests {
     #[test]
     fn get_thread_ts_returns_none_for_new_asset() {
         let notifier = SlackNotifier::new("#test".to_string());
-        assert!(notifier.get_thread_ts(&eval_failed_event("a")).is_none());
+        assert!(notifier
+            .get_thread_ts(&evaluate_failed_event("a"))
+            .is_none());
     }
 
     #[test]
     fn store_and_get_thread_ts() {
         let notifier = SlackNotifier::new("#test".to_string());
-        let event = eval_failed_event("a");
+        let event = evaluate_failed_event("a");
 
         notifier.store_thread_ts(&event, "1234.5678".to_string());
         assert_eq!(
@@ -140,7 +142,7 @@ mod tests {
     #[test]
     fn store_thread_ts_keeps_first_value() {
         let notifier = SlackNotifier::new("#test".to_string());
-        let event = eval_failed_event("a");
+        let event = evaluate_failed_event("a");
 
         notifier.store_thread_ts(&event, "first".to_string());
         notifier.store_thread_ts(&event, "second".to_string());
@@ -151,11 +153,11 @@ mod tests {
     fn thread_ts_is_per_asset() {
         let notifier = SlackNotifier::new("#test".to_string());
 
-        notifier.store_thread_ts(&eval_failed_event("a"), "ts-a".to_string());
+        notifier.store_thread_ts(&evaluate_failed_event("a"), "ts-a".to_string());
         notifier.store_thread_ts(&suspended_event("b"), "ts-b".to_string());
 
         assert_eq!(
-            notifier.get_thread_ts(&eval_failed_event("a")),
+            notifier.get_thread_ts(&evaluate_failed_event("a")),
             Some("ts-a".to_string())
         );
         assert_eq!(
@@ -168,7 +170,7 @@ mod tests {
     fn thread_ts_shared_across_event_types_for_same_asset() {
         let notifier = SlackNotifier::new("#test".to_string());
 
-        notifier.store_thread_ts(&eval_failed_event("a"), "ts-a".to_string());
+        notifier.store_thread_ts(&evaluate_failed_event("a"), "ts-a".to_string());
         // Suspended event for same asset should reuse the thread.
         assert_eq!(
             notifier.get_thread_ts(&suspended_event("a")),

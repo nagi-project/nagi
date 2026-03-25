@@ -42,7 +42,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn work_queue_enqueue_dequeue() {
+    fn queue_enqueue_dequeue() {
         let mut q = WorkQueue::new();
         assert!(q.is_empty());
 
@@ -57,7 +57,7 @@ mod tests {
     }
 
     #[test]
-    fn work_queue_dedup() {
+    fn queue_dedup() {
         let mut q = WorkQueue::new();
         assert!(q.enqueue("a".to_string()));
         assert!(!q.enqueue("a".to_string())); // duplicate rejected

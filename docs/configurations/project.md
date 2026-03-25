@@ -35,7 +35,9 @@ terminationGracePeriodSeconds: 300
 | `lockRetryMaxAttempts` | integer | — | 3 | Maximum number of lock acquisition retry attempts before skipping. Defaults to 3. |
 | `lockTtlSeconds` | integer | — | 3600 | Time-to-live in seconds for sync lock files. Locks expire after this duration, preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour). |
 | `maxControllers` | integer | — | - | Maximum number of Controllers to run in parallel during `nagi serve`. When the number of connected components exceeds this limit, serve exits with an error. When omitted, one Controller is created per connected component. |
-| `nagiDir` | string | — | ~/.nagi | Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`. |
+| `maxEvaluateConcurrency` | integer | — | - | Maximum number of concurrent evaluate tasks per Controller. When omitted, no limit is applied. |
+| `maxSyncConcurrency` | integer | — | - | Maximum number of concurrent sync tasks per Controller. When omitted, no limit is applied. |
+| `nagiDir` | string | — | - | Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`. |
 | `notify` | any | — | - | Notification channel configuration. |
 | `terminationGracePeriodSeconds` | integer | — | - | Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown. When omitted, waits indefinitely. |
 

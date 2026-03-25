@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
     "MergePosition": {
       "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries during Asset overlay merge.",
       "enum": [
@@ -51,6 +56,18 @@
       "default": true,
       "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
       "type": "boolean"
+    },
+    "evaluateCacheTtl": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Default evaluate cache TTL for all conditions in this Asset. Conditions can override this with their own `evaluateCacheTtl`."
     },
     "onDrift": {
       "default": [],

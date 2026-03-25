@@ -23,7 +23,7 @@ use crate::sync::SyncError;
 ///
 /// When `source_stats_dir` is provided and the asset has sources with a
 /// connection, checks `table_stats` for each source. If all source stats are
-/// unchanged from the cached values, returns the cached eval result (skipping
+/// unchanged from the cached values, returns the cached evaluate result (skipping
 /// the actual evaluation queries).
 ///
 /// When `skip_cache` is false, conditions with a valid TTL cache entry are
@@ -46,7 +46,7 @@ pub async fn evaluate_and_cache(
     let cache_path = cache_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
-    let eval_cache = LocalCache::new(cache_path);
+    let evaluate_cache = LocalCache::new(cache_path);
 
     let has_sources = conn.is_some() && !compiled.spec.sources.is_empty();
     let stats_cache = if has_sources {
@@ -62,7 +62,7 @@ pub async fn evaluate_and_cache(
     // Source change detection: skip evaluate if all sources unchanged.
     if let (Some(conn_ref), Some(sc)) = (conn.as_deref(), stats_cache.as_ref()) {
         if let Some(cached_result) =
-            check_sources_unchanged(&compiled, conn_ref, sc, &eval_cache).await
+            check_sources_unchanged(&compiled, conn_ref, sc, &evaluate_cache).await
         {
             return Ok(cached_result);
         }
@@ -84,7 +84,7 @@ pub async fn evaluate_and_cache(
     )
     .await?;
 
-    eval_cache
+    evaluate_cache
         .write(&result)
         .map_err(|e| EvaluateError::Cache(e.to_string()))?;
 
@@ -166,13 +166,13 @@ fn update_condition_cache(
     }
 }
 
-/// Returns the cached eval result if all sources have unchanged stats.
+/// Returns the cached evaluate result if all sources have unchanged stats.
 /// Returns `None` if any source changed or if there's no cached result.
 async fn check_sources_unchanged(
     compiled: &CompiledAsset,
     conn: &dyn crate::db::Connection,
     stats_cache: &dyn SourceStatsCache,
-    eval_cache: &dyn Cache,
+    evaluate_cache: &dyn Cache,
 ) -> Option<AssetEvalResult> {
     for source in &compiled.spec.sources {
         let current = match conn.table_stats(source).await {
@@ -187,8 +187,8 @@ async fn check_sources_unchanged(
             return None;
         }
     }
-    // All sources unchanged — return cached eval result if available.
-    eval_cache.read(&compiled.metadata.name).ok().flatten()
+    // All sources unchanged — return cached evaluate result if available.
+    evaluate_cache.read(&compiled.metadata.name).ok().flatten()
 }
 
 /// Updates the source stats cache with current values. Best-effort (errors logged).
@@ -207,7 +207,7 @@ async fn update_source_stats(
 }
 
 /// Result of a spawned evaluation, including timestamps for logging.
-pub struct EvalOutcome {
+pub struct EvaluateOutcome {
     pub result: Result<AssetEvalResult, EvaluateError>,
     pub started_at: String,
     pub finished_at: String,
@@ -221,7 +221,7 @@ pub async fn spawn_evaluate(
     cache_dir: Option<PathBuf>,
     source_stats_dir: Option<PathBuf>,
     skip_cache: bool,
-) -> (String, EvalOutcome) {
+) -> (String, EvaluateOutcome) {
     let started_at = chrono::Utc::now().to_rfc3339();
     let result = evaluate_and_cache(
         &yaml,
@@ -233,7 +233,7 @@ pub async fn spawn_evaluate(
     let finished_at = chrono::Utc::now().to_rfc3339();
     (
         asset_name,
-        EvalOutcome {
+        EvaluateOutcome {
             result,
             started_at,
             finished_at,
@@ -490,11 +490,11 @@ mod tests {
         }
     }
 
-    struct MockEvalCache {
+    struct MockEvaluateCache {
         inner: Mutex<std::collections::HashMap<String, AssetEvalResult>>,
     }
 
-    impl MockEvalCache {
+    impl MockEvaluateCache {
         fn new() -> Self {
             Self {
                 inner: Mutex::new(std::collections::HashMap::new()),
@@ -509,7 +509,7 @@ mod tests {
         }
     }
 
-    impl Cache for MockEvalCache {
+    impl Cache for MockEvaluateCache {
         fn write(&self, result: &AssetEvalResult) -> Result<(), StorageError> {
             self.inner
                 .lock()
@@ -545,7 +545,7 @@ mod tests {
         }
     }
 
-    fn sample_eval_result() -> AssetEvalResult {
+    fn sample_evaluate_result() -> AssetEvalResult {
         AssetEvalResult {
             asset_name: "test-asset".to_string(),
             ready: true,
@@ -650,11 +650,11 @@ mod tests {
                 num_bytes: 2048,
             },
         );
-        let eval_cache = MockEvalCache::new();
-        eval_cache.set(sample_eval_result());
+        let evaluate_cache = MockEvaluateCache::new();
+        evaluate_cache.set(sample_evaluate_result());
 
         let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &eval_cache).await;
+        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
 
         assert!(result.is_some());
         assert_eq!(result.unwrap().asset_name, "test-asset");
@@ -676,11 +676,11 @@ mod tests {
                 num_bytes: 2048,
             },
         );
-        let eval_cache = MockEvalCache::new();
-        eval_cache.set(sample_eval_result());
+        let evaluate_cache = MockEvaluateCache::new();
+        evaluate_cache.set(sample_evaluate_result());
 
         let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &eval_cache).await;
+        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
 
         assert!(result.is_none());
     }
@@ -694,11 +694,11 @@ mod tests {
             },
         };
         let stats_cache = MockStatsCache::new();
-        let eval_cache = MockEvalCache::new();
-        eval_cache.set(sample_eval_result());
+        let evaluate_cache = MockEvaluateCache::new();
+        evaluate_cache.set(sample_evaluate_result());
 
         let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &eval_cache).await;
+        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
 
         assert!(result.is_none());
     }
@@ -719,10 +719,10 @@ mod tests {
                 num_bytes: 2048,
             },
         );
-        let eval_cache = MockEvalCache::new();
+        let evaluate_cache = MockEvaluateCache::new();
 
         let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &eval_cache).await;
+        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
 
         assert!(result.is_none());
     }

@@ -98,11 +98,11 @@ fn fire_notify(notifier: &Option<Arc<dyn Notifier>>, event: NotifyEvent) {
     });
 }
 
-/// Processes eval outcome: writes to log store and returns the result for state update.
-/// Returns a tuple of (name, eval_result) and an optional notification event.
-fn process_eval_outcome(
+/// Processes evaluate outcome: writes to log store and returns the result for state update.
+/// Returns a tuple of (name, evaluate_result) and an optional notification event.
+fn process_evaluate_outcome(
     name: String,
-    outcome: reconciler::EvalOutcome,
+    outcome: reconciler::EvaluateOutcome,
     log_store: &Option<LogStore>,
 ) -> (
     (
@@ -111,16 +111,19 @@ fn process_eval_outcome(
     ),
     Option<NotifyEvent>,
 ) {
-    if let (Some(store), Ok(ref eval)) = (log_store, &outcome.result) {
-        let eval_id = crate::sync::generate_uuid();
-        if let Err(e) =
-            store.write_evaluate_log(&eval_id, eval, &outcome.started_at, &outcome.finished_at)
-        {
+    if let (Some(store), Ok(ref result)) = (log_store, &outcome.result) {
+        let evaluate_id = crate::sync::generate_uuid();
+        if let Err(e) = store.write_evaluate_log(
+            &evaluate_id,
+            result,
+            &outcome.started_at,
+            &outcome.finished_at,
+        ) {
             tracing::warn!(asset = %name, error = %e, "failed to log evaluation");
         }
     }
     let event = if let Err(ref e) = outcome.result {
-        Some(NotifyEvent::EvalFailed {
+        Some(NotifyEvent::EvaluateFailed {
             asset_name: name.clone(),
             error: e.to_string(),
         })
@@ -146,22 +149,118 @@ fn compute_min_interval(on_drift: &[ResolvedOnDriftEntry]) -> Option<StdDuration
         .min()
 }
 
+/// Concurrency limits for evaluate and sync tasks within a Controller.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ConcurrencyLimits {
+    pub max_evaluate: Option<usize>,
+    pub max_sync: Option<usize>,
+}
+
+/// Drains the evaluate queue and spawns evaluate tasks, respecting the concurrency limit.
+fn spawn_evaluates(
+    state: &mut ServeState,
+    evaluate_tasks: &mut JoinSet<(String, reconciler::EvaluateOutcome)>,
+    yaml_map: &HashMap<&str, &str>,
+    cache_dir: &Option<PathBuf>,
+    source_stats_dir: &Option<PathBuf>,
+    max_evaluate: Option<usize>,
+) {
+    while let Some(name) = state.next_spawnable(max_evaluate) {
+        if let Some(&yaml) = yaml_map.get(name.as_str()) {
+            let skip_cache = state.is_awaiting_post_sync_evaluate(&name);
+            evaluate_tasks.spawn(reconciler::spawn_evaluate(
+                name,
+                yaml.to_string(),
+                cache_dir.clone(),
+                source_stats_dir.clone(),
+                skip_cache,
+            ));
+        }
+    }
+}
+
+/// Drains the sync queue and spawns sync tasks, respecting the concurrency limit.
+fn spawn_syncs(
+    state: &mut ServeState,
+    sync_tasks: &mut JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)>,
+    yaml_map: &HashMap<&str, &str>,
+    sync_lock: &Arc<dyn SyncLock>,
+    lock_config: reconciler::LockConfig,
+    notifier: &Option<Arc<dyn Notifier>>,
+    max_sync: Option<usize>,
+) {
+    while let Some(name) = state.next_syncable(max_sync) {
+        if let Some(&yaml) = yaml_map.get(name.as_str()) {
+            tracing::info!(asset = %name, "starting sync");
+            sync_tasks.spawn(reconciler::spawn_sync(
+                name,
+                yaml.to_string(),
+                sync_lock.clone(),
+                lock_config,
+                notifier.clone(),
+            ));
+        }
+    }
+}
+
+/// Processes an evaluate JoinSet result: logs, notifies, and updates state.
+fn handle_evaluate_completion(
+    state: &mut ServeState,
+    join_result: Option<Result<(String, reconciler::EvaluateOutcome), tokio::task::JoinError>>,
+    log_store: &Option<LogStore>,
+    notifier: &Option<Arc<dyn Notifier>>,
+) {
+    let mapped = join_result.map(|r| {
+        r.map(|(name, outcome)| {
+            let (name_and_result, event) = process_evaluate_outcome(name, outcome, log_store);
+            if let Some(ev) = event {
+                fire_notify(notifier, ev);
+            }
+            name_and_result
+        })
+    });
+    if let Some(event) = state.on_evaluate_complete(mapped) {
+        fire_notify(
+            notifier,
+            NotifyEvent::Suspended {
+                asset_name: event.asset_name,
+                reason: event.reason,
+            },
+        );
+    }
+}
+
+/// Processes a sync JoinSet result: logs, notifies, and updates state.
+fn handle_sync_completion(
+    state: &mut ServeState,
+    result: super::state::SyncJoinResult,
+    log_store: &Option<LogStore>,
+    notifier: &Option<Arc<dyn Notifier>>,
+) {
+    if let Some(Ok((ref name, Ok(ref sync_result)))) = result {
+        if let Some(ref store) = log_store {
+            log_sync_result(name, sync_result, store);
+        }
+    }
+    if let Some(event) = state.on_sync_complete(result) {
+        fire_notify(
+            notifier,
+            NotifyEvent::Suspended {
+                asset_name: event.asset_name,
+                reason: event.reason,
+            },
+        );
+    }
+}
+
 /// Runs the reconciliation loop for one connected component.
-///
-/// The loop reacts to four events via `tokio::select!`:
-/// 1. **Timer** — a scheduled asset becomes due → enqueue it.
-/// 2. **Eval completion** — a spawned evaluation finishes → update state,
-///    propagate to downstream assets if newly Ready, request sync if Not Ready.
-/// 3. **Sync completion** — a sync finishes → enqueue re-evaluation.
-/// 4. **Shutdown** — break and return.
-///
-/// Sync is serialized: at most one sync runs at a time per Controller.
 pub(super) async fn run_controller(
     input: ControllerInput,
     backend: BackendStores,
     notifier: Option<Arc<dyn Notifier>>,
     log_store: Option<LogStore>,
     lock_config: reconciler::LockConfig,
+    concurrency: ConcurrencyLimits,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
     let ControllerInput {
@@ -175,7 +274,7 @@ pub(super) async fn run_controller(
         suspended_store,
     } = backend;
     let mut state = ServeState::new(&edges, suspended_store);
-    let mut eval_tasks: JoinSet<(String, reconciler::EvalOutcome)> = JoinSet::new();
+    let mut evaluate_tasks: JoinSet<(String, reconciler::EvaluateOutcome)> = JoinSet::new();
     let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
 
@@ -186,56 +285,28 @@ pub(super) async fn run_controller(
         .map(|a| (a.name.as_str(), a.yaml.as_str()))
         .collect();
 
-    // ── Main reconciliation loop ──────────────────────────────────────
-    //
-    // Each iteration:
-    //   1. Spawn: drain work_queue into eval JoinSet (concurrent).
-    //   2. Spawn: start syncs from sync_queue (serialized per asset).
-    //   3. Wait:  select! on the first event that fires:
-    //      a) Timer        — interval elapsed → enqueue the due asset.
-    //      b) Eval done    — update readiness; if Ready, propagate to
-    //                        downstreams; if Not Ready, request sync.
-    //      c) Sync done    — enqueue re-evaluation to verify convergence.
-    //      d) Shutdown      — break out of the loop.
-    //
-    // Evaluations run concurrently (read-only).
-    // Syncs sharing the same sync ref are serialized; different refs may
-    // run concurrently.
-
     loop {
-        // (1) Spawn pending evaluations — multiple may run concurrently.
-        while let Some(name) = state.next_spawnable() {
-            if let Some(&yaml) = yaml_map.get(name.as_str()) {
-                let skip_cache = state.is_awaiting_post_sync_eval(&name);
-                eval_tasks.spawn(reconciler::spawn_evaluate(
-                    name,
-                    yaml.to_string(),
-                    cache_dir.clone(),
-                    source_stats_dir.clone(),
-                    skip_cache,
-                ));
-            }
-        }
+        spawn_evaluates(
+            &mut state,
+            &mut evaluate_tasks,
+            &yaml_map,
+            &cache_dir,
+            &source_stats_dir,
+            concurrency.max_evaluate,
+        );
+        spawn_syncs(
+            &mut state,
+            &mut sync_tasks,
+            &yaml_map,
+            &sync_lock,
+            lock_config,
+            &notifier,
+            concurrency.max_sync,
+        );
 
-        // (2) Spawn syncs whose sync ref is not currently in use.
-        while let Some(name) = state.next_syncable() {
-            if let Some(&yaml) = yaml_map.get(name.as_str()) {
-                tracing::info!(asset = %name, "starting sync");
-                sync_tasks.spawn(reconciler::spawn_sync(
-                    name,
-                    yaml.to_string(),
-                    sync_lock.clone(),
-                    lock_config,
-                    notifier.clone(),
-                ));
-            }
-        }
-
-        // (3) Wait for the next event.
         let sleep_until = state.scheduler.next_due().map(|(_, instant)| instant);
 
         tokio::select! {
-            // (a) Timer: a scheduled asset's interval has elapsed.
             _ = async {
                 match sleep_until {
                     Some(t) => tokio::time::sleep_until(t).await,
@@ -245,37 +316,14 @@ pub(super) async fn run_controller(
                 state.enqueue_due();
             }
 
-            // (b) Eval complete: log, update state, propagate or request sync.
-            join_result = eval_tasks.join_next(), if !eval_tasks.is_empty() => {
-                let eval_result = join_result.map(|r| r.map(|(name, outcome)| {
-                    let (name_and_result, event) = process_eval_outcome(name, outcome, &log_store);
-                    if let Some(ev) = event { fire_notify(&notifier, ev); }
-                    name_and_result
-                }));
-                if let Some(event) = state.on_eval_complete(eval_result) {
-                    fire_notify(&notifier, NotifyEvent::Suspended {
-                        asset_name: event.asset_name,
-                        reason: event.reason,
-                    });
-                }
+            join_result = evaluate_tasks.join_next(), if !evaluate_tasks.is_empty() => {
+                handle_evaluate_completion(&mut state, join_result, &log_store, &notifier);
             }
 
-            // (c) Sync complete: log, enqueue re-evaluation to verify convergence.
             result = sync_tasks.join_next(), if !sync_tasks.is_empty() => {
-                if let Some(Ok((ref name, Ok(ref sync_result)))) = result {
-                    if let Some(ref store) = log_store {
-                        log_sync_result(name, sync_result, store);
-                    }
-                }
-                if let Some(event) = state.on_sync_complete(result) {
-                    fire_notify(&notifier, NotifyEvent::Suspended {
-                        asset_name: event.asset_name,
-                        reason: event.reason,
-                    });
-                }
+                handle_sync_completion(&mut state, result, &log_store, &notifier);
             }
 
-            // (d) Shutdown signal received.
             _ = shutdown.changed() => {
                 tracing::info!("shutting down controller");
                 break;
@@ -283,8 +331,7 @@ pub(super) async fn run_controller(
         }
     }
 
-    // Eval tasks are read-only and safe to abort.
-    drop(eval_tasks);
+    drop(evaluate_tasks);
     drain_sync_tasks(&mut sync_tasks).await;
 
     Ok(())
@@ -548,9 +595,9 @@ mod tests {
         assert!(tasks.is_empty());
     }
 
-    // ── process_eval_outcome tests ────────────────────────────────────────
+    // ── process_evaluate_outcome tests ────────────────────────────────────────
 
-    fn sample_eval_result(name: &str, ready: bool) -> crate::evaluate::AssetEvalResult {
+    fn sample_evaluate_result(name: &str, ready: bool) -> crate::evaluate::AssetEvalResult {
         crate::evaluate::AssetEvalResult {
             asset_name: name.to_string(),
             ready,
@@ -559,16 +606,16 @@ mod tests {
         }
     }
 
-    fn sample_outcome_ok(name: &str) -> reconciler::EvalOutcome {
-        reconciler::EvalOutcome {
-            result: Ok(sample_eval_result(name, true)),
+    fn sample_outcome_ok(name: &str) -> reconciler::EvaluateOutcome {
+        reconciler::EvaluateOutcome {
+            result: Ok(sample_evaluate_result(name, true)),
             started_at: "2025-01-01T00:00:00Z".to_string(),
             finished_at: "2025-01-01T00:00:01Z".to_string(),
         }
     }
 
-    fn sample_outcome_err() -> reconciler::EvalOutcome {
-        reconciler::EvalOutcome {
+    fn sample_outcome_err() -> reconciler::EvaluateOutcome {
+        reconciler::EvaluateOutcome {
             result: Err(EvaluateError::Parse("test".to_string())),
             started_at: "2025-01-01T00:00:00Z".to_string(),
             finished_at: "2025-01-01T00:00:01Z".to_string(),
@@ -576,39 +623,39 @@ mod tests {
     }
 
     #[test]
-    fn process_eval_outcome_ok_returns_result_no_event() {
+    fn process_evaluate_outcome_ok_returns_result_no_event() {
         let (name_and_result, event) =
-            process_eval_outcome("a".to_string(), sample_outcome_ok("a"), &None);
+            process_evaluate_outcome("a".to_string(), sample_outcome_ok("a"), &None);
         assert_eq!(name_and_result.0, "a");
         assert!(name_and_result.1.is_ok());
         assert!(event.is_none());
     }
 
     #[test]
-    fn process_eval_outcome_err_returns_eval_failed_event() {
+    fn process_evaluate_outcome_err_returns_eval_failed_event() {
         let (name_and_result, event) =
-            process_eval_outcome("a".to_string(), sample_outcome_err(), &None);
+            process_evaluate_outcome("a".to_string(), sample_outcome_err(), &None);
         assert_eq!(name_and_result.0, "a");
         assert!(name_and_result.1.is_err());
-        assert!(matches!(event, Some(NotifyEvent::EvalFailed { .. })));
+        assert!(matches!(event, Some(NotifyEvent::EvaluateFailed { .. })));
     }
 
     #[test]
-    fn process_eval_outcome_writes_log_on_success() {
+    fn process_evaluate_outcome_writes_log_on_success() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
         let store = LogStore::open(&db_path, &logs_dir).unwrap();
 
         let (name_and_result, _) =
-            process_eval_outcome("a".to_string(), sample_outcome_ok("a"), &Some(store));
+            process_evaluate_outcome("a".to_string(), sample_outcome_ok("a"), &Some(store));
         assert!(name_and_result.1.is_ok());
         // Verify a log was written by checking the db is non-empty.
         assert!(db_path.metadata().unwrap().len() > 0);
     }
 
     #[test]
-    fn process_eval_outcome_skips_log_on_error() {
+    fn process_evaluate_outcome_skips_log_on_error() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
@@ -616,9 +663,9 @@ mod tests {
         let initial_size = db_path.metadata().unwrap().len();
 
         let (_name_and_result, event) =
-            process_eval_outcome("a".to_string(), sample_outcome_err(), &Some(store));
+            process_evaluate_outcome("a".to_string(), sample_outcome_err(), &Some(store));
         assert!(event.is_some());
-        // DB size unchanged (no eval log written on error).
+        // DB size unchanged (no evaluate log written on error).
         assert_eq!(db_path.metadata().unwrap().len(), initial_size);
     }
 
@@ -711,5 +758,100 @@ mod tests {
     async fn shutdown_empty_handles() {
         await_controller_shutdown(vec![], None).await;
         await_controller_shutdown(vec![], Some(StdDuration::from_secs(1))).await;
+    }
+
+    // ── handle_evaluate_completion tests ──────────────────────────────────────
+
+    fn make_state() -> ServeState {
+        use crate::storage::StorageError;
+
+        #[derive(Debug, Default)]
+        struct MemSuspendedStore {
+            inner: std::sync::Mutex<
+                std::collections::HashMap<String, crate::serve::suspended::SuspendedInfo>,
+            >,
+        }
+
+        impl crate::storage::SuspendedStore for MemSuspendedStore {
+            fn write(
+                &self,
+                info: &crate::serve::suspended::SuspendedInfo,
+            ) -> Result<(), StorageError> {
+                self.inner
+                    .lock()
+                    .unwrap()
+                    .insert(info.asset_name.clone(), info.clone());
+                Ok(())
+            }
+            fn read(
+                &self,
+                name: &str,
+            ) -> Result<Option<crate::serve::suspended::SuspendedInfo>, StorageError> {
+                Ok(self.inner.lock().unwrap().get(name).cloned())
+            }
+            fn remove(&self, name: &str) -> Result<(), StorageError> {
+                self.inner.lock().unwrap().remove(name);
+                Ok(())
+            }
+            fn exists(&self, name: &str) -> Result<bool, StorageError> {
+                Ok(self.inner.lock().unwrap().contains_key(name))
+            }
+            fn list(&self) -> Result<Vec<crate::serve::suspended::SuspendedInfo>, StorageError> {
+                Ok(self.inner.lock().unwrap().values().cloned().collect())
+            }
+        }
+
+        let store: Arc<dyn crate::storage::SuspendedStore> = Arc::new(MemSuspendedStore::default());
+        ServeState::new(&[], store)
+    }
+
+    #[test]
+    fn handle_evaluate_completion_updates_state_on_success() {
+        let mut state = make_state();
+        state.register_assets(&[AssetEntry {
+            name: "a".to_string(),
+            yaml: String::new(),
+            min_interval: None,
+            auto_sync: false,
+            has_sync: false,
+            sync_ref_name: None,
+        }]);
+        state.in_flight.insert("a".to_string());
+
+        let evaluate_result = Ok(sample_evaluate_result("a", true));
+        let join_result: crate::serve::state::EvaluateJoinResult =
+            Some(Ok(("a".to_string(), evaluate_result)));
+        state.on_evaluate_complete(join_result);
+
+        assert!(!state.in_flight.contains("a"));
+        assert_eq!(state.readiness.ready.get("a"), Some(&true));
+    }
+
+    #[test]
+    fn handle_sync_completion_clears_syncing_slot() {
+        let mut state = make_state();
+        state.register_assets(&[AssetEntry {
+            name: "a".to_string(),
+            yaml: String::new(),
+            min_interval: None,
+            auto_sync: true,
+            has_sync: true,
+            sync_ref_name: None,
+        }]);
+        state.syncing.insert("a".to_string());
+
+        let sync_result = crate::sync::SyncExecutionResult {
+            execution_id: "exec-1".to_string(),
+            asset_name: "a".to_string(),
+            sync_type: crate::sync::SyncType::Sync,
+            stages: vec![],
+            success: true,
+        };
+        let join_result = Some(Ok(("a".to_string(), Ok(sync_result))));
+        state.on_sync_complete(join_result);
+
+        assert!(!state.syncing.contains("a"));
+        // Re-evaluate enqueued after sync completion.
+        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
     }
 }

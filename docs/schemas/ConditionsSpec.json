@@ -30,6 +30,18 @@
                 "null"
               ]
             },
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
             "interval": {
               "allOf": [
                 {
@@ -68,6 +80,18 @@
         {
           "description": "Query must return a scalar boolean. Ready when the result is true.",
           "properties": {
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
             "interval": {
               "anyOf": [
                 {
@@ -112,6 +136,18 @@
               "default": {},
               "description": "Environment variables to set for the subprocess.",
               "type": "object"
+            },
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
             },
             "interval": {
               "anyOf": [
