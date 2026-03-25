@@ -132,6 +132,10 @@ impl NagiDir {
     pub fn watermarks_dir(&self) -> PathBuf {
         self.0.join("watermarks")
     }
+
+    pub fn readiness_dir(&self) -> PathBuf {
+        self.0.join("readiness")
+    }
 }
 
 impl Default for NagiDir {

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -7,8 +8,8 @@ use crate::serve::SuspendedInfo;
 
 use super::lock::LockInfo;
 use super::{
-    Cache, ConditionCache, ConditionCacheEntry, ConditionCacheMap, SourceStatsCache, StorageError,
-    SuspendedStore, SyncLock,
+    Cache, ConditionCache, ConditionCacheEntry, ConditionCacheMap, ReadinessStore,
+    SourceStatsCache, StorageError, SuspendedStore, SyncLock,
 };
 
 /// Local file-based cache backend.
@@ -264,6 +265,72 @@ impl ConditionCache for LocalConditionCache {
             self.write_condition(asset_name, condition_name, entry)?;
         }
         Ok(())
+    }
+}
+
+// ── LocalReadinessStore ───────────────────────────────────────────────────
+
+/// Local file-based readiness store.
+/// Stores each asset's readiness as `{dir}/{asset_name}.json`.
+#[derive(Debug)]
+pub struct LocalReadinessStore {
+    dir: PathBuf,
+}
+
+impl LocalReadinessStore {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
+        super::validate_asset_name(asset_name)?;
+        Ok(self.dir.join(format!("{asset_name}.json")))
+    }
+}
+
+impl ReadinessStore for LocalReadinessStore {
+    fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError> {
+        std::fs::create_dir_all(&self.dir)?;
+        for (name, &ready) in readiness {
+            super::validate_asset_name(name)?;
+            let json = serde_json::to_string(&ready)?;
+            std::fs::write(self.asset_path(name)?, json)?;
+        }
+        Ok(())
+    }
+
+    fn read(&self, asset_name: &str) -> Result<Option<bool>, StorageError> {
+        let path = self.asset_path(asset_name)?;
+        match std::fs::read_to_string(path) {
+            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn read_all(&self) -> Result<HashMap<String, bool>, StorageError> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut result = HashMap::new();
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                let name = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let data = std::fs::read_to_string(&path)?;
+                if let Ok(ready) = serde_json::from_str::<bool>(&data) {
+                    result.insert(name, ready);
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -538,6 +605,72 @@ mod tests {
     fn suspended_list_nonexistent_dir() {
         let store = LocalSuspendedStore::new(PathBuf::from("/tmp/nonexistent-nagi-test"));
         assert!(store.list().unwrap().is_empty());
+    }
+
+    // ── LocalReadinessStore tests ─────────────────────────────────────────
+
+    #[test]
+    fn readiness_write_all_and_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalReadinessStore::new(dir.path().to_path_buf());
+        let mut map = HashMap::new();
+        map.insert("asset-a".to_string(), true);
+        map.insert("asset-b".to_string(), false);
+
+        store.write_all(&map).unwrap();
+        assert_eq!(store.read("asset-a").unwrap(), Some(true));
+        assert_eq!(store.read("asset-b").unwrap(), Some(false));
+    }
+
+    #[test]
+    fn readiness_read_missing_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalReadinessStore::new(dir.path().to_path_buf());
+        assert_eq!(store.read("nonexistent").unwrap(), None);
+    }
+
+    #[test]
+    fn readiness_read_all_returns_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalReadinessStore::new(dir.path().to_path_buf());
+        let mut map = HashMap::new();
+        map.insert("x".to_string(), true);
+        map.insert("y".to_string(), false);
+
+        store.write_all(&map).unwrap();
+        let loaded = store.read_all().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded["x"], true);
+        assert_eq!(loaded["y"], false);
+    }
+
+    #[test]
+    fn readiness_read_all_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalReadinessStore::new(dir.path().to_path_buf());
+        assert!(store.read_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn readiness_read_all_nonexistent_dir() {
+        let store = LocalReadinessStore::new(PathBuf::from("/tmp/nonexistent-readiness-test"));
+        assert!(store.read_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn readiness_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalReadinessStore::new(dir.path().to_path_buf());
+
+        let mut map1 = HashMap::new();
+        map1.insert("a".to_string(), false);
+        store.write_all(&map1).unwrap();
+
+        let mut map2 = HashMap::new();
+        map2.insert("a".to_string(), true);
+        store.write_all(&map2).unwrap();
+
+        assert_eq!(store.read("a").unwrap(), Some(true));
     }
 
     macro_rules! validate_asset_name_test {

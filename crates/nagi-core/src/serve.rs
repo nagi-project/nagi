@@ -43,8 +43,8 @@ use controller::{
 };
 use suspended::{list_suspended, remove_suspended, suspended_path};
 
-use crate::storage::local::{LocalSuspendedStore, LocalSyncLock};
-use crate::storage::SuspendedStore;
+use crate::storage::local::{LocalReadinessStore, LocalSuspendedStore, LocalSyncLock};
+use crate::storage::{ReadinessStore, SuspendedStore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -255,9 +255,12 @@ fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendSto
                 Arc::new(LocalSyncLock::new(config.nagi_dir.locks_dir()));
             let suspended_store: Arc<dyn SuspendedStore> =
                 Arc::new(LocalSuspendedStore::new(config.nagi_dir.suspended_dir()));
+            let readiness_store: Arc<dyn ReadinessStore> =
+                Arc::new(LocalReadinessStore::new(config.nagi_dir.readiness_dir()));
             Ok(BackendStores {
                 sync_lock,
                 suspended_store,
+                readiness_store,
             })
         }
         "gcs" | "s3" => {
@@ -265,7 +268,8 @@ fn build_backend_stores(config: &crate::config::NagiConfig) -> Result<BackendSto
                 Arc::new(create_remote_store(&config.backend).map_err(ServeError::Storage)?);
             Ok(BackendStores {
                 sync_lock: remote.clone(),
-                suspended_store: remote,
+                suspended_store: remote.clone(),
+                readiness_store: remote,
             })
         }
         t => Err(ServeError::Parse(format!("unknown backend type: {t}"))),

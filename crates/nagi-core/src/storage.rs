@@ -2,6 +2,7 @@ pub mod local;
 pub mod lock;
 pub mod remote;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -86,6 +87,22 @@ pub trait ConditionCache: Send + Sync {
     ) -> Result<(), StorageError>;
     fn read(&self, asset_name: &str) -> Result<Option<ConditionCacheMap>, StorageError>;
     fn write(&self, asset_name: &str, map: &ConditionCacheMap) -> Result<(), StorageError>;
+}
+
+/// Persists per-asset readiness (Ready / Not Ready) across process restarts.
+///
+/// Each asset is stored as a separate entry. An asset is considered Ready if
+/// its entry exists and contains `ready: true`. Missing entries default to
+/// Not Ready.
+pub trait ReadinessStore: Send + Sync + std::fmt::Debug {
+    /// Writes the readiness snapshot for all assets managed by one controller.
+    /// Replaces previous entries for these assets.
+    fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError>;
+    /// Reads the readiness state for a single asset.
+    /// Returns `None` if no persisted state exists.
+    fn read(&self, asset_name: &str) -> Result<Option<bool>, StorageError>;
+    /// Reads all persisted readiness entries.
+    fn read_all(&self) -> Result<HashMap<String, bool>, StorageError>;
 }
 
 /// Distributed lock for serializing sync execution per asset.

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,7 +10,9 @@ use crate::db::TableStats;
 use crate::evaluate::AssetEvalResult;
 use crate::serve::SuspendedInfo;
 use crate::storage::lock::LockInfo;
-use crate::storage::{Cache, SourceStatsCache, StorageError, SuspendedStore, SyncLock};
+use crate::storage::{
+    Cache, ReadinessStore, SourceStatsCache, StorageError, SuspendedStore, SyncLock,
+};
 
 /// Remote storage backend backed by an `ObjectStore` (GCS or S3).
 ///
@@ -51,6 +54,10 @@ impl RemoteObjectStore {
 
     fn source_stats_path(&self, source_name: &str) -> OsPath {
         self.resolve(&format!("source_stats/{source_name}.json"))
+    }
+
+    fn readiness_path(&self, asset_name: &str) -> OsPath {
+        self.resolve(&format!("readiness/{asset_name}.json"))
     }
 
     fn lock_path(&self, sync_ref: &str) -> OsPath {
@@ -188,6 +195,60 @@ impl SuspendedStore for RemoteObjectStore {
             }
         }
         Ok(results)
+    }
+}
+
+// ── ReadinessStore ────────────────────────────────────────────────────────────
+
+impl ReadinessStore for RemoteObjectStore {
+    fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError> {
+        for (name, &ready) in readiness {
+            let path = self.readiness_path(name);
+            let bytes = serde_json::to_vec(&ready).map_err(serde_err)?;
+            block(self.store.put(&path, bytes.into())).map_err(remote_err)?;
+        }
+        Ok(())
+    }
+
+    fn read(&self, asset_name: &str) -> Result<Option<bool>, StorageError> {
+        let path = self.readiness_path(asset_name);
+        match block(self.store.get(&path)) {
+            Ok(result) => {
+                let bytes = block(result.bytes()).map_err(remote_err)?;
+                let value = serde_json::from_slice(&bytes).map_err(serde_err)?;
+                Ok(Some(value))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(remote_err(e)),
+        }
+    }
+
+    fn read_all(&self) -> Result<HashMap<String, bool>, StorageError> {
+        let prefix = self.resolve("readiness/");
+        let objects = block(self.store.list_with_delimiter(Some(&prefix))).map_err(remote_err)?;
+        let mut result = HashMap::new();
+        for obj in objects.objects {
+            let name = obj
+                .location
+                .filename()
+                .unwrap_or_default()
+                .strip_suffix(".json")
+                .unwrap_or_default()
+                .to_string();
+            if name.is_empty() {
+                continue;
+            }
+            match block(self.store.get(&obj.location)) {
+                Ok(r) => {
+                    let bytes = block(r.bytes()).map_err(remote_err)?;
+                    if let Ok(ready) = serde_json::from_slice::<bool>(&bytes) {
+                        result.insert(name, ready);
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to read readiness entry"),
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -515,6 +576,47 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["x", "y"]);
+    }
+
+    // ── ReadinessStore ────────────────────────────────────────────────────
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn readiness_write_all_and_read() {
+        let store = in_memory_store(None);
+        let mut map = HashMap::new();
+        map.insert("a".to_string(), true);
+        map.insert("b".to_string(), false);
+        ReadinessStore::write_all(&store, &map).unwrap();
+        assert_eq!(ReadinessStore::read(&store, "a").unwrap(), Some(true));
+        assert_eq!(ReadinessStore::read(&store, "b").unwrap(), Some(false));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn readiness_read_missing_returns_none() {
+        let store = in_memory_store(None);
+        assert_eq!(ReadinessStore::read(&store, "nope").unwrap(), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn readiness_read_all() {
+        let store = in_memory_store(None);
+        let mut map = HashMap::new();
+        map.insert("x".to_string(), true);
+        map.insert("y".to_string(), false);
+        ReadinessStore::write_all(&store, &map).unwrap();
+        let loaded = ReadinessStore::read_all(&store).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded["x"], true);
+        assert_eq!(loaded["y"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn readiness_respects_prefix() {
+        let store = in_memory_store(Some("proj/nagi"));
+        let mut map = HashMap::new();
+        map.insert("z".to_string(), true);
+        ReadinessStore::write_all(&store, &map).unwrap();
+        assert_eq!(ReadinessStore::read(&store, "z").unwrap(), Some(true));
     }
 
     // ── SourceStatsCache ───────────────────────────────────────────────────

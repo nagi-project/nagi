@@ -135,11 +135,29 @@ impl ServeState {
         }
     }
 
+    /// Restores readiness state from a previous run.
+    /// Must be called before `register_assets` so that Ready assets
+    /// skip initial evaluation.
+    pub fn restore_readiness(&mut self, persisted: HashMap<String, bool>) {
+        for (name, ready) in persisted {
+            self.readiness.ready.insert(name, ready);
+        }
+    }
+
     /// Registers all assets: enqueue for initial evaluation + register intervals
     /// + store sync configuration.
+    ///
+    /// Assets already marked Ready (via `restore_readiness`) are not enqueued
+    /// for initial evaluation — they wait for the next upstream change or interval.
     pub fn register_assets(&mut self, assets: &[AssetEntry]) {
         for asset in assets {
-            if self.all_upstreams_ready(&asset.name) {
+            let already_ready = self
+                .readiness
+                .ready
+                .get(&asset.name)
+                .copied()
+                .unwrap_or(false);
+            if !already_ready && self.all_upstreams_ready(&asset.name) {
                 self.evaluate_queue.enqueue(asset.name.clone());
             }
             if let Some(dur) = asset.min_interval {
@@ -1351,6 +1369,51 @@ mod tests {
         // At limit → None; "c" stays in queue.
         assert_eq!(state.next_spawnable(Some(2)), None);
         assert_eq!(state.evaluate_queue.dequeue(), Some("c".to_string()));
+    }
+
+    // ── restore_readiness tests ──────────────────────────────────────────
+
+    #[test]
+    fn restore_readiness_skips_initial_evaluate_for_ready_assets() {
+        let edges = vec![edge("a", "b")];
+        let mut state = ServeState::new(&edges, mem_suspended_store());
+
+        let mut persisted = HashMap::new();
+        persisted.insert("a".to_string(), true);
+        state.restore_readiness(persisted);
+
+        state.register_assets(&[
+            asset_entry("a", Some(StdDuration::from_secs(60))),
+            asset_entry("b", None),
+        ]);
+
+        // "a" was Ready → not enqueued.
+        // "b" has upstream "a" Ready → enqueued.
+        let first = state.evaluate_queue.dequeue();
+        assert_eq!(first, Some("b".to_string()));
+        assert_eq!(state.evaluate_queue.dequeue(), None);
+    }
+
+    #[test]
+    fn restore_readiness_enqueues_not_ready_assets() {
+        let mut state = ServeState::new(&[], mem_suspended_store());
+
+        let mut persisted = HashMap::new();
+        persisted.insert("a".to_string(), false);
+        state.restore_readiness(persisted);
+
+        state.register_assets(&[asset_entry("a", None)]);
+
+        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
+    }
+
+    #[test]
+    fn restore_readiness_empty_behaves_like_fresh_start() {
+        let mut state = ServeState::new(&[], mem_suspended_store());
+        state.restore_readiness(HashMap::new());
+        state.register_assets(&[asset_entry("a", None)]);
+
+        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
     }
 
     #[test]

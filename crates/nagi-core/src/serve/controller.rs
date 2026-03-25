@@ -27,6 +27,7 @@ use super::ServeError;
 pub(super) struct BackendStores {
     pub sync_lock: Arc<dyn SyncLock>,
     pub suspended_store: Arc<dyn crate::storage::SuspendedStore>,
+    pub readiness_store: Arc<dyn crate::storage::ReadinessStore>,
 }
 
 /// Builds a notifier from project config, if configured.
@@ -272,11 +273,26 @@ pub(super) async fn run_controller(
     let BackendStores {
         sync_lock,
         suspended_store,
+        readiness_store,
     } = backend;
     let mut state = ServeState::new(&edges, suspended_store);
     let mut evaluate_tasks: JoinSet<(String, reconciler::EvaluateOutcome)> = JoinSet::new();
     let mut sync_tasks: JoinSet<(String, Result<crate::sync::SyncExecutionResult, SyncError>)> =
         JoinSet::new();
+
+    // Restore persisted readiness from the previous run.
+    match readiness_store.read_all() {
+        Ok(persisted) => {
+            if !persisted.is_empty() {
+                let ready_count = persisted.values().filter(|&&r| r).count();
+                state.restore_readiness(persisted);
+                tracing::info!(count = ready_count, "restored readiness from previous run");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to restore readiness, starting fresh");
+        }
+    }
 
     state.register_assets(&assets);
 
@@ -333,6 +349,11 @@ pub(super) async fn run_controller(
 
     drop(evaluate_tasks);
     drain_sync_tasks(&mut sync_tasks).await;
+
+    // Persist readiness for the next startup.
+    if let Err(e) = readiness_store.write_all(&state.readiness.ready) {
+        tracing::warn!(error = %e, "failed to persist readiness");
+    }
 
     Ok(())
 }
