@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from nagi_cli.commands.init import init
+from nagi_cli.commands.init import DOCS_URL, init
 
 SINGLE_PROFILE_JSON = json.dumps(
     {
@@ -48,8 +48,8 @@ SINGLE_MULTI_TARGET_JSON = json.dumps(
 )
 
 
-class TestInitNoDbt:
-    def test_creates_resources_dir_without_dbt(self, tmp_path: Path) -> None:
+class TestInitNoOrigin:
+    def test_creates_resources_dir_without_origin(self, tmp_path: Path) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=tmp_path):
             result = runner.invoke(init, input="n\n")
@@ -64,8 +64,15 @@ class TestInitNoDbt:
             assert not (Path("resources") / "connection.yaml").exists()
             assert not (Path("resources") / "origin.yaml").exists()
 
+    def test_shows_docs_url_when_no_origin(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(init, input="n\n")
+            assert result.exit_code == 0
+            assert DOCS_URL in result.output
 
-class TestInitSingleProfile:
+
+class TestInitDbtOrigin:
     @patch("nagi_cli.commands.init.run_dbt_debug")
     @patch(
         "nagi_cli.commands.init.load_dbt_profiles",
@@ -81,7 +88,8 @@ class TestInitSingleProfile:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            result = runner.invoke(init, input=f"y\n{dbt_dir}\nn\n")
+            # y (set up origin) -> 1 (dbt) -> path -> n (no more origins)
+            result = runner.invoke(init, input=f"y\n1\n{dbt_dir}\nn\n")
             assert result.exit_code == 0
             connection_path = Path("resources") / "connection.yaml"
             assert connection_path.exists()
@@ -104,7 +112,7 @@ class TestInitSingleProfile:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            result = runner.invoke(init, input=f"y\n{dbt_dir}\nn\n")
+            result = runner.invoke(init, input=f"y\n1\n{dbt_dir}\nn\n")
             assert result.exit_code == 0
             assert (Path("resources") / "origin.yaml").exists()
 
@@ -126,7 +134,10 @@ class TestInitSingleProfile:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            result = runner.invoke(init, input=f"y\n{dbt_dir_a}\ny\n{dbt_dir_b}\nn\n")
+            # y -> 1 (dbt) -> path_a -> y (another) -> 1 (dbt) -> path_b -> n
+            result = runner.invoke(
+                init, input=f"y\n1\n{dbt_dir_a}\ny\n1\n{dbt_dir_b}\nn\n"
+            )
             assert result.exit_code == 0
             content = (Path("resources") / "origin.yaml").read_text()
             assert content.count("kind: Origin") == 2
@@ -148,7 +159,7 @@ class TestInitMultipleProfiles:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            result = runner.invoke(init, input=f"y\n{dbt_dir}\n1\ndev\nn\n")
+            result = runner.invoke(init, input=f"y\n1\n{dbt_dir}\n1\ndev\nn\n")
         assert result.exit_code == 0
 
     @patch("nagi_cli.commands.init.run_dbt_debug")
@@ -166,7 +177,7 @@ class TestInitMultipleProfiles:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            result = runner.invoke(init, input=f"y\n{dbt_dir}\n99\n")
+            result = runner.invoke(init, input=f"y\n1\n{dbt_dir}\n99\n")
         assert result.exit_code == 1
 
     @patch("nagi_cli.commands.init.run_dbt_debug")
@@ -187,11 +198,9 @@ class TestInitMultipleProfiles:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            # First project uses profile 1 (project_a/dev)
-            # Second project uses profile 2 (project_b/staging)
             result = runner.invoke(
                 init,
-                input=f"y\n{dbt_dir_a}\n1\ndev\ny\n{dbt_dir_b}\n2\nn\n",
+                input=f"y\n1\n{dbt_dir_a}\n1\ndev\ny\n1\n{dbt_dir_b}\n2\nn\n",
             )
             assert result.exit_code == 0
 
@@ -225,7 +234,7 @@ class TestInitMultipleProfiles:
         with runner.isolated_filesystem(temp_dir=nagi_dir):
             result = runner.invoke(
                 init,
-                input=f"y\n{dbt_dir_a}\ndev\ny\n{dbt_dir_b}\nprod\nn\n",
+                input=f"y\n1\n{dbt_dir_a}\ndev\ny\n1\n{dbt_dir_b}\nprod\nn\n",
             )
             assert result.exit_code == 0
 
@@ -247,7 +256,7 @@ class TestInitFailure:
     def test_profiles_load_error(self, _mock_profiles: object, tmp_path: Path) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            result = runner.invoke(init, input="y\n")
+            result = runner.invoke(init, input="y\n1\n")
         assert result.exit_code == 1
         assert "profiles.yml not found" in result.output
 
@@ -272,6 +281,13 @@ class TestInitFailure:
         nagi_dir = tmp_path / "nagi"
         nagi_dir.mkdir()
         with runner.isolated_filesystem(temp_dir=nagi_dir):
-            result = runner.invoke(init, input=f"y\n{dbt_dir}\n")
+            result = runner.invoke(init, input=f"y\n1\n{dbt_dir}\n")
         assert result.exit_code == 1
         assert "dbt debug failed" in result.output
+
+    def test_invalid_origin_type(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(init, input="y\n99\n")
+        assert result.exit_code == 1
+        assert "error" in result.output

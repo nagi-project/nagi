@@ -9,6 +9,12 @@ from nagi_cli._nagi_core import (
     write_init_dbt_files,
 )
 
+DOCS_URL = "https://nagi-project.dev"
+
+ORIGIN_TYPES = [
+    {"key": "dbt", "label": "dbt project"},
+]
+
 
 @click.command()
 def init() -> None:
@@ -19,61 +25,77 @@ def init() -> None:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    if not click.confirm("Do you use dbt?", default=False):
+    if not click.confirm("Set up an Origin?", default=True):
+        click.echo(f"See {DOCS_URL} for manual configuration.")
         return
 
-    try:
-        profiles = json.loads(load_dbt_profiles())["profiles"]
-    except RuntimeError as e:
-        click.echo(json.dumps({"error": str(e)}))
-        raise SystemExit(1)
-
-    entries = _collect_dbt_entries(profiles)
-    if not entries:
-        return
-
-    try:
-        result = json.loads(write_init_dbt_files(".", json.dumps(entries)))
-    except RuntimeError as e:
-        click.echo(json.dumps({"error": str(e)}))
-        raise SystemExit(1)
-
-    if result.get("connectionPath"):
-        click.echo(json.dumps({"connection": result["connectionPath"]}))
-    if result.get("originPath"):
-        click.echo(json.dumps({"origin": result["originPath"]}))
-
-
-def _collect_dbt_entries(profiles: list[dict]) -> list[dict]:
-    """Interactively collect dbt project entries from the user."""
-    entries: list[dict] = []
-    tested: set[tuple[str, str | None]] = set()
+    dbt_entries: list[dict] = []
+    dbt_tested: set[tuple[str, str | None]] = set()
+    dbt_profiles: list[dict] | None = None
 
     while True:
-        dbt_dir = click.prompt("Path to dbt project directory")
-        profile_name, target = _select_profile_target(profiles)
+        origin_type = _select_origin_type()
 
-        if (profile_name, target) not in tested:
-            try:
-                run_dbt_debug(dbt_dir, profile_name, target)
-            except RuntimeError as e:
-                click.echo(json.dumps({"error": str(e)}))
-                raise SystemExit(1)
-            click.echo(json.dumps({"connection": "ok"}))
-            tested.add((profile_name, target))
+        if origin_type == "dbt":
+            if dbt_profiles is None:
+                try:
+                    dbt_profiles = json.loads(load_dbt_profiles())["profiles"]
+                except RuntimeError as e:
+                    click.echo(json.dumps({"error": str(e)}))
+                    raise SystemExit(1)
+            _collect_one_dbt_entry(dbt_entries, dbt_tested, dbt_profiles)
 
-        entries.append(
-            {
-                "projectDir": dbt_dir,
-                "profile": profile_name,
-                "target": target,
-            }
-        )
-
-        if not click.confirm("Do you have another dbt project?", default=False):
+        if not click.confirm("Add another Origin?", default=False):
             break
 
-    return entries
+    if dbt_entries:
+        try:
+            result = json.loads(write_init_dbt_files(".", json.dumps(dbt_entries)))
+        except RuntimeError as e:
+            click.echo(json.dumps({"error": str(e)}))
+            raise SystemExit(1)
+
+        if result.get("connectionPath"):
+            click.echo(json.dumps({"connection": result["connectionPath"]}))
+        if result.get("originPath"):
+            click.echo(json.dumps({"origin": result["originPath"]}))
+
+
+def _select_origin_type() -> str:
+    click.echo("Origin types:")
+    for i, entry in enumerate(ORIGIN_TYPES):
+        click.echo(f"  {i + 1}) {entry['label']}")
+    choice = click.prompt("Select Origin type", type=int) - 1
+    if choice < 0 or choice >= len(ORIGIN_TYPES):
+        click.echo(json.dumps({"error": "invalid selection"}))
+        raise SystemExit(1)
+    return ORIGIN_TYPES[choice]["key"]
+
+
+def _collect_one_dbt_entry(
+    entries: list[dict],
+    tested: set[tuple[str, str | None]],
+    profiles: list[dict],
+) -> None:
+    dbt_dir = click.prompt("Path to dbt project directory")
+    profile_name, target = _select_profile_target(profiles)
+
+    if (profile_name, target) not in tested:
+        try:
+            run_dbt_debug(dbt_dir, profile_name, target)
+        except RuntimeError as e:
+            click.echo(json.dumps({"error": str(e)}))
+            raise SystemExit(1)
+        click.echo(json.dumps({"connection": "ok"}))
+        tested.add((profile_name, target))
+
+    entries.append(
+        {
+            "projectDir": dbt_dir,
+            "profile": profile_name,
+            "target": target,
+        }
+    )
 
 
 def _select_profile_target(

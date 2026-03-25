@@ -21,7 +21,7 @@
 | `serve` | Asset をコンパイルし、reconciliation loop を開始する |
 | `serve resume` | 停止した Asset を再開する |
 | `serve halt` | 全 Asset を一括停止する |
-| `export` | 実行ログをリモート DWH にエクスポートする |
+| `export` | 実行ログをデータウェアハウス にエクスポートする |
 | `mcp` | MCP サーバーを stdio で起動する |
 
 ## init
@@ -32,7 +32,7 @@
 nagi init
 ```
 
-対話形式で dbt プロジェクトの設定、Connection / Origin の生成、接続確認を行います。冪等で、再実行可能です。
+対話形式で Origin の設定、Connection の生成、接続確認を行います。Origin type を選択し、type に応じた設定を進めます。冪等で、再実行可能です。
 
 ## compile
 
@@ -148,7 +148,7 @@ nagi serve halt [OPTIONS]
 
 ## export
 
-実行ログ（`logs.db`）をリモート DWH にエクスポートします。[`nagi.yaml`](./configurations/project.md) の `export` 設定が必要です。
+実行ログ（`logs.db`）をデータウェアハウス にエクスポートします。[`nagi.yaml`](./configurations/project.md) の `export` 設定が必要です。
 
 ```bash
 nagi export [OPTIONS]
