@@ -5,7 +5,7 @@ use super::KindError;
 
 pub const KIND: &str = "Connection";
 
-/// Spec for `kind: Connection`. Holds external data connection info referenced by Sources.
+/// Spec for `kind: Connection`. Holds external data connection info referenced by Assets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSpec {

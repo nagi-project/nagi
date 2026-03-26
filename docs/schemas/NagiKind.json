@@ -9,6 +9,14 @@
           "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
           "type": "boolean"
         },
+        "connection": {
+          "default": null,
+          "description": "Name of the Connection resource for DB access.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "evaluateCacheTtl": {
           "anyOf": [
             {
@@ -29,17 +37,17 @@
           },
           "type": "array"
         },
-        "sources": {
+        "tags": {
           "default": [],
-          "description": "Names of upstream Source resources.",
+          "description": "Tags for filtering with `--select tag:X`.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
-        "tags": {
+        "upstreams": {
           "default": [],
-          "description": "Tags for filtering with `--select tag:X`.",
+          "description": "Names of upstream Asset resources.",
           "items": {
             "type": "string"
           },
@@ -56,7 +64,7 @@
       "type": "array"
     },
     "ConnectionSpec": {
-      "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Sources.",
+      "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Assets.",
       "properties": {
         "dbtCloud": {
           "anyOf": [
@@ -369,7 +377,7 @@
         {
           "properties": {
             "connection": {
-              "description": "Connection resource name for auto-generated Sources.",
+              "description": "Connection resource name for auto-generated Assets.",
               "type": "string"
             },
             "defaultSync": {
@@ -399,19 +407,6 @@
           "type": "object"
         }
       ]
-    },
-    "SourceSpec": {
-      "description": "Spec for `kind: Source`. Declares the location of raw data, referenced by Assets.",
-      "properties": {
-        "connection": {
-          "description": "Name of the Connection resource this Source uses.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "connection"
-      ],
-      "type": "object"
     },
     "StepType": {
       "description": "Currently only `Command` (subprocess execution) is supported.",
@@ -510,32 +505,6 @@
         },
         "spec": {
           "$ref": "#/definitions/ConnectionSpec"
-        }
-      },
-      "required": [
-        "apiVersion",
-        "kind",
-        "metadata",
-        "spec"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "apiVersion": {
-          "type": "string"
-        },
-        "kind": {
-          "enum": [
-            "Source"
-          ],
-          "type": "string"
-        },
-        "metadata": {
-          "$ref": "#/definitions/Metadata"
-        },
-        "spec": {
-          "$ref": "#/definitions/SourceSpec"
         }
       },
       "required": [

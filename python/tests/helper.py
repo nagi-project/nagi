@@ -22,9 +22,9 @@ CONNECTION_YAML = (
     "    profile: my_project\n"
 )
 
-SOURCE_YAML = (
+UPSTREAM_ASSET_YAML = (
     "apiVersion: nagi.io/v1alpha1\n"
-    "kind: Source\n"
+    "kind: Asset\n"
     "metadata:\n"
     f"  name: {SOURCE_NAME}\n"
     "spec:\n"
@@ -50,7 +50,8 @@ ASSET_YAML = (
     "metadata:\n"
     f"  name: {ASSET_NAME}\n"
     "spec:\n"
-    "  sources:\n"
+    f"  connection: {CONNECTION_NAME}\n"
+    "  upstreams:\n"
     f"    - {SOURCE_NAME}\n"
     "  onDrift:\n"
     f"    - conditions: {CONDITIONS_NAME}\n"
@@ -73,7 +74,7 @@ def write_valid_resources(resources_dir: Path) -> None:
     """Write a minimal valid set of resource YAML files for testing."""
     resources_dir.mkdir()
     (resources_dir / "connection.yaml").write_text(CONNECTION_YAML)
-    (resources_dir / "source.yaml").write_text(SOURCE_YAML)
+    (resources_dir / "upstream.yaml").write_text(UPSTREAM_ASSET_YAML)
     (resources_dir / "conditions.yaml").write_text(CONDITIONS_YAML)
     (resources_dir / "asset.yaml").write_text(ASSET_YAML)
     (resources_dir / "sync.yaml").write_text(SYNC_YAML)

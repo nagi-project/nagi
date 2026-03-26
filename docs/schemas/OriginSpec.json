@@ -5,7 +5,7 @@
     {
       "properties": {
         "connection": {
-          "description": "Connection resource name for auto-generated Sources.",
+          "description": "Connection resource name for auto-generated Assets.",
           "type": "string"
         },
         "defaultSync": {

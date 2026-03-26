@@ -15,7 +15,6 @@ from pathlib import Path
 SCHEMA_MAP = {
     "AssetSpec": ("configurations/resources/asset.md", "kind: Asset", False),
     "OnDriftEntry": ("configurations/resources/asset.md", "OnDriftEntry", True),
-    "SourceSpec": ("configurations/resources/source.md", "kind: Source", False),
     "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection", False),
     "SyncSpec": ("configurations/resources/sync.md", "kind: Sync", False),
     "SyncStep": ("configurations/resources/sync.md", "SyncStep", True),

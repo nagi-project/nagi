@@ -11,7 +11,7 @@ pub const KIND: &str = "Origin";
 pub enum OriginSpec {
     #[serde(rename_all = "camelCase")]
     DBT {
-        /// Connection resource name for auto-generated Sources.
+        /// Connection resource name for auto-generated Assets.
         connection: String,
         /// Local path to the dbt project directory (relative or absolute).
         project_dir: String,

@@ -35,7 +35,7 @@
       "type": "object"
     }
   },
-  "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Sources.",
+  "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Assets.",
   "properties": {
     "dbtCloud": {
       "anyOf": [

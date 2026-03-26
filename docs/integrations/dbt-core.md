@@ -49,12 +49,13 @@ Origin の `projectDir` は `--project-dir` オプションで使われます。
 | dbt resource | 生成されるリソース |
 | --- | --- |
 | model | [kind: Asset](../configurations/resources/asset.md) |
-| test | [kind: Conditions](../configurations/resources/conditions.md) + Asset の `onDrift` |
-| source | [kind: Source](../configurations/resources/source.md) |
+| test (on model) | [kind: Conditions](../configurations/resources/conditions.md) + Asset の `onDrift` |
+| test (on source) | [kind: Conditions](../configurations/resources/conditions.md) + Asset の `onDrift`（`nagi-skip-sync` を使用） |
+| source | [kind: Asset](../configurations/resources/asset.md)（`upstreams` なし、テストがあれば `onDrift` 付き） |
 
-dbt の source は接続先とデータの所在の両方を含んでいます。Nagi ではこれらを分離して管理しており、接続情報は init で生成済みの kind: Connection が担います。compile では kind: Source を生成し、Connection を参照します。
+dbt source は Nagi では Asset として生成されます。dbt source にテストが定義されている場合、`onDrift` に条件が設定され、`nagi-skip-sync`（何もせず正常終了する Sync）が割り当てられます。Drifted になると下流 Asset がブロックされ、外部で修復されるまで待機します。
 
-dbt model のリネージは Asset の `spec.sources` として依存関係に変換されます。
+dbt model と dbt source のリネージは Asset の `spec.upstreams` として依存関係に変換されます。
 
 ## Evaluate
 

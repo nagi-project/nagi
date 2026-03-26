@@ -31,7 +31,7 @@ Nagi では、データウェアハウスのテーブルやビューといった
 
 Asset には `onDrift` で条件（**Conditions**）と収束操作（**Sync**）のペアを定義します。条件は [`kind: Conditions`](./configurations/resources/conditions.md) リソースとして定義し、「24時間以内に更新されている」「特定カラムに NULL がない」「集計値が0以上である」といった内容です。
 
-Asset は他の Asset や Source への依存関係を宣言できます。このドキュメントでは、依存元を**上流**、依存先を**下流**と呼びます。Nagi はその依存関係から依存グラフ（`target/graph.json`）を構築し、reconciliation loop の実行制御や実行対象の抽出に使用します。
+Asset は `upstreams` で他の Asset への依存関係を宣言できます。このドキュメントでは、依存元を**上流**、依存先を**下流**と呼びます。Nagi はその依存関係から依存グラフ（`target/graph.json`）を構築し、reconciliation loop の実行制御や実行対象の抽出に使用します。
 
 ### Evaluate
 
@@ -174,8 +174,7 @@ my-project/
 ├── suspended/             # Guardrails による停止フラグ
 ├── logs.db                # 実行履歴を保存する SQLite ファイル
 ├── logs/                  # sync の stdout/stderr を保存するログファイル
-├── watermarks/            # DWH エクスポートのウォーターマーク
-└── source_stats/          # Source テーブルの統計値キャッシュ
+└── watermarks/            # DWH エクスポートのウォーターマーク
 ```
 
 [`nagi.yaml`](./configurations/project.md) はプロジェクト全体の設定（ストレージバックエンド、通知先など）を担います。

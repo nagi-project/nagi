@@ -47,7 +47,6 @@ nav:
     - Resources:
       - Overview: configurations/resources/index.md
       - "kind: Asset": configurations/resources/asset.md
-      - "kind: Source": configurations/resources/source.md
       - "kind: Connection": configurations/resources/connection.md
       - "kind: Sync": configurations/resources/sync.md
       - "kind: Conditions": configurations/resources/conditions.md

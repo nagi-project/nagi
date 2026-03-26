@@ -118,7 +118,7 @@ class TestCompileFailure:
         output = json.loads(result.output)
         assert "error" in output
 
-    def test_unresolved_source_ref(self, tmp_path: Path) -> None:
+    def test_unresolved_upstream_ref(self, tmp_path: Path) -> None:
         resources_dir = tmp_path / "resources"
         resources_dir.mkdir()
         (resources_dir / "asset.yaml").write_text(
@@ -127,10 +127,8 @@ class TestCompileFailure:
             "metadata:\n"
             "  name: broken\n"
             "spec:\n"
-            "  sources:\n"
-            "    - ref: nonexistent\n"
-            "  sync:\n"
-            "    ref: dbt-sync\n"
+            "  upstreams:\n"
+            "    - nonexistent\n"
         )
         (resources_dir / "sync.yaml").write_text(SYNC_YAML)
 

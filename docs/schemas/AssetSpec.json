@@ -57,6 +57,14 @@
       "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
       "type": "boolean"
     },
+    "connection": {
+      "default": null,
+      "description": "Name of the Connection resource for DB access.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "evaluateCacheTtl": {
       "anyOf": [
         {
@@ -77,17 +85,17 @@
       },
       "type": "array"
     },
-    "sources": {
+    "tags": {
       "default": [],
-      "description": "Names of upstream Source resources.",
+      "description": "Tags for filtering with `--select tag:X`.",
       "items": {
         "type": "string"
       },
       "type": "array"
     },
-    "tags": {
+    "upstreams": {
       "default": [],
-      "description": "Tags for filtering with `--select tag:X`.",
+      "description": "Names of upstream Asset resources.",
       "items": {
         "type": "string"
       },
