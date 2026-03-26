@@ -1614,8 +1614,8 @@ spec:
         assert_eq!(assets.len(), 3);
 
         let syncs: Vec<_> = expanded.iter().filter(|r| r.kind() == "Sync").collect();
-        // dbt-run (user) + dbt-tag-finance (auto)
-        assert_eq!(syncs.len(), 2);
+        // dbt-run (user-defined only; tag-based syncs are no longer auto-generated)
+        assert_eq!(syncs.len(), 1);
     }
 
     #[test]

@@ -72,7 +72,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
     if needs_skip_sync {
         resources.push(make_skip_sync());
     }
-    let (model_assets, tag_sets) = build_model_assets(
+    let model_assets = build_model_assets(
         &model_nodes,
         &model_tests,
         &dbt_source_map,
@@ -81,7 +81,6 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         default_sync,
     );
     resources.extend(model_assets);
-    resources.extend(generate_tag_syncs(&tag_sets));
     resources
 }
 
@@ -163,7 +162,6 @@ fn make_skip_sync() -> NagiKind {
 }
 
 /// Builds Assets and Conditions for dbt models.
-/// Returns the resources and collected tag sets (for tag Sync generation by the caller).
 fn build_model_assets(
     model_nodes: &[&DbtNode],
     model_tests: &HashMap<String, Vec<&DbtNode>>,
@@ -171,9 +169,8 @@ fn build_model_assets(
     model_names: &HashMap<String, String>,
     connection: &str,
     default_sync: &Option<String>,
-) -> (Vec<NagiKind>, Vec<Vec<String>>) {
+) -> Vec<NagiKind> {
     let mut resources: Vec<NagiKind> = Vec::new();
-    let mut all_tag_sets: Vec<Vec<String>> = Vec::new();
 
     for model in model_nodes {
         let upstreams = resolve_upstreams(&model.depends_on.nodes, dbt_source_map, model_names);
@@ -183,12 +180,6 @@ fn build_model_assets(
 
         if let Some(cond) = conditions_resource {
             resources.push(cond);
-        }
-
-        if !model.tags.is_empty() {
-            let mut sorted = model.tags.clone();
-            sorted.sort();
-            all_tag_sets.push(sorted);
         }
 
         resources.push(NagiKind::Asset {
@@ -207,7 +198,7 @@ fn build_model_assets(
         });
     }
 
-    (resources, all_tag_sets)
+    resources
 }
 
 /// Builds a dbt source unique_id → nagi Asset name lookup and a deduplicated list of names.
@@ -336,70 +327,6 @@ fn tests_to_conditions(tests: &[&DbtNode]) -> Vec<DesiredCondition> {
         }
     }
     entries
-}
-
-/// Generates `kind: Sync` resources for each unique tag and each realized tag combination.
-fn generate_tag_syncs(tag_sets: &[Vec<String>]) -> Vec<NagiKind> {
-    let mut single_tags: HashSet<String> = HashSet::new();
-    let mut combo_tags: HashSet<Vec<String>> = HashSet::new();
-
-    for tags in tag_sets {
-        for tag in tags {
-            single_tags.insert(tag.clone());
-        }
-        if tags.len() > 1 {
-            combo_tags.insert(tags.clone());
-        }
-    }
-
-    let mut syncs = Vec::new();
-
-    let mut sorted_singles: Vec<String> = single_tags.into_iter().collect();
-    sorted_singles.sort();
-
-    for tag in &sorted_singles {
-        let sync_name = format!("dbt-tag-{tag}");
-        let selector = format!("tag:{tag}");
-        syncs.push(make_tag_sync(&sync_name, &selector));
-    }
-
-    let mut sorted_combos: Vec<Vec<String>> = combo_tags.into_iter().collect();
-    sorted_combos.sort();
-
-    for tags in &sorted_combos {
-        let sync_name = format!("dbt-tag-{}", tags.join("-"));
-        let selector = tags
-            .iter()
-            .map(|t| format!("tag:{t}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        syncs.push(make_tag_sync(&sync_name, &selector));
-    }
-
-    syncs
-}
-
-fn make_tag_sync(name: &str, selector: &str) -> NagiKind {
-    NagiKind::Sync {
-        api_version: API_VERSION.to_string(),
-        metadata: Metadata {
-            name: name.to_string(),
-        },
-        spec: SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec![
-                    "dbt".to_string(),
-                    "run".to_string(),
-                    "--select".to_string(),
-                    selector.to_string(),
-                ],
-                env: HashMap::new(),
-            },
-            post: None,
-        },
-    }
 }
 
 #[cfg(test)]
@@ -739,38 +666,6 @@ mod tests {
     }
 
     #[test]
-    fn manifest_to_resources_generates_single_tag_syncs() {
-        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
-
-        let syncs: Vec<_> = resources.iter().filter(|r| r.kind() == "Sync").collect();
-
-        let sync_names: Vec<_> = syncs.iter().map(|s| s.metadata().name.as_str()).collect();
-        assert!(
-            sync_names.contains(&"dbt-tag-finance"),
-            "missing dbt-tag-finance"
-        );
-        assert!(
-            sync_names.contains(&"dbt-tag-daily"),
-            "missing dbt-tag-daily"
-        );
-    }
-
-    #[test]
-    fn manifest_to_resources_generates_combo_tag_syncs() {
-        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
-
-        let syncs: Vec<_> = resources.iter().filter(|r| r.kind() == "Sync").collect();
-
-        let sync_names: Vec<_> = syncs.iter().map(|s| s.metadata().name.as_str()).collect();
-        assert!(
-            sync_names.contains(&"dbt-tag-daily-finance"),
-            "missing combo tag sync dbt-tag-daily-finance"
-        );
-    }
-
-    #[test]
     fn manifest_to_resources_no_default_sync() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let origin = OriginSpec::DBT {
@@ -925,22 +820,6 @@ mod tests {
         assert!(conditions.is_some());
     }
 
-    #[test]
-    fn tag_sync_has_correct_dbt_run_command() {
-        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
-
-        let sync = resources
-            .iter()
-            .find(|r| r.metadata().name == "dbt-tag-finance")
-            .unwrap();
-        if let NagiKind::Sync { spec, .. } = sync {
-            assert_eq!(spec.run.args, vec!["dbt", "run", "--select", "tag:finance"]);
-        } else {
-            panic!("expected Sync");
-        }
-    }
-
     // ── build_dbt_source_assets tests ──────────────────────────────────
 
     #[test]
@@ -999,7 +878,7 @@ mod tests {
         let model_tests = collect_tests(&manifest, &model_names);
         let default_sync = Some("dbt-run".to_string());
 
-        let (resources, _) = build_model_assets(
+        let resources = build_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
@@ -1032,7 +911,7 @@ mod tests {
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
 
-        let (resources, _) = build_model_assets(
+        let resources = build_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
@@ -1055,7 +934,7 @@ mod tests {
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
 
-        let (resources, _) = build_model_assets(
+        let resources = build_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
@@ -1069,48 +948,5 @@ mod tests {
             syncs.is_empty(),
             "Sync generation is the caller's responsibility"
         );
-    }
-
-    #[test]
-    fn build_model_assets_returns_tag_sets() {
-        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _) = collect_dbt_source_names(&manifest);
-        let (model_names, model_nodes) = collect_models(&manifest);
-        let model_tests = collect_tests(&manifest, &model_names);
-
-        let (_, tag_sets) = build_model_assets(
-            &model_nodes,
-            &model_tests,
-            &dbt_source_map,
-            &model_names,
-            "my-bq",
-            &Some("dbt-run".to_string()),
-        );
-
-        assert!(!tag_sets.is_empty());
-        // jaffle_shop has models with tags: ["finance"], ["finance", "daily"]
-        assert!(tag_sets.iter().any(|t| t == &["finance"]));
-        assert!(tag_sets.iter().any(|t| t == &["daily", "finance"]));
-    }
-
-    // ── generate_tag_syncs tests ─────────────────────────────────────────
-
-    #[test]
-    fn generate_tag_syncs_from_tag_sets() {
-        let tag_sets = vec![
-            vec!["finance".to_string()],
-            vec!["daily".to_string(), "finance".to_string()],
-        ];
-        let syncs = generate_tag_syncs(&tag_sets);
-        let names: Vec<_> = syncs.iter().map(|s| s.metadata().name.as_str()).collect();
-        assert!(names.contains(&"dbt-tag-finance"));
-        assert!(names.contains(&"dbt-tag-daily"));
-        assert!(names.contains(&"dbt-tag-daily-finance"));
-    }
-
-    #[test]
-    fn generate_tag_syncs_empty_input() {
-        let syncs = generate_tag_syncs(&[]);
-        assert!(syncs.is_empty());
     }
 }
