@@ -469,6 +469,40 @@ fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, Stri
     result
 }
 
+/// Detects if a single sync step uses a command that updates multiple Assets.
+/// Returns a reason string if problematic, `None` otherwise.
+fn detect_multi_asset_step(args: &[String]) -> Option<String> {
+    if args.iter().any(|a| a == "dbt") && args.iter().any(|a| a == "build") {
+        return Some(
+            "uses `dbt build` which updates multiple models in a single execution".to_string(),
+        );
+    }
+    if let Some(tag) = args.iter().find(|a| a.starts_with("tag:")) {
+        return Some(format!(
+            "uses tag-based selector '{tag}' which may update multiple models in a single execution",
+        ));
+    }
+    None
+}
+
+/// Checks Sync definitions for commands that update multiple Assets in a single execution.
+/// Returns a list of `(sync_name, reason)` pairs for each problematic Sync.
+fn check_multi_asset_syncs(syncs: &HashMap<String, SyncSpec>) -> Vec<(String, String)> {
+    let mut warnings: Vec<(String, String)> = syncs
+        .iter()
+        .filter_map(|(name, spec)| {
+            let steps = [Some(&spec.run), spec.pre.as_ref(), spec.post.as_ref()];
+            steps
+                .into_iter()
+                .flatten()
+                .find_map(|step| detect_multi_asset_step(&step.args))
+                .map(|reason| (name.clone(), reason))
+        })
+        .collect();
+    warnings.sort_by(|a, b| a.0.cmp(&b.0));
+    warnings
+}
+
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let CategorizedResources {
@@ -477,6 +511,15 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         syncs,
         assets,
     } = categorize(resources)?;
+
+    for (sync_name, reason) in check_multi_asset_syncs(&syncs) {
+        tracing::warn!(
+            sync = sync_name,
+            "Sync '{}' {}: this conflicts with Nagi's per-Asset reconciliation loop",
+            sync_name,
+            reason,
+        );
+    }
 
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
@@ -1815,5 +1858,70 @@ spec:
         assert_eq!(sub.project_dir, "../dbt-sub");
         assert_eq!(sub.profile, "dev_profile");
         assert_eq!(sub.target, None);
+    }
+
+    // ── detect_multi_asset_step tests ───────────────────────────────
+
+    fn args(strs: &[&str]) -> Vec<String> {
+        strs.iter().map(|s| s.to_string()).collect()
+    }
+
+    macro_rules! detect_multi_asset_step_test {
+        ($($name:ident: $args:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let a = args($args);
+                    let result = detect_multi_asset_step(&a);
+                    assert_eq!(result.is_some(), $expected);
+                }
+            )*
+        };
+    }
+
+    detect_multi_asset_step_test! {
+        detect_dbt_build: &["dbt", "build", "--select", "model_a"] => true;
+        detect_dbt_build_no_select: &["dbt", "build"] => true;
+        detect_tag_selector: &["dbt", "run", "--select", "tag:finance"] => true;
+        detect_tag_selector_combo: &["dbt", "run", "-s", "tag:finance,tag:daily"] => true;
+        ignore_model_select: &["dbt", "run", "--select", "my_model"] => false;
+        ignore_non_dbt_command: &["python", "run.py"] => false;
+        ignore_empty_args: &[] => false;
+    }
+
+    // ── check_multi_asset_syncs tests ─────────────────────────────────
+
+    fn make_sync(args: Vec<&str>) -> SyncSpec {
+        SyncSpec {
+            pre: None,
+            run: crate::kind::sync::SyncStep {
+                step_type: crate::kind::sync::StepType::Command,
+                args: args.into_iter().map(String::from).collect(),
+                env: HashMap::new(),
+            },
+            post: None,
+        }
+    }
+
+    #[test]
+    fn check_multi_asset_syncs_collects_warnings() {
+        let mut syncs = HashMap::new();
+        syncs.insert(
+            "build-sync".to_string(),
+            make_sync(vec!["dbt", "build", "--select", "model_a"]),
+        );
+        syncs.insert(
+            "ok-sync".to_string(),
+            make_sync(vec!["dbt", "run", "--select", "my_model"]),
+        );
+        let warnings = check_multi_asset_syncs(&syncs);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].0, "build-sync");
+    }
+
+    #[test]
+    fn check_multi_asset_syncs_empty() {
+        let warnings = check_multi_asset_syncs(&HashMap::new());
+        assert!(warnings.is_empty());
     }
 }
