@@ -267,6 +267,20 @@ mod tests {
         std::fs::write(dir.path().join("nagi.yaml"), "").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config, NagiConfig::default());
+        assert_eq!(config.backend.r#type, "local");
+        assert!(config.backend.bucket.is_none());
+        assert!(config.backend.region.is_none());
+        assert!(config.backend.prefix.is_none());
+        assert!(config.notify.slack.is_none());
+        assert!(config.termination_grace_period_seconds.is_none());
+        assert!(config.max_controllers.is_none());
+        assert_eq!(config.lock_ttl_seconds, 3600);
+        assert_eq!(config.lock_retry_interval_seconds, 900);
+        assert_eq!(config.lock_retry_max_attempts, 3);
+        assert!(config.max_evaluate_concurrency.is_none());
+        assert!(config.max_sync_concurrency.is_none());
+        assert!(config.nagi_dir.root().ends_with(".nagi"));
+        assert!(config.export.is_none());
     }
 
     #[test]
@@ -314,13 +328,6 @@ notify:
     }
 
     #[test]
-    fn default_backend_bucket_and_region_are_none() {
-        let config = NagiConfig::default();
-        assert!(config.backend.bucket.is_none());
-        assert!(config.backend.region.is_none());
-    }
-
-    #[test]
     fn load_notify_only() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r##"
@@ -335,33 +342,12 @@ notify:
     }
 
     #[test]
-    fn default_termination_grace_period_is_none() {
-        let config = NagiConfig::default();
-        assert!(config.termination_grace_period_seconds.is_none());
-    }
-
-    #[test]
     fn load_termination_grace_period() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "terminationGracePeriodSeconds: 300";
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.termination_grace_period_seconds, Some(300));
-    }
-
-    #[test]
-    fn load_without_termination_grace_period() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: local";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert!(config.termination_grace_period_seconds.is_none());
-    }
-
-    #[test]
-    fn default_max_controllers_is_none() {
-        let config = NagiConfig::default();
-        assert!(config.max_controllers.is_none());
     }
 
     #[test]
@@ -374,12 +360,6 @@ notify:
     }
 
     #[test]
-    fn default_backend_prefix_is_none() {
-        let config = NagiConfig::default();
-        assert!(config.backend.prefix.is_none());
-    }
-
-    #[test]
     fn load_backend_prefix() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "backend:\n  type: gcs\n  prefix: my-project/nagi";
@@ -389,44 +369,12 @@ notify:
     }
 
     #[test]
-    fn load_backend_without_prefix() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: gcs";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.backend.r#type, "gcs");
-        assert!(config.backend.prefix.is_none());
-    }
-
-    #[test]
-    fn default_lock_ttl_is_3600() {
-        let config = NagiConfig::default();
-        assert_eq!(config.lock_ttl_seconds, 3600);
-    }
-
-    #[test]
     fn load_custom_lock_ttl() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "lockTtlSeconds: 120";
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.lock_ttl_seconds, 120);
-    }
-
-    #[test]
-    fn load_without_lock_ttl_uses_default() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: local";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.lock_ttl_seconds, 3600);
-    }
-
-    #[test]
-    fn default_lock_retry_values() {
-        let config = NagiConfig::default();
-        assert_eq!(config.lock_retry_interval_seconds, 900);
-        assert_eq!(config.lock_retry_max_attempts, 3);
     }
 
     #[test]
@@ -447,62 +395,12 @@ notify:
     }
 
     #[test]
-    fn default_nagi_dir_is_dot_nagi() {
-        let config = NagiConfig::default();
-        assert!(config.nagi_dir.root().ends_with(".nagi"));
-    }
-
-    #[test]
     fn load_custom_nagi_dir() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "nagiDir: /tmp/my-nagi";
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.nagi_dir, NagiDir::new(PathBuf::from("/tmp/my-nagi")));
-    }
-
-    #[test]
-    fn load_without_nagi_dir_uses_default() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: local";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.nagi_dir, NagiDir::default());
-    }
-
-    #[test]
-    fn config_derived_paths() {
-        let config = NagiConfig {
-            nagi_dir: NagiDir::new(PathBuf::from("/data/nagi")),
-            ..NagiConfig::default()
-        };
-        assert_eq!(
-            config.nagi_dir.db_path(),
-            PathBuf::from("/data/nagi/logs.db")
-        );
-        assert_eq!(config.nagi_dir.logs_dir(), PathBuf::from("/data/nagi/logs"));
-        assert_eq!(
-            config.nagi_dir.evaluate_cache_dir(),
-            PathBuf::from("/data/nagi/cache/evaluate")
-        );
-        assert_eq!(
-            config.nagi_dir.locks_dir(),
-            PathBuf::from("/data/nagi/locks")
-        );
-        assert_eq!(
-            config.nagi_dir.suspended_dir(),
-            PathBuf::from("/data/nagi/suspended")
-        );
-        assert_eq!(
-            config.nagi_dir.watermarks_dir(),
-            PathBuf::from("/data/nagi/watermarks")
-        );
-    }
-
-    #[test]
-    fn default_export_is_none() {
-        let config = NagiConfig::default();
-        assert!(config.export.is_none());
     }
 
     #[test]
@@ -558,24 +456,6 @@ export:
     }
 
     #[test]
-    fn load_without_export() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: local";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert!(config.export.is_none());
-    }
-
-    // ── Concurrency ──────────────────────────────────────────────────────
-
-    #[test]
-    fn default_concurrency_is_none() {
-        let config = NagiConfig::default();
-        assert!(config.max_evaluate_concurrency.is_none());
-        assert!(config.max_sync_concurrency.is_none());
-    }
-
-    #[test]
     fn load_concurrency_limits() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "maxEvaluateConcurrency: 5\nmaxSyncConcurrency: 2";
@@ -583,16 +463,6 @@ export:
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.max_evaluate_concurrency, Some(5));
         assert_eq!(config.max_sync_concurrency, Some(2));
-    }
-
-    #[test]
-    fn load_without_concurrency_uses_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: local";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert!(config.max_evaluate_concurrency.is_none());
-        assert!(config.max_sync_concurrency.is_none());
     }
 
     // ── NagiDir ──────────────────────────────────────────────────────────
