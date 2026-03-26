@@ -575,8 +575,8 @@ mod tests {
         ReadinessStore::write_all(&store, &map).unwrap();
         let loaded = ReadinessStore::read_all(&store).unwrap();
         assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded["x"], true);
-        assert_eq!(loaded["y"], false);
+        assert!(loaded["x"]);
+        assert!(!loaded["y"]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

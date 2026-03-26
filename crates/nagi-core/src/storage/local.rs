@@ -601,8 +601,8 @@ mod tests {
         store.write_all(&map).unwrap();
         let loaded = store.read_all().unwrap();
         assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded["x"], true);
-        assert_eq!(loaded["y"], false);
+        assert!(loaded["x"]);
+        assert!(!loaded["y"]);
     }
 
     #[test]
