@@ -2,6 +2,31 @@
 
 dbt Cloud を使用している環境での Nagi の設定と動作について解説します。
 
+## Operation Models
+
+dbt Cloud 環境では、以下の2つの運用モデルがあります。
+
+### a. Nagi as orchestrator (dbt Core execution)
+
+Nagi が `dbt run --select <model>` を Asset 単位で実行します。dbt Cloud のジョブは使用しません。`dbtCloud` フィールドは Sync 実行前のジョブ実行中チェックに使用します。
+
+reconciliation loop（evaluate → sync → re-evaluate → upstream propagation）がそのまま機能します。
+
+### b. dbt Cloud as orchestrator (Nagi as observer)
+
+Nagi は evaluate と通知のみを実行します。Sync は実行しません。dbt Cloud のジョブが既存のスケジュールでモデルを更新し、Nagi は定期的にデータの状態を検査して drift を検出したら通知します。
+
+Asset の `autoSync: false` を設定するか、`onDrift` を省略します。
+
+### Why two models?
+
+`dbt build` は DAG 全体を一括処理するため、Nagi の per-Asset reconciliation loop と粒度が一致しません。Nagi が dbt Cloud ジョブをトリガーすると、以下の問題が発生します。
+
+- **Sync duplication**: 1つのジョブが複数 Asset を更新するのに、Asset ごとに Sync が連鎖する
+- **Re-evaluate test duplication**: `dbt build` のテスト実行後に、同じテストを re-evaluate で再実行する
+
+モデル a はこの問題を Asset 単位の `dbt run` で回避し、モデル b は Sync を Nagi の責務外とすることで回避します。
+
 ## Prerequisites
 
 Nagi を実行する環境に [dbt CLI](https://docs.getdbt.com/docs/core/installation-overview)（dbt-core >= 1.0）のインストールが必要です。
@@ -46,7 +71,7 @@ dbt CLI をサブプロセスとして実行します（例: `dbt run --select d
 
 ## Sync Control
 
-`dbtCloud` が設定されている場合、Nagi は Sync 実行前に dbt Cloud API で実行中のジョブを確認します。compile 時に各 dbt Cloud ジョブの `execute_steps` を解析し、対象 Asset を含むジョブを特定します。Sync 実行時にそのジョブが実行中であれば Sync を中断します。
+運用モデル a で Nagi が Sync を実行する場合、`dbtCloud` が設定されていれば Sync 実行前に dbt Cloud API で実行中のジョブを確認します。compile 時に各 dbt Cloud ジョブの `execute_steps` を解析し、対象 Asset を含むジョブを特定します。Sync 実行時にそのジョブが実行中であれば Sync を中断します。
 
 1. compile 時に Jobs API から全ジョブを取得し、`execute_steps` の `--select` からモデル名を抽出して Asset ごとに関連ジョブを特定する
 2. Sync 実行時に Runs API で実行中のジョブを取得し、対象 Asset に関連するジョブが実行中か確認する
