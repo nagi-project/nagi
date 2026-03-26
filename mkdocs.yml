@@ -54,6 +54,7 @@ nav:
   - Architecture:
     - Serve: architecture/serve.md
     - Serve Scenarios: architecture/serve-scenarios.md
+    - Serve Restart: architecture/serve-restart.md
     - Storage: architecture/storage.md
     - Notifications: architecture/notifications.md
     - MCP Server: architecture/mcp.md
