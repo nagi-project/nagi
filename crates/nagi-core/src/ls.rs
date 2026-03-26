@@ -2,12 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::compile::{load_compiled_assets, load_graph, CompiledAsset, DependencyGraph};
+use crate::compile::{load_compiled_assets, CompiledAsset};
 
 #[derive(Debug, Serialize)]
 pub struct LsOutput {
     pub assets: Vec<LsAsset>,
-    pub sources: Vec<LsSource>,
     pub connections: Vec<LsConnection>,
     pub conditions: Vec<LsConditions>,
     pub syncs: Vec<LsSync>,
@@ -20,7 +19,7 @@ pub struct LsAsset {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<String>,
+    pub upstreams: Vec<String>,
     pub auto_sync: bool,
     pub on_drift: Vec<LsOnDriftEntry>,
 }
@@ -30,11 +29,6 @@ pub struct LsAsset {
 pub struct LsOnDriftEntry {
     pub conditions: String,
     pub sync: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct LsSource {
-    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,20 +51,17 @@ pub struct LsSync {
 
 /// Reads compiled target/ directory and returns a structured listing of all resources.
 pub fn ls(target_dir: &std::path::Path) -> Result<LsOutput, crate::compile::CompileError> {
-    let graph = load_graph(target_dir)?;
     let loaded = load_compiled_assets(target_dir, &[])?;
 
     let compiled_assets = parse_compiled_assets(&loaded)?;
 
     let assets = collect_assets(&compiled_assets);
-    let sources = collect_sources(&compiled_assets, &graph);
     let connections = collect_connections(&compiled_assets);
     let conditions = collect_conditions(&compiled_assets);
     let syncs = collect_syncs(&compiled_assets);
 
     Ok(LsOutput {
         assets,
-        sources,
         connections,
         conditions,
         syncs,
@@ -106,30 +97,12 @@ fn collect_assets(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsAsset> {
             LsAsset {
                 name: name.clone(),
                 tags: compiled.spec.tags.clone(),
-                sources: compiled.spec.sources.clone(),
+                upstreams: compiled.spec.upstreams.clone(),
                 auto_sync: compiled.spec.auto_sync,
                 on_drift,
             }
         })
         .collect()
-}
-
-fn collect_sources(
-    compiled_assets: &[(String, CompiledAsset)],
-    graph: &DependencyGraph,
-) -> Vec<LsSource> {
-    let mut sources = BTreeSet::new();
-    for (_, compiled) in compiled_assets {
-        for source in &compiled.spec.sources {
-            sources.insert(source.clone());
-        }
-    }
-    for node in &graph.nodes {
-        if node.kind == "Source" {
-            sources.insert(node.name.clone());
-        }
-    }
-    sources.into_iter().map(|name| LsSource { name }).collect()
 }
 
 fn collect_connections(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsConnection> {
@@ -182,7 +155,7 @@ fn collect_syncs(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsSync> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::{resolve, write_output, GraphNode};
+    use crate::compile::{resolve, write_output};
     use crate::kind::parse_kinds;
 
     fn yaml_docs(docs: &[&str]) -> String {
@@ -214,9 +187,9 @@ spec:
     profile: my_project
     target: dev";
 
-    const SOURCE: &str = "\
+    const UPSTREAM_ASSET: &str = "\
 apiVersion: nagi.io/v1alpha1
-kind: Source
+kind: Asset
 metadata:
   name: raw-sales
 spec:
@@ -249,26 +222,27 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sources: [raw-sales]
+  connection: my-bq
+  upstreams: [raw-sales]
   tags: [finance]
   onDrift:
     - conditions: freshness-check
       sync: dbt-run";
 
-    const ALL_YAML: &[&str] = &[CONNECTION, SOURCE, CONDITIONS, SYNC, ASSET];
+    const ALL_YAML: &[&str] = &[CONNECTION, UPSTREAM_ASSET, CONDITIONS, SYNC, ASSET];
 
     // ── collect_assets ──────────────────────────────────────────────────
 
     #[test]
-    fn collect_assets_extracts_name_tags_sources() {
+    fn collect_assets_extracts_name_tags_upstreams() {
         let compiled = setup_compiled_assets(&yaml_docs(ALL_YAML));
         let assets = collect_assets(&compiled);
 
-        assert_eq!(assets.len(), 1);
-        assert_eq!(assets[0].name, "daily-sales");
-        assert_eq!(assets[0].tags, vec!["finance"]);
-        assert_eq!(assets[0].sources, vec!["raw-sales"]);
-        assert!(assets[0].auto_sync);
+        assert_eq!(assets.len(), 2);
+        let daily = assets.iter().find(|a| a.name == "daily-sales").unwrap();
+        assert_eq!(daily.tags, vec!["finance"]);
+        assert_eq!(daily.upstreams, vec!["raw-sales"]);
+        assert!(daily.auto_sync);
     }
 
     #[test]
@@ -276,76 +250,29 @@ spec:
         let compiled = setup_compiled_assets(&yaml_docs(ALL_YAML));
         let assets = collect_assets(&compiled);
 
-        assert_eq!(assets[0].on_drift.len(), 1);
-        assert_eq!(assets[0].on_drift[0].conditions, "freshness-check");
-        assert_eq!(assets[0].on_drift[0].sync, "dbt-run");
+        let daily = assets.iter().find(|a| a.name == "daily-sales").unwrap();
+        assert_eq!(daily.on_drift.len(), 1);
+        assert_eq!(daily.on_drift[0].conditions, "freshness-check");
+        assert_eq!(daily.on_drift[0].sync, "dbt-run");
     }
 
     #[test]
     fn collect_assets_empty_on_drift_when_no_conditions() {
         let yaml = yaml_docs(&[
             CONNECTION,
-            SOURCE,
+            UPSTREAM_ASSET,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: passive
 spec:
-  sources: [raw-sales]",
+  upstreams: [raw-sales]",
         ]);
         let compiled = setup_compiled_assets(&yaml);
         let assets = collect_assets(&compiled);
 
         assert!(assets[0].on_drift.is_empty());
-    }
-
-    // ── collect_sources ─────────────────────────────────────────────────
-
-    #[test]
-    fn collect_sources_from_asset_specs() {
-        let compiled = setup_compiled_assets(&yaml_docs(ALL_YAML));
-        let graph = DependencyGraph {
-            nodes: vec![],
-            edges: vec![],
-        };
-        let sources = collect_sources(&compiled, &graph);
-
-        assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].name, "raw-sales");
-    }
-
-    #[test]
-    fn collect_sources_from_graph_nodes() {
-        let compiled = vec![];
-        let graph = DependencyGraph {
-            nodes: vec![GraphNode {
-                name: "graph-source".to_string(),
-                kind: "Source".to_string(),
-                tags: vec![],
-            }],
-            edges: vec![],
-        };
-        let sources = collect_sources(&compiled, &graph);
-
-        assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].name, "graph-source");
-    }
-
-    #[test]
-    fn collect_sources_deduplicates() {
-        let compiled = setup_compiled_assets(&yaml_docs(ALL_YAML));
-        let graph = DependencyGraph {
-            nodes: vec![GraphNode {
-                name: "raw-sales".to_string(),
-                kind: "Source".to_string(),
-                tags: vec![],
-            }],
-            edges: vec![],
-        };
-        let sources = collect_sources(&compiled, &graph);
-
-        assert_eq!(sources.len(), 1);
     }
 
     // ── collect_connections ──────────────────────────────────────────────
@@ -378,7 +305,7 @@ spec:
     fn collect_connections_deduplicates() {
         let yaml = yaml_docs(&[
             CONNECTION,
-            SOURCE,
+            UPSTREAM_ASSET,
             CONDITIONS,
             SYNC,
             ASSET,
@@ -430,7 +357,7 @@ spec:
     fn collect_conditions_deduplicates_across_assets() {
         let yaml = yaml_docs(&[
             CONNECTION,
-            SOURCE,
+            UPSTREAM_ASSET,
             CONDITIONS,
             SYNC,
             ASSET,
@@ -481,7 +408,7 @@ spec:
     fn collect_syncs_deduplicates_across_assets() {
         let yaml = yaml_docs(&[
             CONNECTION,
-            SOURCE,
+            UPSTREAM_ASSET,
             CONDITIONS,
             SYNC,
             ASSET,
@@ -509,8 +436,7 @@ spec:
         let (_dir, target) = setup_target(&yaml_docs(ALL_YAML));
         let output = ls(&target).unwrap();
 
-        assert_eq!(output.assets.len(), 1);
-        assert_eq!(output.sources.len(), 1);
+        assert_eq!(output.assets.len(), 2);
         assert_eq!(output.connections.len(), 1);
         assert_eq!(output.conditions.len(), 1);
         assert_eq!(output.syncs.len(), 1);

@@ -210,7 +210,7 @@ mod tests {
             nodes: vec![
                 GraphNode {
                     name: "raw-sales".to_string(),
-                    kind: "Source".to_string(),
+                    kind: "Asset".to_string(),
                     tags: vec![],
                 },
                 GraphNode {
@@ -225,7 +225,7 @@ mod tests {
                 },
                 GraphNode {
                     name: "raw-logs".to_string(),
-                    kind: "Source".to_string(),
+                    kind: "Asset".to_string(),
                     tags: vec![],
                 },
                 GraphNode {

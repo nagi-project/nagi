@@ -6,13 +6,10 @@ use object_store::path::Path as OsPath;
 use object_store::{ObjectStore, PutMode, PutOptions};
 
 use crate::config::BackendConfig;
-use crate::db::TableStats;
 use crate::evaluate::AssetEvalResult;
 use crate::serve::SuspendedInfo;
 use crate::storage::lock::LockInfo;
-use crate::storage::{
-    Cache, ReadinessStore, SourceStatsCache, StorageError, SuspendedStore, SyncLock,
-};
+use crate::storage::{Cache, ReadinessStore, StorageError, SuspendedStore, SyncLock};
 
 /// Remote storage backend backed by an `ObjectStore` (GCS or S3).
 ///
@@ -50,10 +47,6 @@ impl RemoteObjectStore {
 
     fn suspended_path(&self, asset_name: &str) -> OsPath {
         self.resolve(&format!("suspended/{asset_name}.json"))
-    }
-
-    fn source_stats_path(&self, source_name: &str) -> OsPath {
-        self.resolve(&format!("source_stats/{source_name}.json"))
     }
 
     fn readiness_path(&self, asset_name: &str) -> OsPath {
@@ -249,30 +242,6 @@ impl ReadinessStore for RemoteObjectStore {
             }
         }
         Ok(result)
-    }
-}
-
-// ── SourceStatsCache ──────────────────────────────────────────────────────────
-
-impl SourceStatsCache for RemoteObjectStore {
-    fn read(&self, source_name: &str) -> Result<Option<TableStats>, StorageError> {
-        let path = self.source_stats_path(source_name);
-        match block(self.store.get(&path)) {
-            Ok(result) => {
-                let bytes = block(result.bytes()).map_err(remote_err)?;
-                let value = serde_json::from_slice(&bytes).map_err(serde_err)?;
-                Ok(Some(value))
-            }
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(remote_err(e)),
-        }
-    }
-
-    fn write(&self, source_name: &str, stats: &TableStats) -> Result<(), StorageError> {
-        let path = self.source_stats_path(source_name);
-        let bytes = serde_json::to_vec(stats).map_err(serde_err)?;
-        block(self.store.put(&path, bytes.into())).map_err(remote_err)?;
-        Ok(())
     }
 }
 
@@ -473,7 +442,7 @@ pub fn create_remote_store(config: &BackendConfig) -> Result<RemoteObjectStore, 
 mod tests {
     use super::*;
     use crate::evaluate::{ConditionResult, ConditionStatus};
-    use crate::storage::{Cache, SourceStatsCache, SuspendedStore, SyncLock};
+    use crate::storage::{Cache, SuspendedStore, SyncLock};
 
     fn in_memory_store(prefix: Option<&str>) -> RemoteObjectStore {
         RemoteObjectStore::new(
@@ -617,28 +586,6 @@ mod tests {
         map.insert("z".to_string(), true);
         ReadinessStore::write_all(&store, &map).unwrap();
         assert_eq!(ReadinessStore::read(&store, "z").unwrap(), Some(true));
-    }
-
-    // ── SourceStatsCache ───────────────────────────────────────────────────
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn source_stats_write_and_read() {
-        let store = in_memory_store(None);
-        let stats = crate::db::TableStats {
-            num_rows: 42,
-            num_bytes: 1024,
-        };
-        SourceStatsCache::write(&store, "src_table", &stats).unwrap();
-        let got = SourceStatsCache::read(&store, "src_table")
-            .unwrap()
-            .unwrap();
-        assert_eq!(got.num_rows, 42);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn source_stats_read_missing_returns_none() {
-        let store = in_memory_store(None);
-        assert!(SourceStatsCache::read(&store, "nope").unwrap().is_none());
     }
 
     // ── SyncLock ───────────────────────────────────────────────────────────

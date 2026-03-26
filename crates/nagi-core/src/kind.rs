@@ -6,14 +6,12 @@ pub mod asset;
 pub mod condition;
 pub mod connection;
 pub mod origin;
-pub mod source;
 pub mod sync;
 
 pub use asset::AssetSpec;
 pub use condition::ConditionsSpec;
 pub use connection::ConnectionSpec;
 pub use origin::OriginSpec;
-pub use source::SourceSpec;
 pub use sync::SyncSpec;
 
 pub const API_VERSION: &str = "nagi.io/v1alpha1";
@@ -47,12 +45,6 @@ pub enum NagiKind {
         metadata: Metadata,
         spec: ConnectionSpec,
     },
-    Source {
-        #[serde(rename = "apiVersion")]
-        api_version: String,
-        metadata: Metadata,
-        spec: SourceSpec,
-    },
     Asset {
         #[serde(rename = "apiVersion")]
         api_version: String,
@@ -83,7 +75,6 @@ impl NagiKind {
     pub fn api_version(&self) -> &str {
         match self {
             NagiKind::Connection { api_version, .. } => api_version,
-            NagiKind::Source { api_version, .. } => api_version,
             NagiKind::Asset { api_version, .. } => api_version,
             NagiKind::Conditions { api_version, .. } => api_version,
             NagiKind::Sync { api_version, .. } => api_version,
@@ -94,7 +85,6 @@ impl NagiKind {
     pub fn metadata(&self) -> &Metadata {
         match self {
             NagiKind::Connection { metadata, .. } => metadata,
-            NagiKind::Source { metadata, .. } => metadata,
             NagiKind::Asset { metadata, .. } => metadata,
             NagiKind::Conditions { metadata, .. } => metadata,
             NagiKind::Sync { metadata, .. } => metadata,
@@ -105,7 +95,6 @@ impl NagiKind {
     pub fn kind(&self) -> &'static str {
         match self {
             NagiKind::Connection { .. } => connection::KIND,
-            NagiKind::Source { .. } => source::KIND,
             NagiKind::Asset { .. } => asset::KIND,
             NagiKind::Conditions { .. } => condition::KIND,
             NagiKind::Sync { .. } => sync::KIND,
@@ -141,7 +130,6 @@ impl NagiKind {
         }
         match self {
             NagiKind::Connection { spec, .. } => spec.validate(),
-            NagiKind::Source { spec, .. } => spec.validate(),
             NagiKind::Asset { spec, .. } => spec.validate(),
             NagiKind::Conditions { spec, .. } => spec.validate(),
             NagiKind::Sync { spec, .. } => spec.validate(),
@@ -195,25 +183,6 @@ spec:
     }
 
     #[test]
-    fn parse_source_resource() {
-        let yaml = r#"
-apiVersion: nagi.io/v1alpha1
-kind: Source
-metadata:
-  name: raw-sales
-spec:
-  connection: my-bigquery
-"#;
-        let resource = parse_kind(yaml).unwrap();
-        assert_eq!(resource.kind(), source::KIND);
-        assert_eq!(resource.metadata().name, "raw-sales");
-        assert!(matches!(
-            &resource,
-            NagiKind::Source { spec, .. } if spec.connection == "my-bigquery"
-        ));
-    }
-
-    #[test]
     fn parse_asset_resource() {
         let yaml = r#"
 apiVersion: nagi.io/v1alpha1
@@ -221,7 +190,7 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sources:
+  upstreams:
     - raw-sales
 "#;
         let resource = parse_kind(yaml).unwrap();
@@ -258,27 +227,25 @@ spec:
     profile: my_project
 ---
 apiVersion: nagi.io/v1alpha1
-kind: Source
+kind: Asset
 metadata:
-  name: raw-sales
-spec:
-  connection: my-bigquery
+  name: daily-sales
+spec: {}
 "#;
         let resources = parse_kinds(yaml).unwrap();
         assert_eq!(resources.len(), 2);
         assert_eq!(resources[0].kind(), connection::KIND);
-        assert_eq!(resources[1].kind(), source::KIND);
+        assert_eq!(resources[1].kind(), asset::KIND);
     }
 
     #[test]
     fn parse_kind_rejects_empty_name() {
         let yaml = r#"
 apiVersion: nagi.io/v1alpha1
-kind: Source
+kind: Asset
 metadata:
   name: ""
-spec:
-  connection: my-bigquery
+spec: {}
 "#;
         let err = parse_kind(yaml).unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { .. }));
@@ -295,11 +262,10 @@ spec:
             let yaml = format!(
                 r#"
 apiVersion: nagi.io/v1alpha1
-kind: Source
+kind: Asset
 metadata:
   name: "{name}"
-spec:
-  connection: my-bq
+spec: {{}}
 "#
             );
             let err = parse_kind(&yaml).unwrap_err();
@@ -309,13 +275,18 @@ spec:
             );
         }
         // Backslash tested via direct construction to avoid YAML escape issues.
-        let resource = NagiKind::Source {
+        let resource = NagiKind::Asset {
             api_version: API_VERSION.to_string(),
             metadata: Metadata {
                 name: "foo\\bar".to_string(),
             },
-            spec: source::SourceSpec {
-                connection: "my-bq".to_string(),
+            spec: AssetSpec {
+                tags: vec![],
+                connection: None,
+                upstreams: vec![],
+                on_drift: vec![],
+                auto_sync: true,
+                evaluate_cache_ttl: None,
             },
         };
         let err = resource.validate().unwrap_err();
@@ -326,13 +297,18 @@ spec:
     fn parse_kind_rejects_sql_metacharacters_in_name() {
         let cases = [("tab'le", "single quote"), ("tab`le", "backtick")];
         for (name, desc) in cases {
-            let resource = NagiKind::Source {
+            let resource = NagiKind::Asset {
                 api_version: API_VERSION.to_string(),
                 metadata: Metadata {
                     name: name.to_string(),
                 },
-                spec: source::SourceSpec {
-                    connection: "my-bq".to_string(),
+                spec: AssetSpec {
+                    tags: vec![],
+                    connection: None,
+                    upstreams: vec![],
+                    on_drift: vec![],
+                    auto_sync: true,
+                    evaluate_cache_ttl: None,
                 },
             };
             let err = resource.validate().unwrap_err();
@@ -363,11 +339,10 @@ spec:
     fn parse_kind_rejects_unsupported_api_version() {
         let yaml = r#"
 apiVersion: nagi.io/v2
-kind: Source
+kind: Asset
 metadata:
   name: raw-sales
-spec:
-  connection: my-bq
+spec: {}
 "#;
         let err = parse_kind(yaml).unwrap_err();
         assert!(matches!(err, KindError::UnsupportedApiVersion { .. }));
@@ -376,11 +351,10 @@ spec:
     #[test]
     fn parse_kind_rejects_missing_api_version() {
         let yaml = r#"
-kind: Source
+kind: Asset
 metadata:
   name: raw-sales
-spec:
-  connection: my-bq
+spec: {}
 "#;
         let err = parse_kind(yaml).unwrap_err();
         assert!(matches!(err, KindError::YamlParse(_)));

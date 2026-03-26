@@ -87,7 +87,7 @@ pub struct ResolvedOnDriftEntry {
     pub sync_ref_name: String,
 }
 
-/// Connection info resolved from Asset → Source → Connection chain.
+/// Connection info resolved from Asset → Connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ResolvedConnection {
@@ -139,7 +139,7 @@ pub fn compile(
     Ok(output)
 }
 
-/// Expands Origin resources by generating Assets, Sources, and Syncs from dbt manifests.
+/// Expands Origin resources by generating Assets and Syncs from dbt manifests.
 pub fn expand_origins(
     resources: Vec<NagiKind>,
     manifests: &HashMap<String, String>,
@@ -366,8 +366,6 @@ use crate::kind::connection::ConnectionSpec;
 
 struct CategorizedResources {
     connections: HashMap<String, ConnectionSpec>,
-    sources: HashSet<String>,
-    source_connections: HashMap<String, String>,
     conditions_groups: HashMap<String, Vec<DesiredCondition>>,
     syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
@@ -377,8 +375,6 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut result = CategorizedResources {
         connections: HashMap::new(),
-        sources: HashSet::new(),
-        source_connections: HashMap::new(),
         conditions_groups: HashMap::new(),
         syncs: HashMap::new(),
         assets: Vec::new(),
@@ -415,13 +411,6 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                 check_dup(&mut seen, kind, name.clone())?;
                 result.connections.insert(name, spec);
             }
-            NagiKind::Source { spec, .. } => {
-                check_dup(&mut seen, kind, name.clone())?;
-                result
-                    .source_connections
-                    .insert(name.clone(), spec.connection);
-                result.sources.insert(name);
-            }
             NagiKind::Conditions { spec, .. } => {
                 check_dup(&mut seen, kind, name.clone())?;
                 result.conditions_groups.insert(name, spec.0.clone());
@@ -435,16 +424,6 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
     }
 
     Ok(result)
-}
-
-fn require_ref(set: &HashSet<String>, kind: &str, name: &str) -> Result<(), CompileError> {
-    if !set.contains(name) {
-        return Err(CompileError::UnresolvedRef {
-            kind: kind.to_string(),
-            name: name.to_string(),
-        });
-    }
-    Ok(())
 }
 
 fn require_sync_ref(syncs: &HashMap<String, SyncSpec>, name: &str) -> Result<(), CompileError> {
@@ -494,80 +473,26 @@ fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, Stri
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let CategorizedResources {
         connections,
-        sources,
-        source_connections,
         conditions_groups,
         syncs,
         assets,
     } = categorize(resources)?;
 
-    // Validate cross-kind references and resolve on_drift entries.
+    let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
+
     let mut resolved_assets = Vec::new();
     for (metadata, spec) in assets {
-        for source_ref in &spec.sources {
-            require_ref(&sources, "Source", source_ref)?;
-        }
-
-        // Resolve each on_drift entry: validate conditions ref + sync ref, expand templates.
-        let mut resolved_on_drift = Vec::new();
-        let mut all_conditions: Vec<DesiredCondition> = Vec::new();
-        for entry in &spec.on_drift {
-            // Resolve conditions ref to Conditions.
-            let conditions = conditions_groups.get(&entry.conditions).ok_or_else(|| {
-                CompileError::UnresolvedRef {
-                    kind: "Conditions".to_string(),
-                    name: entry.conditions.clone(),
-                }
-            })?;
-
-            // Resolve sync ref and expand templates.
-            require_sync_ref(&syncs, &entry.sync)?;
-            let sync_spec = &syncs[&entry.sync];
-            let resolved_sync = expand_sync_templates(sync_spec, &metadata.name, &entry.with);
-
-            all_conditions.extend(conditions.iter().cloned());
-            resolved_on_drift.push(ResolvedOnDriftEntry {
-                conditions: conditions.clone(),
-                conditions_ref: entry.conditions.clone(),
-                sync: resolved_sync,
-                sync_ref_name: entry.sync.clone(),
-            });
-        }
-
-        // Check for duplicate condition names across all on_drift entries.
-        validate_no_duplicate_condition_names(&all_conditions)?;
-
-        // Resolve connection from the first source's connection chain.
-        let connection = spec
-            .sources
-            .first()
-            .and_then(|s| source_connections.get(s))
-            .and_then(|conn_name| {
-                connections
-                    .get(conn_name)
-                    .map(|spec| (conn_name.clone(), spec))
-            })
-            .map(|(conn_name, conn_spec)| ResolvedConnection::DbtProfile {
-                name: conn_name,
-                profile: conn_spec.dbt_profile.profile.clone(),
-                target: conn_spec.dbt_profile.target.clone(),
-                dbt_cloud_credentials_file: conn_spec.dbt_cloud.as_ref().map(|c| {
-                    c.credentials_file
-                        .clone()
-                        .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
-                }),
-            });
-
-        resolved_assets.push(ResolvedAsset {
+        resolved_assets.push(resolve_asset(
             metadata,
             spec,
-            resolved_on_drift,
-            connection,
-            dbt_cloud_job_ids: None,
-        });
+            &asset_names,
+            &connections,
+            &conditions_groups,
+            &syncs,
+        )?);
     }
 
-    let graph = build_graph(&resolved_assets, &sources)?;
+    let graph = build_graph(&resolved_assets)?;
     detect_cycles(&graph)?;
 
     Ok(CompileOutput {
@@ -576,20 +501,101 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
     })
 }
 
-fn build_graph(
-    assets: &[ResolvedAsset],
-    sources: &HashSet<String>,
-) -> Result<DependencyGraph, CompileError> {
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
+/// Validates references and resolves a single Asset's on_drift entries and connection.
+fn resolve_asset(
+    metadata: Metadata,
+    spec: AssetSpec,
+    asset_names: &HashSet<String>,
+    connections: &HashMap<String, ConnectionSpec>,
+    conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
+    syncs: &HashMap<String, SyncSpec>,
+) -> Result<ResolvedAsset, CompileError> {
+    for upstream_ref in &spec.upstreams {
+        if !asset_names.contains(upstream_ref) {
+            return Err(CompileError::UnresolvedRef {
+                kind: "Asset".to_string(),
+                name: upstream_ref.clone(),
+            });
+        }
+    }
 
-    for name in sources {
-        nodes.push(GraphNode {
-            name: name.clone(),
-            kind: "Source".to_string(),
-            tags: vec![],
+    let resolved_on_drift =
+        resolve_on_drift(&metadata.name, &spec.on_drift, conditions_groups, syncs)?;
+    let connection = resolve_connection(&spec.connection, connections)?;
+
+    Ok(ResolvedAsset {
+        metadata,
+        spec,
+        resolved_on_drift,
+        connection,
+        dbt_cloud_job_ids: None,
+    })
+}
+
+/// Resolves on_drift entries: validates conditions/sync refs and expands templates.
+fn resolve_on_drift(
+    asset_name: &str,
+    on_drift: &[asset::OnDriftEntry],
+    conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
+    syncs: &HashMap<String, SyncSpec>,
+) -> Result<Vec<ResolvedOnDriftEntry>, CompileError> {
+    let mut resolved = Vec::new();
+    let mut all_conditions: Vec<DesiredCondition> = Vec::new();
+
+    for entry in on_drift {
+        let conditions = conditions_groups.get(&entry.conditions).ok_or_else(|| {
+            CompileError::UnresolvedRef {
+                kind: "Conditions".to_string(),
+                name: entry.conditions.clone(),
+            }
+        })?;
+
+        require_sync_ref(syncs, &entry.sync)?;
+        let sync_spec = &syncs[&entry.sync];
+        let resolved_sync = expand_sync_templates(sync_spec, asset_name, &entry.with);
+
+        all_conditions.extend(conditions.iter().cloned());
+        resolved.push(ResolvedOnDriftEntry {
+            conditions: conditions.clone(),
+            conditions_ref: entry.conditions.clone(),
+            sync: resolved_sync,
+            sync_ref_name: entry.sync.clone(),
         });
     }
+
+    validate_no_duplicate_condition_names(&all_conditions)?;
+    Ok(resolved)
+}
+
+/// Validates and resolves the connection reference.
+fn resolve_connection(
+    connection_ref: &Option<String>,
+    connections: &HashMap<String, ConnectionSpec>,
+) -> Result<Option<ResolvedConnection>, CompileError> {
+    let Some(conn_name) = connection_ref else {
+        return Ok(None);
+    };
+    let conn_spec = connections
+        .get(conn_name)
+        .ok_or_else(|| CompileError::UnresolvedRef {
+            kind: "Connection".to_string(),
+            name: conn_name.clone(),
+        })?;
+    Ok(Some(ResolvedConnection::DbtProfile {
+        name: conn_name.clone(),
+        profile: conn_spec.dbt_profile.profile.clone(),
+        target: conn_spec.dbt_profile.target.clone(),
+        dbt_cloud_credentials_file: conn_spec.dbt_cloud.as_ref().map(|c| {
+            c.credentials_file
+                .clone()
+                .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
+        }),
+    }))
+}
+
+fn build_graph(assets: &[ResolvedAsset]) -> Result<DependencyGraph, CompileError> {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
 
     for asset in assets {
         nodes.push(GraphNode {
@@ -597,9 +603,9 @@ fn build_graph(
             kind: "Asset".to_string(),
             tags: asset.spec.tags.clone(),
         });
-        for source_ref in &asset.spec.sources {
+        for upstream in &asset.spec.upstreams {
             edges.push(GraphEdge {
-                from: source_ref.clone(),
+                from: upstream.clone(),
                 to: asset.metadata.name.clone(),
             });
         }
@@ -679,7 +685,7 @@ struct CompiledAssetSpecYaml<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tags: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    sources: &'a Vec<String>,
+    upstreams: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     on_drift: &'a Vec<ResolvedOnDriftEntry>,
     auto_sync: bool,
@@ -706,7 +712,7 @@ pub struct CompiledAssetSpec {
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
-    pub sources: Vec<String>,
+    pub upstreams: Vec<String>,
     #[serde(default)]
     pub on_drift: Vec<ResolvedOnDriftEntry>,
     #[serde(default = "default_true")]
@@ -735,7 +741,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
             metadata: &asset.metadata,
             spec: CompiledAssetSpecYaml {
                 tags: &asset.spec.tags,
-                sources: &asset.spec.sources,
+                upstreams: &asset.spec.upstreams,
                 on_drift: &asset.resolved_on_drift,
                 auto_sync: asset.spec.auto_sync,
                 dbt_cloud_job_ids: &asset.dbt_cloud_job_ids,
@@ -773,9 +779,9 @@ spec:
   dbtProfile:
     profile: my_project";
 
-    const SOURCE_RAW_SALES: &str = "\
+    const ASSET_RAW_SALES: &str = "\
 apiVersion: nagi.io/v1alpha1
-kind: Source
+kind: Asset
 metadata:
   name: raw-sales
 spec:
@@ -825,7 +831,208 @@ spec:
         parse_kinds(yaml).unwrap()
     }
 
-    // ── resolve tests ─────────────────────────────────────────────────────
+    // ── resolve_connection tests ───────────────────────────────────────
+
+    #[test]
+    fn resolve_connection_none_returns_none() {
+        let connections = HashMap::new();
+        let result = resolve_connection(&None, &connections).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_connection_valid_ref() {
+        let mut connections = HashMap::new();
+        connections.insert(
+            "my-bq".to_string(),
+            ConnectionSpec {
+                dbt_profile: crate::kind::connection::DbtProfile {
+                    profile: "proj".to_string(),
+                    target: Some("dev".to_string()),
+                },
+                dbt_cloud: None,
+            },
+        );
+        let result = resolve_connection(&Some("my-bq".to_string()), &connections).unwrap();
+        let conn = result.unwrap();
+        assert!(
+            matches!(conn, ResolvedConnection::DbtProfile { name, profile, .. }
+            if name == "my-bq" && profile == "proj")
+        );
+    }
+
+    #[test]
+    fn resolve_connection_invalid_ref() {
+        let connections = HashMap::new();
+        let err = resolve_connection(&Some("missing".to_string()), &connections).unwrap_err();
+        assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
+            if kind == "Connection" && name == "missing"));
+    }
+
+    // ── resolve_on_drift tests ──────────────────────────────────────────
+
+    fn sample_conditions() -> HashMap<String, Vec<DesiredCondition>> {
+        HashMap::from([(
+            "daily-sla".to_string(),
+            vec![DesiredCondition::Freshness {
+                name: "freshness-24h".to_string(),
+                max_age: crate::duration::Duration::from_secs(86400),
+                column: None,
+                interval: crate::duration::Duration::from_secs(21600),
+                check_at: None,
+                evaluate_cache_ttl: None,
+            }],
+        )])
+    }
+
+    fn sample_syncs() -> HashMap<String, SyncSpec> {
+        HashMap::from([(
+            "dbt-run".to_string(),
+            SyncSpec {
+                pre: None,
+                run: crate::kind::sync::SyncStep {
+                    step_type: crate::kind::sync::StepType::Command,
+                    args: vec![
+                        "dbt".to_string(),
+                        "run".to_string(),
+                        "--select".to_string(),
+                        "{{ asset.name }}".to_string(),
+                    ],
+                    env: HashMap::new(),
+                },
+                post: None,
+            },
+        )])
+    }
+
+    #[test]
+    fn resolve_on_drift_empty() {
+        let result = resolve_on_drift("a", &[], &HashMap::new(), &HashMap::new()).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_on_drift_expands_conditions_and_templates() {
+        let entry = asset::OnDriftEntry {
+            conditions: "daily-sla".to_string(),
+            sync: "dbt-run".to_string(),
+            with: HashMap::new(),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let result = resolve_on_drift(
+            "daily-sales",
+            &[entry],
+            &sample_conditions(),
+            &sample_syncs(),
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            &result[0].conditions[0],
+            DesiredCondition::Freshness { .. }
+        ));
+        assert_eq!(result[0].sync.run.args[3], "daily-sales");
+    }
+
+    #[test]
+    fn resolve_on_drift_rejects_missing_conditions_ref() {
+        let entry = asset::OnDriftEntry {
+            conditions: "nonexistent".to_string(),
+            sync: "dbt-run".to_string(),
+            with: HashMap::new(),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let err = resolve_on_drift("a", &[entry], &HashMap::new(), &sample_syncs()).unwrap_err();
+        assert!(matches!(err, CompileError::UnresolvedRef { kind, .. } if kind == "Conditions"));
+    }
+
+    #[test]
+    fn resolve_on_drift_rejects_missing_sync_ref() {
+        let entry = asset::OnDriftEntry {
+            conditions: "daily-sla".to_string(),
+            sync: "nonexistent".to_string(),
+            with: HashMap::new(),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let err =
+            resolve_on_drift("a", &[entry], &sample_conditions(), &HashMap::new()).unwrap_err();
+        assert!(matches!(err, CompileError::UnresolvedRef { kind, .. } if kind == "Sync"));
+    }
+
+    #[test]
+    fn resolve_on_drift_rejects_duplicate_condition_names() {
+        let conditions = HashMap::from([
+            (
+                "group-a".to_string(),
+                vec![DesiredCondition::Command {
+                    name: "dup-name".to_string(),
+                    run: vec!["true".to_string()],
+                    interval: None,
+                    env: HashMap::new(),
+                    evaluate_cache_ttl: None,
+                }],
+            ),
+            (
+                "group-b".to_string(),
+                vec![DesiredCondition::Command {
+                    name: "dup-name".to_string(),
+                    run: vec!["true".to_string()],
+                    interval: None,
+                    env: HashMap::new(),
+                    evaluate_cache_ttl: None,
+                }],
+            ),
+        ]);
+        let entries = vec![
+            asset::OnDriftEntry {
+                conditions: "group-a".to_string(),
+                sync: "dbt-run".to_string(),
+                with: HashMap::new(),
+                merge_position: asset::MergePosition::BeforeOrigin,
+            },
+            asset::OnDriftEntry {
+                conditions: "group-b".to_string(),
+                sync: "dbt-run".to_string(),
+                with: HashMap::new(),
+                merge_position: asset::MergePosition::BeforeOrigin,
+            },
+        ];
+        let err = resolve_on_drift("a", &entries, &conditions, &sample_syncs()).unwrap_err();
+        assert!(matches!(err, CompileError::Kind(_)));
+    }
+
+    #[test]
+    fn resolve_on_drift_with_variables() {
+        let syncs = HashMap::from([(
+            "dbt-run".to_string(),
+            SyncSpec {
+                pre: None,
+                run: crate::kind::sync::SyncStep {
+                    step_type: crate::kind::sync::StepType::Command,
+                    args: vec![
+                        "dbt".to_string(),
+                        "run".to_string(),
+                        "--select".to_string(),
+                        "{{ sync.selector }}".to_string(),
+                    ],
+                    env: HashMap::new(),
+                },
+                post: None,
+            },
+        )]);
+        let entry = asset::OnDriftEntry {
+            conditions: "daily-sla".to_string(),
+            sync: "dbt-run".to_string(),
+            with: HashMap::from([("selector".to_string(), "+daily_sales".to_string())]),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let result =
+            resolve_on_drift("daily-sales", &[entry], &sample_conditions(), &syncs).unwrap();
+        assert_eq!(result[0].sync.run.args[3], "+daily_sales");
+    }
+
+    // ── resolve (integration) tests ─────────────────────────────────────
 
     #[test]
     fn resolve_minimal_asset() {
@@ -845,31 +1052,7 @@ spec: {}",
     }
 
     #[test]
-    fn resolve_expands_on_drift_conditions_ref() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            SYNC_DBT_RUN,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: dbt-run",
-        ]));
-        let output = resolve(resources).unwrap();
-        assert_eq!(output.assets[0].resolved_on_drift.len(), 1);
-        assert_eq!(output.assets[0].resolved_on_drift[0].conditions.len(), 1);
-        assert!(matches!(
-            &output.assets[0].resolved_on_drift[0].conditions[0],
-            DesiredCondition::Freshness { .. }
-        ));
-    }
-
-    #[test]
-    fn resolve_rejects_unresolved_source_ref() {
+    fn resolve_rejects_unresolved_upstream_ref() {
         let resources = parse(
             "\
 apiVersion: nagi.io/v1alpha1
@@ -877,50 +1060,12 @@ kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sources:
-    - nonexistent-source",
+  upstreams:
+    - nonexistent-asset",
         );
         let err = resolve(resources).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
-            if kind == "Source" && name == "nonexistent-source"));
-    }
-
-    #[test]
-    fn resolve_rejects_unresolved_sync_ref_in_on_drift() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: nonexistent-sync",
-        ]));
-        let err = resolve(resources).unwrap_err();
-        assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
-            if kind == "Sync" && name == "nonexistent-sync"));
-    }
-
-    #[test]
-    fn resolve_rejects_unresolved_desired_group_ref() {
-        let resources = parse(&yaml_docs(&[
-            SYNC_DBT_RUN,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: nonexistent-group
-      sync: dbt-run",
-        ]));
-        let err = resolve(resources).unwrap_err();
-        assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
-            if kind == "Conditions" && name == "nonexistent-group"));
+            if kind == "Asset" && name == "nonexistent-asset"));
     }
 
     #[test]
@@ -1144,7 +1289,7 @@ spec:
     fn resolve_builds_dependency_graph() {
         let resources = parse(&yaml_docs(&[
             CONNECTION_MY_BQ,
-            SOURCE_RAW_SALES,
+            ASSET_RAW_SALES,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
@@ -1152,7 +1297,7 @@ metadata:
   name: daily-sales
 spec:
   tags: [finance]
-  sources:
+  upstreams:
     - raw-sales",
         ]));
         let output = resolve(resources).unwrap();
@@ -1172,227 +1317,90 @@ spec:
     }
 
     #[test]
-    fn resolve_rejects_duplicate_conditions_across_on_drift_entries() {
-        let resources = parse(&yaml_docs(&[
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Conditions
-metadata:
-  name: checks-a
-spec:
-  - name: check
-    type: SQL
-    query: \"SELECT true\"",
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Conditions
-metadata:
-  name: checks-b
-spec:
-  - name: check
-    type: SQL
-    query: \"SELECT true\"",
-            SYNC_DBT_RUN,
-            SYNC_DBT_FULL,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: checks-a
-      sync: dbt-run
-    - conditions: checks-b
-      sync: dbt-full",
-        ]));
-        let err = resolve(resources).unwrap_err();
-        assert!(matches!(err, CompileError::Kind(_)));
-    }
-
-    #[test]
-    fn resolve_on_drift_with_sync_template_expansion() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            SYNC_DBT_RUN,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: dbt-run",
-        ]));
-        let output = resolve(resources).unwrap();
-        let resolved = &output.assets[0];
-        assert_eq!(
-            resolved.resolved_on_drift[0].sync.run.args,
-            vec!["dbt", "run", "--select", "daily-sales"]
-        );
-    }
-
-    // ── sync template expansion tests ──────────────────────────────────────
-
-    #[test]
-    fn resolve_expands_with_variables_in_on_drift_sync() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: dbt-run
-spec:
-  run:
-    type: Command
-    args: [\"dbt\", \"run\", \"--select\", \"{{ sync.selector }}\"]",
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: dbt-run
-      with:
-        selector: \"+daily_sales\"",
-        ]));
-        let output = resolve(resources).unwrap();
-        let resolved = &output.assets[0];
-        assert_eq!(
-            resolved.resolved_on_drift[0].sync.run.args,
-            vec!["dbt", "run", "--select", "+daily_sales"]
-        );
-    }
-
-    #[test]
-    fn resolve_expands_templates_in_all_steps() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: full-sync
-spec:
-  pre:
-    type: Command
-    args: [\"echo\", \"pre-{{ asset.name }}\"]
-  run:
-    type: Command
-    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]
-  post:
-    type: Command
-    args: [\"echo\", \"post-{{ asset.name }}\"]",
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: full-sync",
-        ]));
-        let output = resolve(resources).unwrap();
-        let sync = &output.assets[0].resolved_on_drift[0].sync;
-        assert_eq!(
-            sync.pre.as_ref().unwrap().args,
-            vec!["echo", "pre-daily-sales"]
-        );
-        assert_eq!(sync.run.args, vec!["dbt", "run", "--select", "daily-sales"]);
-        assert_eq!(
-            sync.post.as_ref().unwrap().args,
-            vec!["echo", "post-daily-sales"]
-        );
-    }
-
-    #[test]
-    fn resolve_multiple_on_drift_with_different_syncs() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Conditions
-metadata:
-  name: quality-checks
-spec:
-  - name: no-negative-amount
-    type: SQL
-    query: \"SELECT COUNT(*) = 0 FROM daily_sales WHERE amount < 0\"",
-            SYNC_DBT_RUN,
-            SYNC_DBT_FULL,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: dbt-run
-    - conditions: quality-checks
-      sync: dbt-full",
-        ]));
-        let output = resolve(resources).unwrap();
-        let resolved = &output.assets[0];
-        assert_eq!(resolved.resolved_on_drift.len(), 2);
-        assert_eq!(
-            resolved.resolved_on_drift[0].sync.run.args,
-            vec!["dbt", "run", "--select", "daily-sales"]
-        );
-        assert_eq!(
-            resolved.resolved_on_drift[1].sync.run.args,
-            vec!["dbt", "run", "--full-refresh", "--select", "daily-sales"]
-        );
-    }
-
-    #[test]
-    fn resolve_no_on_drift_no_resolved_syncs() {
+    fn resolve_asset_chain_dependency() {
         let resources = parse(
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
-  name: daily-sales
-spec: {}",
+  name: raw
+spec: {}
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: staging
+spec:
+  upstreams: [raw]
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: mart
+spec:
+  upstreams: [staging]",
         );
         let output = resolve(resources).unwrap();
-        assert!(output.assets[0].resolved_on_drift.is_empty());
+        assert_eq!(output.assets.len(), 3);
+        assert_eq!(output.graph.nodes.len(), 3);
+        assert!(output.graph.nodes.iter().all(|n| n.kind == "Asset"));
+        assert_eq!(output.graph.edges.len(), 2);
+
+        let edge_pairs: Vec<(&str, &str)> = output
+            .graph
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        assert!(edge_pairs.contains(&("raw", "staging")));
+        assert!(edge_pairs.contains(&("staging", "mart")));
     }
 
     #[test]
-    fn resolve_combines_asset_name_and_with_variables() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: dbt-run
-spec:
-  run:
-    type: Command
-    args: [\"dbt\", \"run\", \"--select\", \"{{ sync.selector }}\", \"--vars\", \"name={{ asset.name }}\"]",
+    fn resolve_diamond_dependency() {
+        let resources = parse(
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
-  name: daily-sales
+  name: root
+spec: {}
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: left
 spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: dbt-run
-      with:
-        selector: \"+daily_sales\"",
-        ]));
+  upstreams: [root]
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: right
+spec:
+  upstreams: [root]
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: sink
+spec:
+  upstreams: [left, right]",
+        );
         let output = resolve(resources).unwrap();
-        let args = &output.assets[0].resolved_on_drift[0].sync.run.args;
-        assert_eq!(args[3], "+daily_sales");
-        assert_eq!(args[5], "name=daily-sales");
+        assert_eq!(output.assets.len(), 4);
+        assert_eq!(output.graph.edges.len(), 4);
+
+        let edge_pairs: Vec<(&str, &str)> = output
+            .graph
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        assert!(edge_pairs.contains(&("root", "left")));
+        assert!(edge_pairs.contains(&("root", "right")));
+        assert!(edge_pairs.contains(&("left", "sink")));
+        assert!(edge_pairs.contains(&("right", "sink")));
     }
 
     // ── write_output tests ────────────────────────────────────────────────
@@ -1430,14 +1438,15 @@ spec: {}",
         let target = tmp.path().join("target");
 
         let resources = parse(&yaml_docs(&[
-            SOURCE_RAW_SALES,
+            CONNECTION_MY_BQ,
+            ASSET_RAW_SALES,
             "\
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
 spec:
-  sources:
+  upstreams:
     - raw-sales",
         ]));
         let output = resolve(resources).unwrap();
@@ -1601,10 +1610,8 @@ spec:
         let expanded = expand_origins(resources, &manifests).unwrap();
 
         let assets: Vec<_> = expanded.iter().filter(|r| r.kind() == "Asset").collect();
-        assert_eq!(assets.len(), 2);
-
-        let sources: Vec<_> = expanded.iter().filter(|r| r.kind() == "Source").collect();
-        assert_eq!(sources.len(), 1);
+        // 1 dbt source Asset + 2 model Assets
+        assert_eq!(assets.len(), 3);
 
         let syncs: Vec<_> = expanded.iter().filter(|r| r.kind() == "Sync").collect();
         // dbt-run (user) + dbt-tag-finance (auto)
@@ -1613,7 +1620,7 @@ spec:
 
     #[test]
     fn expand_origins_noop_without_origin() {
-        let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SOURCE_RAW_SALES]));
+        let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, ASSET_RAW_SALES]));
         let count = resources.len();
         let expanded = expand_origins(resources, &HashMap::new()).unwrap();
         assert_eq!(expanded.len(), count);
@@ -1633,13 +1640,31 @@ spec:
         let expanded = expand_origins(resources, &manifests).unwrap();
         let output = resolve(expanded).unwrap();
 
-        assert_eq!(output.assets.len(), 2);
+        // 1 dbt source Asset + 2 model Assets
+        assert_eq!(output.assets.len(), 3);
         let customer_asset = output
             .assets
             .iter()
             .find(|a| a.metadata.name == "customers")
             .unwrap();
         assert!(!customer_asset.resolved_on_drift.is_empty());
+
+        // Verify model-to-model dependency edge exists (previously discarded).
+        let edge_pairs: Vec<(&str, &str)> = output
+            .graph
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        assert!(
+            edge_pairs.contains(&("stg_customers", "customers")),
+            "model-to-model dependency must produce a graph edge: edges = {edge_pairs:?}"
+        );
+        // raw.customers → stg_customers edge
+        assert!(
+            edge_pairs.contains(&("raw.customers", "stg_customers")),
+            "upstream dependency must produce a graph edge: edges = {edge_pairs:?}"
+        );
     }
 
     #[test]

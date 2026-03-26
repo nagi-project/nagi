@@ -28,9 +28,12 @@ pub struct AssetSpec {
     /// Tags for filtering with `--select tag:X`.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Names of upstream Source resources.
+    /// Name of the Connection resource for DB access.
     #[serde(default)]
-    pub sources: Vec<String>,
+    pub connection: Option<String>,
+    /// Names of upstream Asset resources.
+    #[serde(default)]
+    pub upstreams: Vec<String>,
     /// Condition-sync pairs evaluated in order. First entry whose conditions detect drift
     /// determines which sync to run. When omitted, the Asset is always Ready.
     #[serde(default)]
@@ -256,7 +259,7 @@ mod tests {
     #[test]
     fn parse_full_asset_spec() {
         let yaml = r#"
-sources:
+upstreams:
   - raw-sales
   - customer-master
 onDrift:
@@ -270,9 +273,9 @@ autoSync: true
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
-        assert_eq!(spec.sources.len(), 2);
-        assert_eq!(spec.sources[0], "raw-sales");
-        assert_eq!(spec.sources[1], "customer-master");
+        assert_eq!(spec.upstreams.len(), 2);
+        assert_eq!(spec.upstreams[0], "raw-sales");
+        assert_eq!(spec.upstreams[1], "customer-master");
 
         assert_eq!(spec.on_drift.len(), 2);
         assert_eq!(spec.on_drift[0].conditions, "daily-sla");
@@ -296,7 +299,7 @@ onDrift:
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
 
-        assert!(spec.sources.is_empty());
+        assert!(spec.upstreams.is_empty());
         assert_eq!(spec.on_drift.len(), 1);
         assert!(spec.auto_sync, "autoSync should default to true");
     }
@@ -304,7 +307,7 @@ onDrift:
     #[test]
     fn parse_asset_without_on_drift() {
         let yaml = r#"
-sources:
+upstreams:
   - raw-sales
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
@@ -341,7 +344,8 @@ autoSync: false
     fn validate_accepts_empty_on_drift() {
         let spec = AssetSpec {
             tags: vec![],
-            sources: vec![],
+            connection: None,
+            upstreams: vec![],
             on_drift: vec![],
             auto_sync: true,
             evaluate_cache_ttl: None,
@@ -353,7 +357,8 @@ autoSync: false
     fn validate_accepts_valid_spec() {
         let spec = AssetSpec {
             tags: vec![],
-            sources: vec![],
+            connection: None,
+            upstreams: vec![],
             on_drift: vec![OnDriftEntry {
                 conditions: "daily-sla".to_string(),
                 sync: "dbt-run".to_string(),
@@ -370,7 +375,8 @@ autoSync: false
     fn validate_rejects_empty_conditions_ref() {
         let spec = AssetSpec {
             tags: vec![],
-            sources: vec![],
+            connection: None,
+            upstreams: vec![],
             on_drift: vec![OnDriftEntry {
                 conditions: "".to_string(),
                 sync: "dbt-run".to_string(),
@@ -388,7 +394,8 @@ autoSync: false
     fn validate_rejects_empty_sync_ref() {
         let spec = AssetSpec {
             tags: vec![],
-            sources: vec![],
+            connection: None,
+            upstreams: vec![],
             on_drift: vec![OnDriftEntry {
                 conditions: "daily-sla".to_string(),
                 sync: "".to_string(),

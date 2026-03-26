@@ -91,14 +91,6 @@ mod tests {
         }
     }
 
-    fn source_node(name: &str) -> GraphNode {
-        GraphNode {
-            name: name.to_string(),
-            kind: "Source".to_string(),
-            tags: vec![],
-        }
-    }
-
     fn edge(from: &str, to: &str) -> GraphEdge {
         GraphEdge {
             from: from.to_string(),
@@ -129,25 +121,25 @@ mod tests {
             edges: vec![],
         } => vec![vec!["a".to_string()], vec!["b".to_string()]];
 
-        chain_via_source: DependencyGraph {
-            nodes: vec![source_node("s"), asset_node("a"), asset_node("b")],
+        chain_via_upstream: DependencyGraph {
+            nodes: vec![asset_node("a"), asset_node("b"), asset_node("s")],
             edges: vec![edge("s", "a"), edge("s", "b")],
-        } => vec![vec!["a".to_string(), "b".to_string()]];
+        } => vec![vec!["a".to_string(), "b".to_string(), "s".to_string()]];
 
         two_separate_chains: DependencyGraph {
             nodes: vec![
-                source_node("s1"), asset_node("a1"),
-                source_node("s2"), asset_node("a2"),
+                asset_node("a1"), asset_node("s1"),
+                asset_node("a2"), asset_node("s2"),
             ],
             edges: vec![edge("s1", "a1"), edge("s2", "a2")],
-        } => vec![vec!["a1".to_string()], vec!["a2".to_string()]];
+        } => vec![vec!["a1".to_string(), "s1".to_string()], vec!["a2".to_string(), "s2".to_string()]];
 
         three_assets_one_component: DependencyGraph {
             nodes: vec![
-                source_node("raw"), asset_node("daily"), asset_node("monthly"), asset_node("raw-asset"),
+                asset_node("raw"), asset_node("daily"), asset_node("monthly"), asset_node("raw-asset"),
             ],
             edges: vec![edge("raw", "daily"), edge("raw", "monthly"), edge("raw", "raw-asset")],
-        } => vec![vec!["daily".to_string(), "monthly".to_string(), "raw-asset".to_string()]];
+        } => vec![vec!["daily".to_string(), "monthly".to_string(), "raw".to_string(), "raw-asset".to_string()]];
 
         empty_graph: DependencyGraph {
             nodes: vec![],

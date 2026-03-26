@@ -163,7 +163,6 @@ fn spawn_evaluates(
     evaluate_tasks: &mut JoinSet<(String, reconciler::EvaluateOutcome)>,
     yaml_map: &HashMap<&str, &str>,
     cache_dir: &Option<PathBuf>,
-    source_stats_dir: &Option<PathBuf>,
     max_evaluate: Option<usize>,
 ) {
     while let Some(name) = state.next_spawnable(max_evaluate) {
@@ -173,7 +172,6 @@ fn spawn_evaluates(
                 name,
                 yaml.to_string(),
                 cache_dir.clone(),
-                source_stats_dir.clone(),
                 skip_cache,
             ));
         }
@@ -268,7 +266,6 @@ pub(super) async fn run_controller(
         assets,
         edges,
         cache_dir,
-        source_stats_dir,
     } = input;
     let BackendStores {
         sync_lock,
@@ -307,7 +304,6 @@ pub(super) async fn run_controller(
             &mut evaluate_tasks,
             &yaml_map,
             &cache_dir,
-            &source_stats_dir,
             concurrency.max_evaluate,
         );
         spawn_syncs(
@@ -364,7 +360,6 @@ pub(super) struct ControllerInput {
     pub(super) assets: Vec<AssetEntry>,
     pub(super) edges: Vec<GraphEdge>,
     pub(super) cache_dir: Option<PathBuf>,
-    pub(super) source_stats_dir: Option<PathBuf>,
 }
 
 /// Builds per-component [`ControllerInput`]s from the graph and compiled assets.
@@ -423,7 +418,6 @@ pub(super) fn build_controller_inputs(
             assets,
             edges,
             cache_dir: None,
-            source_stats_dir: None,
         });
     }
 
@@ -435,7 +429,7 @@ pub(super) fn build_controller_inputs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::{GraphEdge, GraphNode};
+    use crate::compile::GraphNode;
     use crate::notify::NotifyError;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -444,21 +438,6 @@ mod tests {
             name: name.to_string(),
             kind: "Asset".to_string(),
             tags: vec![],
-        }
-    }
-
-    fn source_node(name: &str) -> GraphNode {
-        GraphNode {
-            name: name.to_string(),
-            kind: "Source".to_string(),
-            tags: vec![],
-        }
-    }
-
-    fn edge(from: &str, to: &str) -> GraphEdge {
-        GraphEdge {
-            from: from.to_string(),
-            to: to.to_string(),
         }
     }
 
@@ -545,13 +524,8 @@ mod tests {
     #[test]
     fn build_controller_inputs_splits_components() {
         let graph = DependencyGraph {
-            nodes: vec![
-                source_node("s1"),
-                asset_node("a1"),
-                source_node("s2"),
-                asset_node("a2"),
-            ],
-            edges: vec![edge("s1", "a1"), edge("s2", "a2")],
+            nodes: vec![asset_node("a1"), asset_node("a2")],
+            edges: vec![],
         };
         let yaml = |name: &str| {
             format!("apiVersion: v1\nmetadata:\n  name: {name}\nspec:\n  desiredSets: []\n")

@@ -485,7 +485,8 @@ fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig
             name: asset_name.clone(),
         },
         spec: kind::AssetSpec {
-            sources: vec![],
+            connection: None,
+            upstreams: vec![],
             on_drift: vec![kind::asset::OnDriftEntry {
                 conditions: conditions_name,
                 sync: sync_name,

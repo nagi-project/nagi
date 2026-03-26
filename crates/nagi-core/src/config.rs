@@ -125,10 +125,6 @@ impl NagiDir {
         self.0.join("suspended")
     }
 
-    pub fn source_stats_dir(&self) -> PathBuf {
-        self.0.join("source_stats")
-    }
-
     pub fn watermarks_dir(&self) -> PathBuf {
         self.0.join("watermarks")
     }
@@ -498,10 +494,6 @@ notify:
             PathBuf::from("/data/nagi/suspended")
         );
         assert_eq!(
-            config.nagi_dir.source_stats_dir(),
-            PathBuf::from("/data/nagi/source_stats")
-        );
-        assert_eq!(
             config.nagi_dir.watermarks_dir(),
             PathBuf::from("/data/nagi/watermarks")
         );
@@ -623,7 +615,6 @@ export:
         nagi_dir_cache_dir:      cache_dir      => "/state/cache";
         nagi_dir_locks_dir:      locks_dir      => "/state/locks";
         nagi_dir_suspended_dir:  suspended_dir  => "/state/suspended";
-        nagi_dir_source_stats:   source_stats_dir => "/state/source_stats";
         nagi_dir_watermarks:     watermarks_dir => "/state/watermarks";
     }
 

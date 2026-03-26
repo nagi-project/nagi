@@ -142,10 +142,8 @@ fn load_controller_inputs(
             .map(PathBuf::from)
             .unwrap_or_else(|| config.nagi_dir.evaluate_cache_dir()),
     );
-    let resolved_stats = Some(config.nagi_dir.source_stats_dir());
     for input in &mut inputs {
         input.cache_dir = resolved_cache.clone();
-        input.source_stats_dir = resolved_stats.clone();
     }
 
     Ok(inputs)
@@ -374,7 +372,7 @@ mod tests {
 
         for name in asset_names {
             let yaml = format!(
-                "apiVersion: nagi.io/v1alpha1\nmetadata:\n  name: {name}\nspec:\n  sources: []\n  onDrift: []\n  autoSync: false\n  tags: []\n"
+                "apiVersion: nagi.io/v1alpha1\nmetadata:\n  name: {name}\nspec:\n  upstreams: []\n  onDrift: []\n  autoSync: false\n  tags: []\n"
             );
             std::fs::write(assets_dir.join(format!("{name}.yaml")), yaml).unwrap();
         }
@@ -403,7 +401,6 @@ mod tests {
         // Two independent assets → two components
         assert_eq!(inputs.len(), 2);
         assert!(inputs[0].cache_dir.is_some());
-        assert!(inputs[0].source_stats_dir.is_some());
     }
 
     #[test]

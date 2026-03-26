@@ -8,10 +8,9 @@ use crate::compile::CompiledAsset;
 use crate::evaluate::{AssetEvalResult, ConditionResult, EvaluateError};
 use crate::log::LogStore;
 use crate::notify::{Notifier, NotifyEvent};
-use crate::storage::local::{LocalCache, LocalConditionCache, LocalSourceStatsCache};
+use crate::storage::local::{LocalCache, LocalConditionCache};
 use crate::storage::{
-    Cache, ConditionCache, ConditionCacheEntry, ConditionCacheMap, SourceStatsCache, StorageError,
-    SyncLock,
+    Cache, ConditionCache, ConditionCacheEntry, ConditionCacheMap, StorageError, SyncLock,
 };
 use crate::sync::SyncError;
 
@@ -21,17 +20,11 @@ use crate::sync::SyncError;
 /// returned future is `Send` and can be spawned on a `JoinSet`.
 /// (`evaluate_from_compiled` cannot be used here because `LogStore` is `!Send`.)
 ///
-/// When `source_stats_dir` is provided and the asset has sources with a
-/// connection, checks `table_stats` for each source. If all source stats are
-/// unchanged from the cached values, returns the cached evaluate result (skipping
-/// the actual evaluation queries).
-///
 /// When `skip_cache` is false, conditions with a valid TTL cache entry are
 /// reused without executing the actual query/command.
 pub async fn evaluate_and_cache(
     yaml: &str,
     cache_dir: Option<&Path>,
-    source_stats_dir: Option<&Path>,
     skip_cache: bool,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let compiled: CompiledAsset =
@@ -47,26 +40,6 @@ pub async fn evaluate_and_cache(
         .map(PathBuf::from)
         .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
     let evaluate_cache = LocalCache::new(cache_path);
-
-    let has_sources = conn.is_some() && !compiled.spec.sources.is_empty();
-    let stats_cache = if has_sources {
-        Some(LocalSourceStatsCache::new(
-            source_stats_dir
-                .map(PathBuf::from)
-                .unwrap_or_else(|| nagi_dir.source_stats_dir()),
-        ))
-    } else {
-        None
-    };
-
-    // Source change detection: skip evaluate if all sources unchanged.
-    if let (Some(conn_ref), Some(sc)) = (conn.as_deref(), stats_cache.as_ref()) {
-        if let Some(cached_result) =
-            check_sources_unchanged(&compiled, conn_ref, sc, &evaluate_cache).await
-        {
-            return Ok(cached_result);
-        }
-    }
 
     // Condition-level TTL cache: collect still-valid cached results.
     let condition_cache = LocalConditionCache::new(nagi_dir.evaluate_cache_dir());
@@ -90,10 +63,6 @@ pub async fn evaluate_and_cache(
 
     // Update condition cache with fresh results.
     update_condition_cache(&compiled, &result, &condition_cache);
-
-    if let (Some(conn_ref), Some(sc)) = (conn.as_deref(), stats_cache.as_ref()) {
-        update_source_stats(&compiled, conn_ref, sc).await;
-    }
 
     Ok(result)
 }
@@ -166,46 +135,8 @@ fn update_condition_cache(
     }
 }
 
-/// Returns the cached evaluate result if all sources have unchanged stats.
+/// Returns the cached evaluate result if available.
 /// Returns `None` if any source changed or if there's no cached result.
-async fn check_sources_unchanged(
-    compiled: &CompiledAsset,
-    conn: &dyn crate::db::Connection,
-    stats_cache: &dyn SourceStatsCache,
-    evaluate_cache: &dyn Cache,
-) -> Option<AssetEvalResult> {
-    for source in &compiled.spec.sources {
-        let current = match conn.table_stats(source).await {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
-        let cached = match stats_cache.read(source) {
-            Ok(Some(s)) => s,
-            _ => return None,
-        };
-        if current != cached {
-            return None;
-        }
-    }
-    // All sources unchanged — return cached evaluate result if available.
-    evaluate_cache.read(&compiled.metadata.name).ok().flatten()
-}
-
-/// Updates the source stats cache with current values. Best-effort (errors logged).
-async fn update_source_stats(
-    compiled: &CompiledAsset,
-    conn: &dyn crate::db::Connection,
-    stats_cache: &dyn SourceStatsCache,
-) {
-    for source in &compiled.spec.sources {
-        if let Ok(stats) = conn.table_stats(source).await {
-            if let Err(e) = stats_cache.write(source, &stats) {
-                tracing::warn!(source = %source, error = %e, "failed to cache source stats");
-            }
-        }
-    }
-}
-
 /// Result of a spawned evaluation, including timestamps for logging.
 pub struct EvaluateOutcome {
     pub result: Result<AssetEvalResult, EvaluateError>,
@@ -219,17 +150,10 @@ pub async fn spawn_evaluate(
     asset_name: String,
     yaml: String,
     cache_dir: Option<PathBuf>,
-    source_stats_dir: Option<PathBuf>,
     skip_cache: bool,
 ) -> (String, EvaluateOutcome) {
     let started_at = chrono::Utc::now().to_rfc3339();
-    let result = evaluate_and_cache(
-        &yaml,
-        cache_dir.as_deref(),
-        source_stats_dir.as_deref(),
-        skip_cache,
-    )
-    .await;
+    let result = evaluate_and_cache(&yaml, cache_dir.as_deref(), skip_cache).await;
     let finished_at = chrono::Utc::now().to_rfc3339();
     (
         asset_name,
@@ -417,146 +341,10 @@ fn storage_to_sync_error(e: StorageError) -> SyncError {
 mod tests {
     use super::*;
     use crate::compile::CompiledAssetSpec;
-    use crate::db::{ConnectionError, TableStats};
     use crate::evaluate::{AssetEvalResult, ConditionResult, ConditionStatus};
     use crate::kind::Metadata;
     use crate::storage::StorageError;
-    use async_trait::async_trait;
     use std::sync::Mutex;
-
-    struct MockConn {
-        stats: TableStats,
-    }
-
-    #[async_trait]
-    impl crate::db::Connection for MockConn {
-        async fn query_scalar(&self, _sql: &str) -> Result<serde_json::Value, ConnectionError> {
-            Ok(serde_json::Value::Bool(true))
-        }
-
-        fn freshness_sql(&self, _asset_name: &str, _column: Option<&str>) -> String {
-            String::new()
-        }
-
-        fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
-            Box::new(sqlparser::dialect::BigQueryDialect {})
-        }
-
-        async fn table_stats(&self, _table_name: &str) -> Result<TableStats, ConnectionError> {
-            Ok(self.stats.clone())
-        }
-
-        async fn execute_sql(&self, _sql: &str) -> Result<(), ConnectionError> {
-            Ok(())
-        }
-
-        async fn load_jsonl(
-            &self,
-            _dataset: &str,
-            _table: &str,
-            _jsonl_path: &std::path::Path,
-        ) -> Result<(), ConnectionError> {
-            Ok(())
-        }
-    }
-
-    struct MockStatsCache {
-        inner: Mutex<std::collections::HashMap<String, TableStats>>,
-    }
-
-    impl MockStatsCache {
-        fn new() -> Self {
-            Self {
-                inner: Mutex::new(std::collections::HashMap::new()),
-            }
-        }
-
-        fn set(&self, name: &str, stats: TableStats) {
-            self.inner.lock().unwrap().insert(name.to_string(), stats);
-        }
-    }
-
-    impl SourceStatsCache for MockStatsCache {
-        fn read(&self, source_name: &str) -> Result<Option<TableStats>, StorageError> {
-            Ok(self.inner.lock().unwrap().get(source_name).cloned())
-        }
-
-        fn write(&self, source_name: &str, stats: &TableStats) -> Result<(), StorageError> {
-            self.inner
-                .lock()
-                .unwrap()
-                .insert(source_name.to_string(), stats.clone());
-            Ok(())
-        }
-    }
-
-    struct MockEvaluateCache {
-        inner: Mutex<std::collections::HashMap<String, AssetEvalResult>>,
-    }
-
-    impl MockEvaluateCache {
-        fn new() -> Self {
-            Self {
-                inner: Mutex::new(std::collections::HashMap::new()),
-            }
-        }
-
-        fn set(&self, result: AssetEvalResult) {
-            self.inner
-                .lock()
-                .unwrap()
-                .insert(result.asset_name.clone(), result);
-        }
-    }
-
-    impl Cache for MockEvaluateCache {
-        fn write(&self, result: &AssetEvalResult) -> Result<(), StorageError> {
-            self.inner
-                .lock()
-                .unwrap()
-                .insert(result.asset_name.clone(), result.clone());
-            Ok(())
-        }
-
-        fn read(&self, asset_name: &str) -> Result<Option<AssetEvalResult>, StorageError> {
-            Ok(self.inner.lock().unwrap().get(asset_name).cloned())
-        }
-
-        fn list(&self) -> Result<Vec<AssetEvalResult>, StorageError> {
-            Ok(self.inner.lock().unwrap().values().cloned().collect())
-        }
-    }
-
-    fn sample_compiled(sources: Vec<&str>) -> CompiledAsset {
-        CompiledAsset {
-            api_version: "v1".to_string(),
-            metadata: Metadata {
-                name: "test-asset".to_string(),
-            },
-            spec: CompiledAssetSpec {
-                tags: vec![],
-                sources: sources.into_iter().map(|s| s.to_string()).collect(),
-                on_drift: vec![],
-                auto_sync: true,
-                dbt_cloud_job_ids: None,
-                evaluate_cache_ttl: None,
-            },
-            connection: None,
-        }
-    }
-
-    fn sample_evaluate_result() -> AssetEvalResult {
-        AssetEvalResult {
-            asset_name: "test-asset".to_string(),
-            ready: true,
-            conditions: vec![ConditionResult {
-                condition_name: "check".to_string(),
-                condition_type: "SQL".to_string(),
-                status: ConditionStatus::Ready,
-            }],
-            evaluation_id: None,
-        }
-    }
 
     struct MockSyncLock {
         /// Sequence of results to return from `acquire`, in order.
@@ -632,117 +420,6 @@ mod tests {
             vec![true], 1 => true, 1;
         acquire_single_attempt_fails:
             vec![false], 1 => false, 1;
-    }
-
-    #[tokio::test]
-    async fn check_sources_unchanged_returns_cached_when_stats_match() {
-        let conn = MockConn {
-            stats: TableStats {
-                num_rows: 100,
-                num_bytes: 2048,
-            },
-        };
-        let stats_cache = MockStatsCache::new();
-        stats_cache.set(
-            "src_table",
-            TableStats {
-                num_rows: 100,
-                num_bytes: 2048,
-            },
-        );
-        let evaluate_cache = MockEvaluateCache::new();
-        evaluate_cache.set(sample_evaluate_result());
-
-        let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
-
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().asset_name, "test-asset");
-    }
-
-    #[tokio::test]
-    async fn check_sources_unchanged_returns_none_when_stats_differ() {
-        let conn = MockConn {
-            stats: TableStats {
-                num_rows: 200,
-                num_bytes: 4096,
-            },
-        };
-        let stats_cache = MockStatsCache::new();
-        stats_cache.set(
-            "src_table",
-            TableStats {
-                num_rows: 100,
-                num_bytes: 2048,
-            },
-        );
-        let evaluate_cache = MockEvaluateCache::new();
-        evaluate_cache.set(sample_evaluate_result());
-
-        let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
-
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn check_sources_unchanged_returns_none_when_no_cached_stats() {
-        let conn = MockConn {
-            stats: TableStats {
-                num_rows: 100,
-                num_bytes: 2048,
-            },
-        };
-        let stats_cache = MockStatsCache::new();
-        let evaluate_cache = MockEvaluateCache::new();
-        evaluate_cache.set(sample_evaluate_result());
-
-        let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
-
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn check_sources_unchanged_returns_none_when_no_cached_eval() {
-        let conn = MockConn {
-            stats: TableStats {
-                num_rows: 100,
-                num_bytes: 2048,
-            },
-        };
-        let stats_cache = MockStatsCache::new();
-        stats_cache.set(
-            "src_table",
-            TableStats {
-                num_rows: 100,
-                num_bytes: 2048,
-            },
-        );
-        let evaluate_cache = MockEvaluateCache::new();
-
-        let compiled = sample_compiled(vec!["src_table"]);
-        let result = check_sources_unchanged(&compiled, &conn, &stats_cache, &evaluate_cache).await;
-
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn update_source_stats_writes_current_values() {
-        let conn = MockConn {
-            stats: TableStats {
-                num_rows: 500,
-                num_bytes: 8192,
-            },
-        };
-        let stats_cache = MockStatsCache::new();
-        let compiled = sample_compiled(vec!["src_table"]);
-
-        update_source_stats(&compiled, &conn, &stats_cache).await;
-
-        let cached = stats_cache.read("src_table").unwrap().unwrap();
-        assert_eq!(cached.num_rows, 500);
-        assert_eq!(cached.num_bytes, 8192);
     }
 
     // ── TTL cache tests ────────────────────────────────────────────────────
@@ -821,7 +498,7 @@ mod tests {
             },
             spec: CompiledAssetSpec {
                 tags: vec![],
-                sources: vec![],
+                upstreams: vec![],
                 on_drift: vec![ResolvedOnDriftEntry {
                     conditions,
                     conditions_ref: "test-cond".to_string(),

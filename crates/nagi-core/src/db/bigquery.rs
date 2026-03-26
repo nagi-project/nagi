@@ -362,39 +362,6 @@ impl Connection for BigQueryConnection {
         Box::new(sqlparser::dialect::BigQueryDialect {})
     }
 
-    async fn table_stats(&self, table_name: &str) -> Result<super::TableStats, ConnectionError> {
-        let token = self.access_token().await?;
-        let (dataset, table) = match table_name.split_once('.') {
-            Some((d, t)) => (d, t),
-            None => (self.config.dataset.as_str(), table_name),
-        };
-        let url = format!(
-            "https://bigquery.googleapis.com/bigquery/v2/projects/{}/datasets/{}/tables/{}",
-            self.config.project, dataset, table,
-        );
-
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct TableResponse {
-            num_rows: Option<String>,
-            num_bytes: Option<String>,
-        }
-
-        let resp: TableResponse = self
-            .client
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        Ok(super::TableStats {
-            num_rows: parse_u64_field(&resp.num_rows, "numRows")?,
-            num_bytes: parse_u64_field(&resp.num_bytes, "numBytes")?,
-        })
-    }
-
     async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError> {
         let token = self.access_token().await?;
         let url = format!(
@@ -537,14 +504,6 @@ impl Connection for BigQueryConnection {
         }
         Ok(())
     }
-}
-
-fn parse_u64_field(value: &Option<String>, field_name: &str) -> Result<u64, ConnectionError> {
-    value
-        .as_deref()
-        .unwrap_or("0")
-        .parse::<u64>()
-        .map_err(|e| ConnectionError::QueryFailed(format!("invalid {field_name}: {e}")))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

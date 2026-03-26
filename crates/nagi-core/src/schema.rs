@@ -4,9 +4,7 @@ use crate::config::NagiConfig;
 use crate::evaluate::AssetEvalResult;
 use crate::kind::asset::OnDriftEntry;
 use crate::kind::sync::SyncStep;
-use crate::kind::{
-    AssetSpec, ConditionsSpec, ConnectionSpec, NagiKind, OriginSpec, SourceSpec, SyncSpec,
-};
+use crate::kind::{AssetSpec, ConditionsSpec, ConnectionSpec, NagiKind, OriginSpec, SyncSpec};
 use crate::log::{EvaluateLogEntry, SyncLogEntry};
 use crate::serve::SuspendedInfo;
 use crate::storage::lock::LockInfo;
@@ -23,10 +21,6 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
         (
             "AssetSpec",
             serde_json::to_value(schema_for!(AssetSpec)).unwrap(),
-        ),
-        (
-            "SourceSpec",
-            serde_json::to_value(schema_for!(SourceSpec)).unwrap(),
         ),
         (
             "ConnectionSpec",
@@ -111,7 +105,6 @@ mod tests {
         let expected = [
             "NagiKind.json",
             "AssetSpec.json",
-            "SourceSpec.json",
             "ConnectionSpec.json",
             "SyncSpec.json",
             "ConditionsSpec.json",
