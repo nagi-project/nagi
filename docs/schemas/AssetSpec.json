@@ -39,7 +39,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Template variables passed to the Sync resource for argument interpolation.",
+          "description": "Template variables passed to the Sync and Conditions resources for argument interpolation.",
           "type": "object"
         }
       },

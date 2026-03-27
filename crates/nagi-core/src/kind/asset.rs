@@ -60,7 +60,7 @@ pub struct OnDriftEntry {
     pub conditions: String,
     /// Name of the Sync resource to execute when drift is detected.
     pub sync: String,
-    /// Template variables passed to the Sync resource for argument interpolation.
+    /// Template variables passed to the Sync and Conditions resources for argument interpolation.
     #[serde(default)]
     pub with: HashMap<String, String>,
     /// Controls insertion position during overlay merge. Not included in compiled output.

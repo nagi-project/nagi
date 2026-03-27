@@ -461,6 +461,33 @@ fn expand_sync_templates(
     }
 }
 
+/// Expands template variables in a DesiredCondition's args.
+fn expand_condition_templates(
+    condition: &DesiredCondition,
+    asset_name: &str,
+    with: &HashMap<String, String>,
+) -> DesiredCondition {
+    match condition {
+        DesiredCondition::Command {
+            name,
+            run,
+            interval,
+            env,
+            evaluate_cache_ttl,
+        } => DesiredCondition::Command {
+            name: name.clone(),
+            run: run
+                .iter()
+                .map(|arg| expand_template_string(arg, asset_name, with))
+                .collect(),
+            interval: interval.clone(),
+            env: env.clone(),
+            evaluate_cache_ttl: evaluate_cache_ttl.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
 fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, String>) -> String {
     let mut result = s.replace("{{ asset.name }}", asset_name);
     for (key, value) in with {
@@ -597,9 +624,13 @@ fn resolve_on_drift(
         let sync_spec = &syncs[&entry.sync];
         let resolved_sync = expand_sync_templates(sync_spec, asset_name, &entry.with);
 
-        all_conditions.extend(conditions.iter().cloned());
+        let expanded_conditions: Vec<DesiredCondition> = conditions
+            .iter()
+            .map(|c| expand_condition_templates(c, asset_name, &entry.with))
+            .collect();
+        all_conditions.extend(expanded_conditions.clone());
         resolved.push(ResolvedOnDriftEntry {
-            conditions: conditions.clone(),
+            conditions: expanded_conditions,
             conditions_ref: entry.conditions.clone(),
             sync: resolved_sync,
             sync_ref_name: entry.sync.clone(),
@@ -1073,6 +1104,42 @@ spec:
         let result =
             resolve_on_drift("daily-sales", &[entry], &sample_conditions(), &syncs).unwrap();
         assert_eq!(result[0].sync.run.args[3], "+daily_sales");
+    }
+
+    #[test]
+    fn resolve_on_drift_expands_conditions_templates() {
+        let conditions = HashMap::from([(
+            "export-drift".to_string(),
+            vec![DesiredCondition::Command {
+                name: "unexported-rows".to_string(),
+                run: vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "nagi export --select {{ sync.table }} --dry-run".to_string(),
+                ],
+                interval: None,
+                env: HashMap::new(),
+                evaluate_cache_ttl: None,
+            }],
+        )]);
+        let entry = asset::OnDriftEntry {
+            conditions: "export-drift".to_string(),
+            sync: "dbt-run".to_string(),
+            with: HashMap::from([("table".to_string(), "evaluate_logs".to_string())]),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let result = resolve_on_drift(
+            "nagi-export-evaluate_logs",
+            &[entry],
+            &conditions,
+            &sample_syncs(),
+        )
+        .unwrap();
+        if let DesiredCondition::Command { run, .. } = &result[0].conditions[0] {
+            assert_eq!(run[2], "nagi export --select evaluate_logs --dry-run");
+        } else {
+            panic!("expected Command condition");
+        }
     }
 
     // ── resolve (integration) tests ─────────────────────────────────────

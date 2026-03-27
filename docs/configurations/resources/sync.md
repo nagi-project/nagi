@@ -21,11 +21,11 @@ spec:
 
 ## Template variables
 
-`args` 内で以下のテンプレート変数を使用できます。
+Sync と Conditions の `args` 内で以下のテンプレート変数を使用できます。Asset の `onDrift[].with` で指定した値が compile 時に展開されます。
 
 | Variable | Description |
 | --- | --- |
-| `{{ asset.name }}` | この Sync を参照する Asset の名前に展開される |
+| `{{ asset.name }}` | この Sync / Conditions を参照する Asset の名前に展開される |
 | `{{ sync.<key> }}` | Asset の `onDrift[].with` で指定した値に展開される |
 
 ```yaml

@@ -12,7 +12,7 @@ pub const KIND: &str = "Origin";
 pub struct DefaultSync {
     /// Name of the user-defined Sync resource to use instead of the auto-generated one.
     pub sync: String,
-    /// Template variables passed to the Sync resource for argument interpolation.
+    /// Template variables passed to the Sync and Conditions resources for argument interpolation.
     #[serde(default)]
     pub with: HashMap<String, String>,
 }
