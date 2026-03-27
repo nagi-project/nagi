@@ -87,6 +87,11 @@ parse_duration_test! {
 
 - All headings in documentation files (`docs/`) must be in English.
 
+### Git Workflow
+
+- Never modify code directly on main. Always create a worktree (`isolation: "worktree"` in Agent tool) or a feature branch before making changes.
+- Branch/worktree names must describe the work (e.g. `feat/python-3.10-support`, `fix/compile-error-handling`). Do not use auto-generated names like `worktree-agent-abc123`.
+
 ### General
 
 - When using external tools, libraries, or SDKs, always refer to the official documentation to verify correct usage.
