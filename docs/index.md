@@ -1,14 +1,12 @@
 # Nagi
 
-Nagi はデータのための reconciliation engine です。Kubernetes の reconciliation loop と同じ概念をデータエンジニアリングに適用しています。
+Nagi はデータの期待状態を宣言的に定義し、その評価と収束を自動で繰り返すワークフローエンジンです。
 
-データウェアハウスに存在するデータの期待状態を宣言的に定義し、その状態を継続的に評価します。期待状態を満たさないデータを検知すると、あらかじめ定義された収束操作を自動的に実行し、期待状態を満たす形へ修復します。この評価と収束のサイクルを繰り返します。
+## Motivation
 
-## Why Nagi
+データエンジニアリングでは、「ジョブの成功」が「データが期待どおりであること」を保証しない場合があります。ジョブが正常終了しても、データが古い、NULL が混入している、集計値に不整合がある、といったことは起こり得ます。ジョブの成否ではなく、データの品質を高めることが求められています。
 
-データエンジニアリングでは、「ジョブの成功」が「データが期待どおりであること」を保証しない場合があります。ジョブが正常終了しても、データが古い、NULL が混入している、集計値に不整合がある、といったことは起こり得るため、信頼に足るデータをつくれているかを常に確認できているのが理想的です。
-
-Nagi は「データが期待どおりであるか」の評価を起点に動作します。データの状態を継続的に評価し、その結果に対応する収束操作を起動します。状況に応じた収束操作を宣言的に実行することで、実行スケジュールの調整やマニュアルでの対応を削減します。また、期待状態や収束操作を明示しているため、その判断の一部を AI に任せることもできます。
+Nagi は「データが期待どおりであるか」の評価を起点に動作します。データの期待状態を継続的に評価し、逸脱を検知すると、対応する収束操作を実行します。期待状態と収束操作を宣言的に定義することで、状態評価と定常的な Extract/Load/Transform、障害対応をひとつのループに統合します。
 
 ### Traditional Approach
 
@@ -57,5 +55,5 @@ graph LR
 ## Principles
 
 - Declarative — Define the desired state; let the engine converge.
-- Integrative — Work with the tools you already use.
-- AI-collaborative — Operate with humans and AI agents together.
+- Composable — Use with your existing tools, or let Nagi take the wheel.
+- AI-collaborative — Designed for humans and AI agents to work as one.

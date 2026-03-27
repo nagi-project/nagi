@@ -6,3 +6,12 @@ spec:
   run:
     type: Command
     args: [sh, -c, "echo 'Hello from Nagi!' > greeting.txt"]
+---
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: create-farewell
+spec:
+  run:
+    type: Command
+    args: [sh, -c, "echo 'Goodbye from Nagi!' > farewell.txt"]

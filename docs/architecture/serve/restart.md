@@ -5,7 +5,7 @@
 Nagi は各 Asset の最新の評価結果（Ready または Drifted）をストレージに保存しています。再起動時にこの情報を読み込むことで、前回 Ready となっていた Asset はそのまま Ready として復帰し、Drifted であった Asset だけが evaluate から再開します。
 
 !!! tip
-    この仕組みは、再起動後も同じストレージを参照できることを前提にしています。ローカルストレージの場合はディスクが永続化されていること、リモートストレージの場合は [`nagi.yaml`](../configurations/project.md) でバックエンドが設定されていることを確認してください。ストレージの詳細については [Storage](./storage.md) を参照してください。
+    この仕組みは、再起動後も同じストレージを参照できることを前提にしています。ローカルストレージの場合はディスクが永続化されていること、リモートストレージの場合は [`nagi.yaml`](../../reference/project.md) でバックエンドが設定されていることを確認してください。ストレージの詳細については [Storage](../storage.md) を参照してください。
 
 ## Restart Sequence
 
@@ -14,7 +14,7 @@ Nagi は各 Asset の最新の評価結果（Ready または Drifted）をスト
 3. 前回 Drifted だった Asset、または readiness が存在しない Asset は、上流を持たないもの（ルート）のみ evaluate を開始する
 4. `interval` 付きの Asset はタイマーを再登録する。評価時刻は `interval` から再計算される
 
-readiness ファイルが存在しない場合（初回起動）は、すべての Asset を Drifted として扱います。ルート Asset の evaluate は [Concurrency Limits](../configurations/project.md) の範囲内で実行されます。
+readiness ファイルが存在しない場合（初回起動）は、すべての Asset を Drifted として扱います。ルート Asset の evaluate は [Concurrency Limits](../../reference/project.md) の範囲内で実行されます。
 
 ## Linear Chain with Partial Recovery
 

@@ -1,13 +1,10 @@
 # Serve Scenarios
 
-`nagi serve` の動作を具体的なケースで説明します。各ケースでは、evaluate と sync がどのタイミングで実行されるかを時系列で示します。
+`nagi serve` の動作を具体的なシナリオを例に説明します。各シナリオでは、evaluate と sync がどのタイミングで実行されるかを時系列で示します。
 
-すべてのケースで以下を前提としています。
+なお、すべてのシナリオで `autoSync: true` を前提としています。
 
-- `autoSync: true`
-- 上流の Drifted → Ready 遷移では、下流の evaluate をスキップして直接 sync を起動します。sync 完了後に re-evaluate で収束結果を確認します。
-
-## Case 1: Linear Dependency Chain
+## Scenario 1: Linear Dependency Chain
 
 ```mermaid
 graph LR
@@ -41,7 +38,7 @@ sequenceDiagram
     deactivate C
 ```
 
-## Case 2: Multiple Upstreams Become Ready in Quick Succession
+## Scenario 2: Multiple Upstreams Become Ready in Quick Succession
 
 ```mermaid
 graph LR
@@ -80,7 +77,7 @@ sequenceDiagram
     deactivate X
 ```
 
-## Case 3: Upstreams Become Ready with Large Intervals
+## Scenario 3: Upstreams Become Ready with Large Intervals
 
 Case 2 と同じグラフで、上流の Ready 遷移が十分な間隔を空けて起きるケースです。**X の sync は3回、evaluate は3回（sync 後の re-evaluate のみ）**です。各上流のデータ変更を X に反映するため、それぞれ正当な実行です。
 
@@ -117,7 +114,7 @@ sequenceDiagram
     deactivate X
 ```
 
-## Case 4: Fan-out
+## Scenario 4: Fan-out
 
 ```mermaid
 graph LR
@@ -158,7 +155,7 @@ sequenceDiagram
     end
 ```
 
-## Case 5: Diamond Dependency
+## Scenario 5: Diamond Dependency
 
 ```mermaid
 graph LR
@@ -205,7 +202,7 @@ sequenceDiagram
 
 B と C の sync 完了が近いタイミングであっても、X の sync が実行中であれば重複実行は発生しません。
 
-## Case 6: Interval with Upstream Propagation
+## Scenario 6: Interval with Upstream Propagation
 
 ```mermaid
 graph LR
@@ -239,7 +236,7 @@ sequenceDiagram
 
 interval による evaluate は上流の状態変化とは独立して動作します。上流の Drifted → Ready 遷移では evaluate をスキップして直接 sync を起動しますが、interval による定期的な evaluate は引き続き実行されます。
 
-## Case 7: Upstream Drifted Blocks Downstream Operations
+## Scenario 7: Upstream Drifted Blocks Downstream Operations
 
 ```mermaid
 graph LR

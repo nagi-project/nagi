@@ -1,6 +1,6 @@
 # kind: Origin
 
-外部プロジェクトから Asset を自動生成するリソースです。[`nagi compile`](../../cli.md#compile) 時に外部プロジェクトの定義を読み取り、Asset / Conditions / Sync を自動生成します。
+外部プロジェクトから Asset を自動生成するリソースです。[`nagi compile`](../cli.md#compile) 時に外部プロジェクトの定義を読み取り、Asset / Conditions / Sync を自動生成します。
 
 ```yaml
 apiVersion: nagi.io/v1alpha1

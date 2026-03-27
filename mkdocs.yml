@@ -20,6 +20,7 @@ theme:
   features:
     - navigation.sections
     - navigation.expand
+    - navigation.indexes
     - content.code.copy
 
 markdown_extensions:
@@ -39,29 +40,32 @@ markdown_extensions:
 nav:
   - Introduction: index.md
   - Overview:
-    - Concepts: concepts.md
-    - Get Started: get-started.md
-    - Quickstart: quickstart.md
-  - Configurations:
-    - Project: configurations/project.md
-    - Resources:
-      - Overview: configurations/resources/index.md
-      - "kind: Asset": configurations/resources/asset.md
-      - "kind: Connection": configurations/resources/connection.md
-      - "kind: Sync": configurations/resources/sync.md
-      - "kind: Conditions": configurations/resources/conditions.md
-      - "kind: Origin": configurations/resources/origin.md
+    - Concepts: overview/concepts.md
+    - Quickstart: overview/quickstart.md
+    - Get Started: overview/get-started.md
   - Architecture:
-    - Serve: architecture/serve.md
-    - Serve Scenarios: architecture/serve-scenarios.md
-    - Serve Restart: architecture/serve-restart.md
+    - architecture/index.md
+    - Serve:
+      - Internals: architecture/serve/internals.md
+      - Scenarios: architecture/serve/scenarios.md
+      - Restart: architecture/serve/restart.md
     - Storage: architecture/storage.md
     - Export: architecture/export.md
     - Notifications: architecture/notifications.md
     - MCP Server: architecture/mcp.md
-  - Integrations:
-    - dbt Core: integrations/dbt-core.md
-    - dbt Cloud: integrations/dbt-cloud.md
   - Reference:
-    - CLI: cli.md
-    - Glossary: glossary.md
+    - Project Config: reference/project.md
+    - Resource Config:
+      - reference/resources/index.md
+      - "kind: Asset": reference/resources/asset.md
+      - "kind: Connection": reference/resources/connection.md
+      - "kind: Sync": reference/resources/sync.md
+      - "kind: Conditions": reference/resources/conditions.md
+      - "kind: Origin": reference/resources/origin.md
+    - CLI: reference/cli.md
+    - Glossary: reference/glossary.md
+  - Integrations:
+    - integrations/index.md
+    - dbt:
+      - dbt Core: integrations/dbt/core.md
+      - dbt Cloud: integrations/dbt/cloud.md

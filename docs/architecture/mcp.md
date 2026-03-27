@@ -4,13 +4,13 @@ Nagi は [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) サー
 
 ## Tools
 
-[`nagi mcp`](../cli.md#mcp) で起動すると、以下のツールが MCP クライアントに公開されます。
+[`nagi mcp`](../reference/cli.md#mcp) で起動すると、以下のツールが MCP クライアントに公開されます。
 
 | MCP tool | 対応する CLI | 権限 | `--allow-sync` |
 | --- | --- | --- | --- |
-| `nagi_status` | [`nagi status`](../cli.md#status) | 読み取り専用 | 不要 |
-| `nagi_evaluate` | [`nagi evaluate`](../cli.md#evaluate) | 読み取り専用 | 不要 |
-| `nagi_sync` | [`nagi sync`](../cli.md#sync) | 書き込み | 必要 |
+| `nagi_status` | [`nagi status`](../reference/cli.md#status) | 読み取り専用 | 不要 |
+| `nagi_evaluate` | [`nagi evaluate`](../reference/cli.md#evaluate) | 読み取り専用 | 不要 |
+| `nagi_sync` | [`nagi sync`](../reference/cli.md#sync) | 書き込み | 必要 |
 
 !!! tip
     デフォルトでは読み取り専用ツール（`nagi_status`、`nagi_evaluate`）のみが公開されます。`--allow-sync` を指定すると、`nagi_sync` も公開されます。

@@ -6,3 +6,14 @@ spec:
   onDrift:
     - conditions: greeting-check
       sync: create-greeting
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: farewell
+spec:
+  upstreams:
+    - greeting
+  onDrift:
+    - conditions: farewell-check
+      sync: create-farewell

@@ -2,7 +2,7 @@
 
 ## Install
 
-インストール方法は [Get Started](./get-started.md#install) を参照してください。
+インストール方法は [Get Started](../overview/get-started.md#install) を参照してください。
 
 ## Output
 
@@ -142,13 +142,13 @@ nagi serve resume [OPTIONS]
 nagi serve halt [OPTIONS]
 ```
 
-| オプション | 説明 |
-| --- | --- |
-| `--reason` | 停止理由 |
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--reason` | `manual halt` | 停止理由。suspended ファイルと通知メッセージに含まれる |
 
 ## export
 
-実行ログ（`logs.db`）をデータウェアハウス にエクスポートします。[`nagi.yaml`](./configurations/project.md) の `export` 設定が必要です。
+実行ログ（`logs.db`）をデータウェアハウス にエクスポートします。[`nagi.yaml`](./project.md) の `export` 設定が必要です。
 
 ```bash
 nagi export [OPTIONS]

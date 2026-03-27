@@ -2,7 +2,7 @@
 
 ## nagi.yaml
 
-プロジェクト設定ファイルです。[`nagi init`](../cli.md#init) で生成され、プロジェクトルート（`resources/` と同階層）に配置します。
+プロジェクト設定ファイルです。[`nagi init`](./cli.md#init) で生成され、プロジェクトルート（`resources/` と同階層）に配置します。
 
 ```yaml
 backend:

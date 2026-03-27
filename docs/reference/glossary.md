@@ -33,9 +33,6 @@ Asset
 Conditions
 : 再利用可能な条件のセット。`kind: Conditions` として定義し、複数の Asset から共有できる。
 
-Source
-: Asset が依存する上流データ。Connection への参照を持つ。
-
 Connection
 : データウェアハウスへの接続情報。dbt の `profiles.yml` を参照する形で定義する。
 
@@ -91,23 +88,3 @@ SyncLock
 
 Graceful Shutdown
 : `Ctrl-C` による停止時に新規タスクの発行を停止し、実行中の Sync サブプロセスの完了を待つ。待機上限は `terminationGracePeriodSeconds` で設定。
-
-## CLI & Compilation
-
-compile
-: `resources/` のリソース定義を検証・解決し、`target/` にコンパイル済み Asset と依存グラフを出力するコマンド。
-
-ls
-: コンパイル済みリソースを JSON で一覧表示するコマンド。
-
-export
-: 実行ログ（`logs.db`）をデータウェアハウスにエクスポートするコマンド。ウォーターマークによる差分転送を行う。
-
-resources
-: ユーザーが定義するリソース YAML の配置ディレクトリ。
-
-target
-: `nagi compile` の出力ディレクトリ。コンパイル済み Asset YAML と `graph.json` が格納される。
-
-select
-: 対象 Asset をフィルタリングする構文。名前指定（`daily-sales`）、上流/下流（`+name` / `name+`）、タグ（`tag:finance`）をサポートする。

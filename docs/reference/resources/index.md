@@ -22,3 +22,34 @@ kind ごとに reconciliation loop の中での役割が異なります。
 | [Sync](./sync.md) | sync の手順定義。pre → run → post の3ステージ |
 | [Conditions](./conditions.md) | 再利用可能な条件のセット。複数の Asset で共有できる |
 | [Origin](./origin.md) | 外部プロジェクトから Asset を自動生成する |
+
+## Template Variables
+
+Sync と Conditions の `args` 内で以下のテンプレート変数を使用できます。Asset の `onDrift[].with` で指定した値が compile 時に展開されます。
+
+| Variable | Description |
+| --- | --- |
+| `{{ asset.name }}` | この Sync / Conditions を参照する Asset の名前に展開される |
+| `{{ sync.<key> }}` | Asset の `onDrift[].with` で指定した値に展開される |
+
+```yaml
+# Sync 定義
+kind: Sync
+metadata:
+  name: dbt-default
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ sync.selector }}"]
+```
+
+```yaml
+# Asset 側で with を指定
+onDrift:
+  - conditions: daily-sla
+    sync: dbt-default
+    with:
+      selector: "+daily_sales"   # {{ sync.selector }} が "+daily_sales" に展開される
+```
+
+`with` を省略した場合、`{{ asset.name }}` は自動で展開されますが、`{{ sync.<key> }}` は展開されずそのまま残ります。

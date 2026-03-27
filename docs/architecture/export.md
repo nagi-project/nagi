@@ -4,9 +4,9 @@
 
 ## How it works
 
-1. [`nagi compile`](../cli.md#compile) が **エクスポート用リソース（Conditions / Sync / Asset）を自動生成**する
-2. [`nagi serve`](../cli.md#serve) が自動生成された Asset を他の Asset と同様に reconcile し、未エクスポートの行があれば `nagi export` を実行する
-3. [`nagi export`](../cli.md#export) を手動実行することもできる
+1. [`nagi compile`](../reference/cli.md#compile) が **エクスポート用リソース（Conditions / Sync / Asset）を自動生成**する
+2. [`nagi serve`](../reference/cli.md#serve) が自動生成された Asset を他の Asset と同様に reconcile し、未エクスポートの行があれば `nagi export` を実行する
+3. [`nagi export`](../reference/cli.md#export) を手動実行することもできる
 
 省略するとログはローカルの `logs.db` のみに保持され、リソースの自動生成は行われません。
 
