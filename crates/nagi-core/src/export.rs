@@ -430,25 +430,23 @@ pub async fn export_all(
     results
 }
 
-/// Generates Conditions + Sync + Asset resources for export of a single table.
-fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig) -> Vec<NagiKind> {
-    let table_name = table.table_name();
-
-    let conditions_name = format!("export-{table_name}-drift");
-    let sync_name = format!("export-{table_name}");
-    let asset_name = format!("nagi-export-{table_name}");
+/// Generates export resources: 1 Conditions + 1 Sync + 3 Assets (5 total).
+pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
+    let conditions_name = "nagi-export-drift";
+    let sync_name = "nagi-export";
 
     let conditions = NagiKind::Conditions {
         api_version: kind::API_VERSION.to_string(),
         metadata: kind::Metadata {
-            name: conditions_name.clone(),
+            name: conditions_name.to_string(),
         },
         spec: kind::ConditionsSpec(vec![kind::asset::DesiredCondition::Command {
             name: "unexported-rows".to_string(),
             run: vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                format!("nagi export --select {table_name} --dry-run | jq -e '.[] | .count == 0'"),
+                "nagi export --select {{ sync.table }} --dry-run | jq -e '.[] | .count == 0'"
+                    .to_string(),
             ],
             interval: Some(crate::duration::Duration::from_secs(
                 config.interval.as_std().as_secs(),
@@ -461,7 +459,7 @@ fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig
     let sync_resource = NagiKind::Sync {
         api_version: kind::API_VERSION.to_string(),
         metadata: kind::Metadata {
-            name: sync_name.clone(),
+            name: sync_name.to_string(),
         },
         spec: kind::SyncSpec {
             pre: None,
@@ -471,7 +469,7 @@ fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig
                     "nagi".to_string(),
                     "export".to_string(),
                     "--select".to_string(),
-                    table_name.to_string(),
+                    "{{ sync.table }}".to_string(),
                 ],
                 env: Default::default(),
             },
@@ -479,35 +477,36 @@ fn generate_export_resources_for_table(table: ExportTable, config: &ExportConfig
         },
     };
 
-    let asset = NagiKind::Asset {
-        api_version: kind::API_VERSION.to_string(),
-        metadata: kind::Metadata {
-            name: asset_name.clone(),
-        },
-        spec: kind::AssetSpec {
-            connection: None,
-            upstreams: vec![],
-            on_drift: vec![kind::asset::OnDriftEntry {
-                conditions: conditions_name,
-                sync: sync_name,
-                with: Default::default(),
-                merge_position: kind::asset::MergePosition::BeforeOrigin,
-            }],
-            auto_sync: true,
-            tags: vec![],
-            evaluate_cache_ttl: None,
-        },
-    };
+    let mut resources = vec![conditions, sync_resource];
 
-    vec![conditions, sync_resource, asset]
-}
+    for table in ExportTable::ALL {
+        let table_name = table.table_name();
+        let asset = NagiKind::Asset {
+            api_version: kind::API_VERSION.to_string(),
+            metadata: kind::Metadata {
+                name: format!("nagi-export-{table_name}"),
+            },
+            spec: kind::AssetSpec {
+                connection: None,
+                upstreams: vec![],
+                on_drift: vec![kind::asset::OnDriftEntry {
+                    conditions: conditions_name.to_string(),
+                    sync: sync_name.to_string(),
+                    with: std::collections::HashMap::from([(
+                        "table".to_string(),
+                        table_name.to_string(),
+                    )]),
+                    merge_position: kind::asset::MergePosition::BeforeOrigin,
+                }],
+                auto_sync: true,
+                tags: vec![],
+                evaluate_cache_ttl: None,
+            },
+        };
+        resources.push(asset);
+    }
 
-/// Generates all export resources (9 total: 3 tables x 3 kinds).
-pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
-    ExportTable::ALL
-        .iter()
-        .flat_map(|table| generate_export_resources_for_table(*table, config))
-        .collect()
+    resources
 }
 
 /// Resolves a data warehouse Connection by loading `resources/` and matching `connection_name`.
@@ -751,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_export_resources_produces_nine_resources() {
+    fn generate_export_resources_produces_five_resources() {
         let config = ExportConfig {
             connection: "my-bq".to_string(),
             dataset: "nagi_logs".to_string(),
@@ -759,33 +758,46 @@ mod tests {
             interval: serde_yaml::from_str("30m").unwrap(),
         };
         let resources = generate_export_resources(&config);
-        assert_eq!(resources.len(), 9);
-    }
-
-    #[test]
-    fn generate_export_resources_names_and_kinds() {
-        let config = ExportConfig {
-            connection: "my-bq".to_string(),
-            dataset: "nagi_logs".to_string(),
-            format: crate::config::ExportFormat::Jsonl,
-            interval: serde_yaml::from_str("30m").unwrap(),
-        };
-        let resources = generate_export_resources(&config);
+        assert_eq!(resources.len(), 5);
 
         let names: Vec<(&str, &str)> = resources
             .iter()
             .map(|r| (r.kind(), r.metadata().name.as_str()))
             .collect();
 
-        assert!(names.contains(&("Conditions", "export-evaluate_logs-drift")));
-        assert!(names.contains(&("Sync", "export-evaluate_logs")));
+        assert!(names.contains(&("Conditions", "nagi-export-drift")));
+        assert!(names.contains(&("Sync", "nagi-export")));
         assert!(names.contains(&("Asset", "nagi-export-evaluate_logs")));
-        assert!(names.contains(&("Conditions", "export-sync_logs-drift")));
-        assert!(names.contains(&("Sync", "export-sync_logs")));
         assert!(names.contains(&("Asset", "nagi-export-sync_logs")));
-        assert!(names.contains(&("Conditions", "export-sync_evaluations-drift")));
-        assert!(names.contains(&("Sync", "export-sync_evaluations")));
         assert!(names.contains(&("Asset", "nagi-export-sync_evaluations")));
+    }
+
+    #[test]
+    fn generate_export_resources_assets_pass_table_via_with() {
+        let config = ExportConfig {
+            connection: "my-bq".to_string(),
+            dataset: "nagi_logs".to_string(),
+            format: crate::config::ExportFormat::Jsonl,
+            interval: serde_yaml::from_str("30m").unwrap(),
+        };
+        let resources = generate_export_resources(&config);
+
+        for table in ExportTable::ALL {
+            let asset_name = format!("nagi-export-{}", table.table_name());
+            let asset = resources
+                .iter()
+                .find(|r| r.metadata().name == asset_name)
+                .unwrap();
+            if let NagiKind::Asset { spec, .. } = asset {
+                assert_eq!(spec.on_drift[0].sync, "nagi-export");
+                assert_eq!(
+                    spec.on_drift[0].with.get("table").unwrap(),
+                    table.table_name()
+                );
+            } else {
+                panic!("expected Asset");
+            }
+        }
     }
 
     #[test]

@@ -30,46 +30,41 @@ export:
 
 ## Auto-generated resources
 
-`nagi compile` はエクスポート対象のテーブルごとに Conditions・Sync・Asset の 3 リソースを自動生成します。対象テーブルは 3 つあるため、合計 9 リソースが生成されます。ユーザーが `resources/` に配置する必要はありません。
+`nagi compile` は以下の 5 リソースを自動生成します。ユーザーが `resources/` に配置する必要はありません。
 
-### Target tables
+### Conditions (`nagi-export-drift`)
 
-| Table | Description |
-| --- | --- |
-| `evaluate_logs` | Evaluate の実行履歴 |
-| `sync_logs` | Sync の実行履歴 |
-| `sync_evaluations` | Sync 実行時の evaluate 結果 |
-
-### Generated resource example
-
-`evaluate_logs` テーブルの場合、以下の 3 リソースが生成されます（`sync_logs`、`sync_evaluations` も同じ構造）。
-
-**Conditions** — 未エクスポートの行があるかチェックする:
+未エクスポートの行がないかチェックします。`{{ sync.table }}` は Asset の `with` から展開されます。
 
 ```yaml
 apiVersion: nagi.dev/v1
 kind: Conditions
 metadata:
-  name: export-evaluate_logs-drift
+  name: nagi-export-drift
 spec:
   - name: unexported-rows
-    run: ["sh", "-c", "nagi export --select evaluate_logs --dry-run | jq -e '.[] | .count == 0'"]
+    run: ["sh", "-c", "nagi export --select {{ sync.table }} --dry-run | jq -e '.[] | .count == 0'"]
     interval: 30m
 ```
 
-**Sync** — エクスポートを実行する:
+### Sync (`nagi-export`)
+
+テーブル単位でエクスポートします。`{{ sync.table }}` は Asset の `with` から渡されます。
 
 ```yaml
 apiVersion: nagi.dev/v1
 kind: Sync
 metadata:
-  name: export-evaluate_logs
+  name: nagi-export
 spec:
   run:
-    command: ["nagi", "export", "--select", "evaluate_logs"]
+    type: Command
+    args: ["nagi", "export", "--select", "{{ sync.table }}"]
 ```
 
-**Asset** — Conditions と Sync を結びつける:
+### Asset (`nagi-export-<table>`)
+
+テーブルごとに 1 つ生成されます（`evaluate_logs`、`sync_logs`、`sync_evaluations`）。`with` でテーブル名を Sync に渡します。
 
 ```yaml
 apiVersion: nagi.dev/v1
@@ -79,8 +74,10 @@ metadata:
 spec:
   autoSync: true
   onDrift:
-    - conditions: export-evaluate_logs-drift
-      sync: export-evaluate_logs
+    - conditions: nagi-export-drift
+      sync: nagi-export
+      with:
+        table: evaluate_logs
 ```
 
 ## Destination tables
