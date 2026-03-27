@@ -1640,7 +1640,8 @@ spec:
   type: DBT
   connection: my-bq
   projectDir: ../dbt-project
-  defaultSync: dbt-run";
+  defaultSync:
+    sync: dbt-run";
 
     fn manifests_for(origin_name: &str) -> HashMap<String, String> {
         HashMap::from([(origin_name.to_string(), MANIFEST_JSON.to_string())])

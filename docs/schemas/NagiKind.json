@@ -129,6 +129,27 @@
       ],
       "type": "object"
     },
+    "DefaultSync": {
+      "description": "Override for the auto-generated Sync. Same interface as `onDrift` entries (sync name + with).",
+      "properties": {
+        "sync": {
+          "description": "Name of the user-defined Sync resource to use instead of the auto-generated one.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync resource for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "sync"
+      ],
+      "type": "object"
+    },
     "DesiredCondition": {
       "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after Conditions expansion) and used as a key in execution logs.",
       "oneOf": [
@@ -389,12 +410,16 @@
               "type": "string"
             },
             "defaultSync": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DefaultSync"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "default": null,
-              "description": "Name of the Sync resource applied to all auto-generated Assets unless overridden.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "description": "User-defined Sync to override the auto-generated `nagi-dbt-run`."
             },
             "projectDir": {
               "description": "Local path to the dbt project directory (relative or absolute).",

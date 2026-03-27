@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 
 use crate::kind::asset::{AssetSpec, DesiredCondition, MergePosition, OnDriftEntry};
-use crate::kind::origin::OriginSpec;
+use crate::kind::origin::{DefaultSync, OriginSpec};
 use crate::kind::sync::{StepType, SyncSpec, SyncStep};
 use crate::kind::{Metadata, NagiKind, API_VERSION};
 
@@ -75,13 +75,26 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
     if needs_skip_sync {
         resources.push(make_skip_sync());
     }
+
+    // When defaultSync is not set, auto-generate the nagi-dbt-run Sync.
+    let effective_sync = match default_sync {
+        Some(ds) => ds.clone(),
+        None => {
+            resources.push(make_dbt_run_sync());
+            DefaultSync {
+                sync: DBT_RUN_SYNC_NAME.to_string(),
+                with: HashMap::new(),
+            }
+        }
+    };
+
     let model_assets = build_model_assets(
         &model_nodes,
         &model_tests,
         &dbt_source_map,
         &model_names,
         connection,
-        default_sync,
+        &effective_sync,
         auto_sync_val,
     );
     resources.extend(model_assets);
@@ -89,6 +102,54 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
 }
 
 const SKIP_SYNC_NAME: &str = "nagi-skip-sync";
+const DBT_RUN_SYNC_NAME: &str = "nagi-dbt-run";
+
+// ── Auto-generated Sync resources ─────────────────────────────────────
+
+/// Generates the `nagi-dbt-run` Sync resource: `dbt run --select {{ asset.name }}`.
+fn make_dbt_run_sync() -> NagiKind {
+    NagiKind::Sync {
+        api_version: API_VERSION.to_string(),
+        metadata: Metadata {
+            name: DBT_RUN_SYNC_NAME.to_string(),
+        },
+        spec: SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: vec![
+                    "dbt".to_string(),
+                    "run".to_string(),
+                    "--select".to_string(),
+                    "{{ asset.name }}".to_string(),
+                ],
+                env: HashMap::new(),
+            },
+            post: None,
+        },
+    }
+}
+
+/// Generates the `nagi-skip-sync` Sync resource: runs `true` (exits 0 immediately).
+fn make_skip_sync() -> NagiKind {
+    NagiKind::Sync {
+        api_version: API_VERSION.to_string(),
+        metadata: Metadata {
+            name: SKIP_SYNC_NAME.to_string(),
+        },
+        spec: SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: vec!["true".to_string()],
+                env: HashMap::new(),
+            },
+            post: None,
+        },
+    }
+}
+
+// ── Asset builders ────────────────────────────────────────────────────
 
 /// Builds Assets and Conditions for dbt sources (external tables).
 /// Returns the resources and whether `nagi-skip-sync` is needed.
@@ -117,14 +178,15 @@ fn build_dbt_source_assets(
         let tests_for_this = tests_by_name.get(name.as_str());
         let has_tests = tests_for_this.is_some_and(|t| !t.is_empty());
 
-        let sync_ref = if has_tests {
+        if has_tests {
             skip_sync_needed = true;
-            Some(SKIP_SYNC_NAME.to_string())
-        } else {
-            None
+        }
+        let skip_sync = DefaultSync {
+            sync: SKIP_SYNC_NAME.to_string(),
+            with: HashMap::new(),
         };
         let (on_drift, conditions_resource) =
-            build_on_drift(tests_for_this.filter(|t| !t.is_empty()), name, &sync_ref);
+            build_on_drift(tests_for_this.filter(|t| !t.is_empty()), name, &skip_sync);
 
         if let Some(cond) = conditions_resource {
             resources.push(cond);
@@ -147,25 +209,6 @@ fn build_dbt_source_assets(
     (resources, skip_sync_needed)
 }
 
-/// Generates the `nagi-skip-sync` Sync resource: runs `true` (exits 0 immediately).
-fn make_skip_sync() -> NagiKind {
-    NagiKind::Sync {
-        api_version: API_VERSION.to_string(),
-        metadata: Metadata {
-            name: SKIP_SYNC_NAME.to_string(),
-        },
-        spec: SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["true".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        },
-    }
-}
-
 /// Builds Assets and Conditions for dbt models.
 fn build_model_assets(
     model_nodes: &[&DbtNode],
@@ -173,7 +216,7 @@ fn build_model_assets(
     dbt_source_map: &HashMap<String, String>,
     model_names: &HashMap<String, String>,
     connection: &str,
-    default_sync: &Option<String>,
+    default_sync: &DefaultSync,
     auto_sync: bool,
 ) -> Vec<NagiKind> {
     let mut resources: Vec<NagiKind> = Vec::new();
@@ -278,7 +321,7 @@ fn resolve_upstreams(
 fn build_on_drift(
     tests: Option<&Vec<&DbtNode>>,
     model_name: &str,
-    default_sync: &Option<String>,
+    default_sync: &DefaultSync,
 ) -> (Vec<OnDriftEntry>, Option<NagiKind>) {
     let conditions = tests
         .map(|t| tests_to_conditions(t))
@@ -297,16 +340,12 @@ fn build_on_drift(
         spec: crate::kind::condition::ConditionsSpec(conditions),
     };
 
-    let on_drift = default_sync
-        .as_ref()
-        .map(|sync_name| OnDriftEntry {
-            conditions: group_name,
-            sync: sync_name.clone(),
-            with: HashMap::new(),
-            merge_position: MergePosition::BeforeOrigin,
-        })
-        .into_iter()
-        .collect();
+    let on_drift = vec![OnDriftEntry {
+        conditions: group_name,
+        sync: default_sync.sync.clone(),
+        with: default_sync.with.clone(),
+        merge_position: MergePosition::BeforeOrigin,
+    }];
 
     (on_drift, Some(conditions_resource))
 }
@@ -486,7 +525,10 @@ mod tests {
         OriginSpec::DBT {
             connection: "my-bigquery".to_string(),
             project_dir: "../dbt-project".to_string(),
-            default_sync: Some("dbt-default".to_string()),
+            default_sync: Some(DefaultSync {
+                sync: "dbt-default".to_string(),
+                with: HashMap::new(),
+            }),
             auto_sync: None,
         }
     }
@@ -673,7 +715,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_to_resources_no_default_sync() {
+    fn manifest_to_resources_no_default_sync_generates_dbt_run() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let origin = OriginSpec::DBT {
             connection: "my-bq".to_string(),
@@ -683,15 +725,46 @@ mod tests {
         };
         let resources = manifest_to_resources(&manifest, &origin);
 
+        // Auto-generated nagi-dbt-run Sync should be present
+        let dbt_run_sync = resources
+            .iter()
+            .find(|r| r.metadata().name == "nagi-dbt-run");
+        assert!(
+            dbt_run_sync.is_some(),
+            "nagi-dbt-run Sync should be auto-generated"
+        );
+        if let Some(NagiKind::Sync { spec, .. }) = dbt_run_sync {
+            assert_eq!(
+                spec.run.args,
+                vec!["dbt", "run", "--select", "{{ asset.name }}"]
+            );
+        }
+
+        // Model Assets with tests should reference nagi-dbt-run
         let customers = resources
             .iter()
             .find(|r| r.metadata().name == "customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
-            assert!(spec.on_drift.is_empty());
+            assert_eq!(spec.on_drift.len(), 1);
+            assert_eq!(spec.on_drift[0].sync, "nagi-dbt-run");
         } else {
             panic!("customers should be an Asset");
         }
+    }
+
+    #[test]
+    fn manifest_to_resources_default_sync_suppresses_auto_generation() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+
+        let dbt_run_sync = resources
+            .iter()
+            .any(|r| r.metadata().name == "nagi-dbt-run");
+        assert!(
+            !dbt_run_sync,
+            "nagi-dbt-run should not be generated when defaultSync is set"
+        );
     }
 
     #[test]
@@ -779,30 +852,13 @@ mod tests {
 
     #[test]
     fn build_on_drift_returns_empty_without_tests() {
-        let (on_drift, conditions) =
-            build_on_drift(None, "my_model", &Some("sync-name".to_string()));
+        let ds = DefaultSync {
+            sync: "nagi-dbt-run".to_string(),
+            with: HashMap::new(),
+        };
+        let (on_drift, conditions) = build_on_drift(None, "my_model", &ds);
         assert!(on_drift.is_empty());
         assert!(conditions.is_none());
-    }
-
-    #[test]
-    fn build_on_drift_returns_empty_without_default_sync() {
-        let test_node = DbtNode {
-            unique_id: "test.pkg.t1".to_string(),
-            resource_type: "test".to_string(),
-            name: "t1".to_string(),
-            package_name: "pkg".to_string(),
-            tags: vec![],
-            depends_on: DbtDependsOn { nodes: vec![] },
-            test_metadata: Some(DbtTestMetadata {
-                name: "not_null".to_string(),
-                kwargs: HashMap::new(),
-            }),
-        };
-        let tests = vec![&test_node];
-        let (on_drift, conditions) = build_on_drift(Some(&tests), "my_model", &None);
-        assert!(on_drift.is_empty());
-        assert!(conditions.is_some(), "Conditions should still be generated");
     }
 
     #[test]
@@ -820,8 +876,11 @@ mod tests {
             }),
         };
         let tests = vec![&test_node];
-        let (on_drift, conditions) =
-            build_on_drift(Some(&tests), "my_model", &Some("default-sync".to_string()));
+        let ds = DefaultSync {
+            sync: "default-sync".to_string(),
+            with: HashMap::new(),
+        };
+        let (on_drift, conditions) = build_on_drift(Some(&tests), "my_model", &ds);
         assert_eq!(on_drift.len(), 1);
         assert_eq!(on_drift[0].sync, "default-sync");
         assert_eq!(on_drift[0].conditions, "dbt-tests-my_model");
@@ -885,15 +944,17 @@ mod tests {
         let (dbt_source_map, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
-        let default_sync = Some("dbt-run".to_string());
-
+        let ds = DefaultSync {
+            sync: "dbt-run".to_string(),
+            with: HashMap::new(),
+        };
         let resources = build_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
             &model_names,
             "my-bq",
-            &default_sync,
+            &ds,
             true,
         );
 
@@ -915,11 +976,15 @@ mod tests {
     }
 
     #[test]
-    fn build_model_assets_without_default_sync() {
+    fn build_model_assets_with_custom_sync_with() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let (dbt_source_map, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
+        let ds = DefaultSync {
+            sync: "custom-sync".to_string(),
+            with: HashMap::from([("selector".to_string(), "+{{ asset.name }}".to_string())]),
+        };
 
         let resources = build_model_assets(
             &model_nodes,
@@ -927,14 +992,22 @@ mod tests {
             &dbt_source_map,
             &model_names,
             "my-bq",
-            &None,
+            &ds,
             true,
         );
 
-        for r in &resources {
-            if let NagiKind::Asset { spec, .. } = r {
-                assert!(spec.on_drift.is_empty());
-            }
+        let customers = resources
+            .iter()
+            .find(|r| r.metadata().name == "customers")
+            .unwrap();
+        if let NagiKind::Asset { spec, .. } = customers {
+            assert_eq!(spec.on_drift[0].sync, "custom-sync");
+            assert_eq!(
+                spec.on_drift[0].with.get("selector").unwrap(),
+                "+{{ asset.name }}"
+            );
+        } else {
+            panic!("expected Asset");
         }
     }
 
@@ -945,13 +1018,17 @@ mod tests {
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
 
+        let ds = DefaultSync {
+            sync: "dbt-run".to_string(),
+            with: HashMap::new(),
+        };
         let resources = build_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
             &model_names,
             "my-bq",
-            &Some("dbt-run".to_string()),
+            &ds,
             true,
         );
 
@@ -968,7 +1045,10 @@ mod tests {
         let origin = OriginSpec::DBT {
             connection: "my-bq".to_string(),
             project_dir: "../dbt-project".to_string(),
-            default_sync: Some("dbt-default".to_string()),
+            default_sync: Some(DefaultSync {
+                sync: "dbt-default".to_string(),
+                with: HashMap::new(),
+            }),
             auto_sync: Some(false),
         };
         let resources = manifest_to_resources(&manifest, &origin);

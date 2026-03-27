@@ -371,7 +371,8 @@ spec:
   type: DBT
   connection: my-bigquery
   projectDir: ../dbt-project
-  defaultSync: dbt-default
+  defaultSync:
+    sync: dbt-default
 "#;
         let resource = parse_kind(yaml).unwrap();
         assert_eq!(resource.kind(), origin::KIND);

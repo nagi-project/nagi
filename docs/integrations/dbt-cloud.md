@@ -24,7 +24,6 @@ spec:
   type: DBT
   connection: my-bigquery
   projectDir: ../dbt-project
-  defaultSync: dbt-default
   autoSync: false
 ```
 
@@ -72,7 +71,7 @@ spec:
 
 Evaluate は Nagi が直接実行します。
 
-- **Freshness / SQL 条件**: Nagi が Connection の接続情報で DWH に直接クエリを発行します
+- **Freshness / SQL 条件**: Nagi が Connection の接続情報で データウェアハウスに直接クエリを発行します
 - **Command 条件（dbt test）**: dbt CLI をサブプロセスとして実行します
 
 ## Sync

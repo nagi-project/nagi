@@ -1,9 +1,21 @@
+use std::collections::HashMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::KindError;
 
 pub const KIND: &str = "Origin";
+
+/// Override for the auto-generated Sync. Same interface as `onDrift` entries (sync name + with).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DefaultSync {
+    /// Name of the user-defined Sync resource to use instead of the auto-generated one.
+    pub sync: String,
+    /// Template variables passed to the Sync resource for argument interpolation.
+    #[serde(default)]
+    pub with: HashMap<String, String>,
+}
 
 /// Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -15,9 +27,9 @@ pub enum OriginSpec {
         connection: String,
         /// Local path to the dbt project directory (relative or absolute).
         project_dir: String,
-        /// Name of the Sync resource applied to all auto-generated Assets unless overridden.
+        /// User-defined Sync to override the auto-generated `nagi-dbt-run`.
         #[serde(default)]
-        default_sync: Option<String>,
+        default_sync: Option<DefaultSync>,
         /// Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).
         #[serde(default)]
         auto_sync: Option<bool>,
@@ -74,13 +86,44 @@ projectDir: ../dbt-project
 type: DBT
 connection: my-bigquery
 projectDir: ../dbt-project
-defaultSync: dbt-default
+defaultSync:
+  sync: my-custom-sync
+  with:
+    selector: "+{{ asset.name }}"
 "#;
         let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
-        assert!(
-            matches!(&spec, OriginSpec::DBT { default_sync: Some(name), .. }
-            if name == "dbt-default")
-        );
+        match &spec {
+            OriginSpec::DBT {
+                default_sync: Some(ds),
+                ..
+            } => {
+                assert_eq!(ds.sync, "my-custom-sync");
+                assert_eq!(ds.with.get("selector").unwrap(), "+{{ asset.name }}");
+            }
+            _ => panic!("expected DBT with defaultSync"),
+        }
+    }
+
+    #[test]
+    fn parse_origin_spec_with_default_sync_no_with() {
+        let yaml = r#"
+type: DBT
+connection: my-bigquery
+projectDir: ../dbt-project
+defaultSync:
+  sync: my-custom-sync
+"#;
+        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            OriginSpec::DBT {
+                default_sync: Some(ds),
+                ..
+            } => {
+                assert_eq!(ds.sync, "my-custom-sync");
+                assert!(ds.with.is_empty());
+            }
+            _ => panic!("expected DBT with defaultSync"),
+        }
     }
 
     #[test]

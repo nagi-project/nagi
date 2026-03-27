@@ -1,5 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "DefaultSync": {
+      "description": "Override for the auto-generated Sync. Same interface as `onDrift` entries (sync name + with).",
+      "properties": {
+        "sync": {
+          "description": "Name of the user-defined Sync resource to use instead of the auto-generated one.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync resource for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "sync"
+      ],
+      "type": "object"
+    }
+  },
   "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
   "oneOf": [
     {
@@ -17,12 +40,16 @@
           "type": "string"
         },
         "defaultSync": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DefaultSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "description": "Name of the Sync resource applied to all auto-generated Assets unless overridden.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "User-defined Sync to override the auto-generated `nagi-dbt-run`."
         },
         "projectDir": {
           "description": "Local path to the dbt project directory (relative or absolute).",
