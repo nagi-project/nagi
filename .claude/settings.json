@@ -4,13 +4,28 @@
   "prefersReducedMotion": true,
   "permissions": {
     "allow": [
-      "Bash(mise run:*)"
+      "Bash(mise run:*)",
+      "Bash(cargo build*)",
+      "Bash(cargo test*)",
+      "Bash(cargo fmt*)",
+      "Bash(cargo clippy*)",
+      "Bash(uv run *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ],
     "deny": [
       "Bash(rm -rf *)",
       "Bash(curl *)",
       "Bash(wget *)",
       "Bash(git push *)",
+      "Bash(git checkout -- *)",
+      "Bash(git reset --hard*)",
+      "Bash(git branch -D *)",
+      "Bash(pip install *)",
+      "Bash(npm install *)",
       "Bash(chmod 777 *)",
       "Read(./.env)",
       "Read(./.env.*)",
