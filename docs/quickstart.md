@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-- Python 3.12 以上
+- Python 3.10 以上
 - `pip install nagi-cli`
 
 ## Project Layout
