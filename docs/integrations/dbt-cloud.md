@@ -1,10 +1,10 @@
 # dbt Cloud
 
-dbt Cloud を使用している環境での Nagi の設定と動作について解説します。
+dbt Cloud を使用している環境での Nagi の利用方法について記載しています。
 
 ## Operation Models
 
-dbt Cloud 環境では、以下の2つの運用モデルがあります。
+dbt Cloud 環境と併用する場合では、以下の2つの運用モデルがあります。
 
 ### a. Nagi orchestrates (dbt Core execution)
 
@@ -16,7 +16,17 @@ reconciliation loop（evaluate → sync → re-evaluate → upstream propagation
 
 Nagi は evaluate と通知のみを実行します。Sync は実行しません。dbt Cloud のジョブが既存のスケジュールでモデルを更新し、Nagi は定期的にデータの状態を検査して drift を検出したら通知します。
 
-Asset の `autoSync: false` を設定するか、`onDrift` を省略します。
+[Origin](../configurations/resources/origin.md) に `autoSync: false` を設定すると、自動生成される全 Asset に適用されます。
+
+```yaml
+kind: Origin
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  defaultSync: dbt-default
+  autoSync: false
+```
 
 ### Why two models?
 

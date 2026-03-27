@@ -18,6 +18,9 @@ pub enum OriginSpec {
         /// Name of the Sync resource applied to all auto-generated Assets unless overridden.
         #[serde(default)]
         default_sync: Option<String>,
+        /// Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).
+        #[serde(default)]
+        auto_sync: Option<bool>,
     },
 }
 
@@ -60,8 +63,8 @@ projectDir: ../dbt-project
 "#;
         let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(
-            matches!(&spec, OriginSpec::DBT { connection, project_dir, default_sync }
-            if connection == "my-bigquery" && project_dir == "../dbt-project" && default_sync.is_none())
+            matches!(&spec, OriginSpec::DBT { connection, project_dir, default_sync, auto_sync }
+            if connection == "my-bigquery" && project_dir == "../dbt-project" && default_sync.is_none() && auto_sync.is_none())
         );
     }
 
@@ -86,6 +89,7 @@ defaultSync: dbt-default
             connection: String::new(),
             project_dir: "../dbt".to_string(),
             default_sync: None,
+            auto_sync: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(err.to_string().contains("connection must not be empty"));
@@ -97,8 +101,44 @@ defaultSync: dbt-default
             connection: "my-bq".to_string(),
             project_dir: String::new(),
             default_sync: None,
+            auto_sync: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(err.to_string().contains("projectDir must not be empty"));
+    }
+
+    #[test]
+    fn parse_origin_spec_auto_sync_false() {
+        let yaml = r#"
+type: DBT
+connection: my-bigquery
+projectDir: ../dbt-project
+autoSync: false
+"#;
+        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            &spec,
+            OriginSpec::DBT {
+                auto_sync: Some(false),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_origin_spec_auto_sync_defaults_to_none() {
+        let yaml = r#"
+type: DBT
+connection: my-bigquery
+projectDir: ../dbt-project
+"#;
+        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            &spec,
+            OriginSpec::DBT {
+                auto_sync: None,
+                ..
+            }
+        ));
     }
 }

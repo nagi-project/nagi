@@ -55,6 +55,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
     let OriginSpec::DBT {
         connection,
         default_sync,
+        auto_sync,
         ..
     } = origin;
 
@@ -63,11 +64,13 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
     let dbt_source_tests = collect_tests(manifest, &dbt_source_map);
     let model_tests = collect_tests(manifest, &model_names);
 
+    let auto_sync_val = auto_sync.unwrap_or(true);
     let (mut resources, needs_skip_sync) = build_dbt_source_assets(
         &dbt_source_names,
         &dbt_source_map,
         &dbt_source_tests,
         connection,
+        auto_sync_val,
     );
     if needs_skip_sync {
         resources.push(make_skip_sync());
@@ -79,6 +82,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         &model_names,
         connection,
         default_sync,
+        auto_sync_val,
     );
     resources.extend(model_assets);
     resources
@@ -93,6 +97,7 @@ fn build_dbt_source_assets(
     dbt_source_map: &HashMap<String, String>,
     dbt_source_tests: &HashMap<String, Vec<&DbtNode>>,
     connection: &str,
+    auto_sync: bool,
 ) -> (Vec<NagiKind>, bool) {
     let mut resources: Vec<NagiKind> = Vec::new();
     let mut skip_sync_needed = false;
@@ -133,7 +138,7 @@ fn build_dbt_source_assets(
                 connection: Some(connection.to_string()),
                 upstreams: vec![],
                 on_drift,
-                auto_sync: true,
+                auto_sync,
                 evaluate_cache_ttl: None,
             },
         });
@@ -169,6 +174,7 @@ fn build_model_assets(
     model_names: &HashMap<String, String>,
     connection: &str,
     default_sync: &Option<String>,
+    auto_sync: bool,
 ) -> Vec<NagiKind> {
     let mut resources: Vec<NagiKind> = Vec::new();
 
@@ -192,7 +198,7 @@ fn build_model_assets(
                 connection: Some(connection.to_string()),
                 upstreams,
                 on_drift,
-                auto_sync: true,
+                auto_sync,
                 evaluate_cache_ttl: None,
             },
         });
@@ -481,6 +487,7 @@ mod tests {
             connection: "my-bigquery".to_string(),
             project_dir: "../dbt-project".to_string(),
             default_sync: Some("dbt-default".to_string()),
+            auto_sync: None,
         }
     }
 
@@ -672,6 +679,7 @@ mod tests {
             connection: "my-bq".to_string(),
             project_dir: "../dbt-project".to_string(),
             default_sync: None,
+            auto_sync: None,
         };
         let resources = manifest_to_resources(&manifest, &origin);
 
@@ -833,6 +841,7 @@ mod tests {
             &dbt_source_map,
             &dbt_source_tests,
             "my-bq",
+            true,
         );
 
         assert!(needs_skip_sync);
@@ -858,7 +867,7 @@ mod tests {
         let dbt_source_tests = HashMap::new();
 
         let (resources, needs_skip_sync) =
-            build_dbt_source_assets(&names, &dbt_source_map, &dbt_source_tests, "my-bq");
+            build_dbt_source_assets(&names, &dbt_source_map, &dbt_source_tests, "my-bq", true);
 
         assert!(!needs_skip_sync);
         assert_eq!(resources.len(), 1);
@@ -885,6 +894,7 @@ mod tests {
             &model_names,
             "my-bq",
             &default_sync,
+            true,
         );
 
         let assets: Vec<_> = resources.iter().filter(|r| r.kind() == "Asset").collect();
@@ -918,6 +928,7 @@ mod tests {
             &model_names,
             "my-bq",
             &None,
+            true,
         );
 
         for r in &resources {
@@ -941,6 +952,7 @@ mod tests {
             &model_names,
             "my-bq",
             &Some("dbt-run".to_string()),
+            true,
         );
 
         let syncs: Vec<_> = resources.iter().filter(|r| r.kind() == "Sync").collect();
@@ -948,5 +960,26 @@ mod tests {
             syncs.is_empty(),
             "Sync generation is the caller's responsibility"
         );
+    }
+
+    #[test]
+    fn origin_auto_sync_false_propagates_to_assets() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let origin = OriginSpec::DBT {
+            connection: "my-bq".to_string(),
+            project_dir: "../dbt-project".to_string(),
+            default_sync: Some("dbt-default".to_string()),
+            auto_sync: Some(false),
+        };
+        let resources = manifest_to_resources(&manifest, &origin);
+
+        for r in &resources {
+            if let NagiKind::Asset { spec, .. } = r {
+                assert!(
+                    !spec.auto_sync,
+                    "all generated Assets should have autoSync: false"
+                );
+            }
+        }
     }
 }

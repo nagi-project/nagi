@@ -4,6 +4,14 @@
   "oneOf": [
     {
       "properties": {
+        "autoSync": {
+          "default": null,
+          "description": "Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "connection": {
           "description": "Connection resource name for auto-generated Assets.",
           "type": "string"
