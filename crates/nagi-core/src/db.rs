@@ -37,7 +37,7 @@ pub trait Connection: Send + Sync {
     /// Executes a DML/DDL statement (e.g. CREATE TABLE, MERGE).
     async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError>;
 
-    /// Loads a JSONL file into a staging table via the DWH's bulk load mechanism.
+    /// Loads a JSONL file into a staging table via the data warehouse's bulk load mechanism.
     /// `dataset` is the target dataset/schema, `table` is the staging table name.
     async fn load_jsonl(
         &self,

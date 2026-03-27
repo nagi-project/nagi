@@ -30,7 +30,7 @@ pub enum ExportError {
     Connection(#[from] crate::db::ConnectionError),
 }
 
-/// Tables that can be exported to a remote DWH.
+/// Tables that can be exported to a remote data warehouse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportTable {
     EvaluateLogs,
@@ -212,7 +212,7 @@ fn build_merge_sql(dataset: &str, table: ExportTable) -> String {
     )
 }
 
-/// Exports a single table to the remote DWH.
+/// Exports a single table to the remote data warehouse.
 ///
 /// Pipeline:
 /// 1. For sync_logs: upload stdout/stderr files, build path rewrite map
@@ -510,7 +510,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
         .collect()
 }
 
-/// Resolves a DWH Connection by loading `resources/` and matching `connection_name`.
+/// Resolves a data warehouse Connection by loading `resources/` and matching `connection_name`.
 pub fn resolve_export_connection(
     resources_dir: &Path,
     connection_name: &str,

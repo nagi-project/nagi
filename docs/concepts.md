@@ -174,7 +174,7 @@ my-project/
 ├── suspended/             # Guardrails による停止フラグ
 ├── logs.db                # 実行履歴を保存する SQLite ファイル
 ├── logs/                  # sync の stdout/stderr を保存するログファイル
-└── watermarks/            # DWH エクスポートのウォーターマーク
+└── watermarks/            # データウェアハウスエクスポートのウォーターマーク
 ```
 
 [`nagi.yaml`](./configurations/project.md) はプロジェクト全体の設定（ストレージバックエンド、通知先など）を担います。

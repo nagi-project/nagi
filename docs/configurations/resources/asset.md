@@ -34,11 +34,11 @@ spec:
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `autoSync` | boolean | — | true | Controls automatic sync execution in `nagi serve`. Defaults to `true`. |
+| `connection` | string | — | - | Name of the Connection resource for DB access. |
 | `evaluateCacheTtl` | Duration | — | - | Default evaluate cache TTL for all conditions in this Asset. Conditions can override this with their own `evaluateCacheTtl`. |
 | `onDrift` | list[OnDriftEntry] | — | [] | Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready. |
-| `connection` | string | — | - | Name of the Connection resource for DB access. |
-| `upstreams` | list[string] | — | [] | Names of upstream Asset resources. |
 | `tags` | list[string] | — | [] | Tags for filtering with `--select tag:X`. |
+| `upstreams` | list[string] | — | [] | Names of upstream Asset resources. |
 
 <!-- schema:auto-generated:end:AssetSpec -->
 

@@ -50,7 +50,7 @@ pub struct NagiConfig {
     #[schemars(default = "schema_default_nagi_dir")]
     pub nagi_dir: NagiDir,
     /// Log export configuration. When set, compile generates export Assets
-    /// and logs are transferred to the remote DWH.
+    /// and logs are transferred to the remote data warehouse.
     pub export: Option<ExportConfig>,
 }
 
@@ -171,12 +171,12 @@ pub enum ExportFormat {
     DuckDb,
 }
 
-/// Configuration for exporting logs to a remote DWH.
+/// Configuration for exporting logs to a remote data warehouse.
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct ExportConfig {
     /// Reference to a `kind: Connection` resource name.
     pub connection: String,
-    /// DWH dataset (BigQuery) or schema (Snowflake) to export into.
+    /// Data warehouse dataset (BigQuery) or schema (Snowflake) to export into.
     pub dataset: String,
     /// Intermediate file format for export.
     #[serde(default = "default_export_format")]

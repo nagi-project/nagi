@@ -38,14 +38,14 @@
       "type": "string"
     },
     "ExportConfig": {
-      "description": "Configuration for exporting logs to a remote DWH.",
+      "description": "Configuration for exporting logs to a remote data warehouse.",
       "properties": {
         "connection": {
           "description": "Reference to a `kind: Connection` resource name.",
           "type": "string"
         },
         "dataset": {
-          "description": "DWH dataset (BigQuery) or schema (Snowflake) to export into.",
+          "description": "Data warehouse dataset (BigQuery) or schema (Snowflake) to export into.",
           "type": "string"
         },
         "format": {
@@ -127,7 +127,7 @@
           "type": "null"
         }
       ],
-      "description": "Log export configuration. When set, compile generates export Assets and logs are transferred to the remote DWH."
+      "description": "Log export configuration. When set, compile generates export Assets and logs are transferred to the remote data warehouse."
     },
     "lockRetryIntervalSeconds": {
       "default": 900,

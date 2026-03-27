@@ -12,13 +12,13 @@ sequenceDiagram
     participant Controller
     participant EvalTask as Evaluate Task
     participant SyncTask as Sync Task
-    participant DWH as Data Warehouse
+    participant DataWarehouse as Data Warehouse
     participant CLI as External Tool
 
     Timer->>Controller: 評価時刻に到達
     Controller->>EvalTask: Evaluate タスク発行
-    EvalTask->>DWH: クエリ実行
-    DWH-->>EvalTask: 結果
+    EvalTask->>DataWarehouse: クエリ実行
+    DataWarehouse-->>EvalTask: 結果
     EvalTask-->>Controller: Ready or Drifted
 
     alt Drifted and autoSync
@@ -27,8 +27,8 @@ sequenceDiagram
         CLI-->>SyncTask: exit code
         SyncTask-->>Controller: 完了
         Controller->>EvalTask: Evaluate タスク発行
-        EvalTask->>DWH: クエリ実行
-        DWH-->>EvalTask: 結果
+        EvalTask->>DataWarehouse: クエリ実行
+        DataWarehouse-->>EvalTask: 結果
         EvalTask-->>Controller: Ready or Drifted
     end
 
