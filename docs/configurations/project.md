@@ -21,7 +21,7 @@ terminationGracePeriodSeconds: 300
 
 `notify.slack` を設定すると Slack 通知が有効になります。省略すると通知機能は OFF になります。設定方法は [Notifications](../architecture/notifications.md) を参照してください。
 
-`export` を設定すると、[`nagi export`](../cli.md#export) で実行ログ（evaluate / sync）をリモート DWH にエクスポートできます。また、[`nagi compile`](../cli.md#compile) がエクスポート用の Asset を自動生成し、[`nagi serve`](../cli.md#serve) で定期的にエクスポートを実行します。省略するとログはローカルの `logs.db` のみに保持されます。
+`export` を設定すると、実行ログをデータウェアハウスにエクスポートできます。compile がエクスポート用リソースを自動生成し、ユーザーのデータウェアハウスにテーブルを作成します。詳細は [Export](../architecture/export.md) を参照してください。
 
 <!-- schema:auto-generated:start:NagiConfig -->
 
@@ -30,7 +30,7 @@ terminationGracePeriodSeconds: 300
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `backend` | any | — | - | State storage backend configuration. |
-| `export` | ExportConfig | — | - | Log export configuration. When set, compile generates export Assets and logs are transferred to the remote DWH. |
+| `export` | ExportConfig | — | - | Log export configuration. When set, compile generates export Assets and logs are transferred to the remote data warehouse. |
 | `lockRetryIntervalSeconds` | integer | — | 900 | Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes). |
 | `lockRetryMaxAttempts` | integer | — | 3 | Maximum number of lock acquisition retry attempts before skipping. Defaults to 3. |
 | `lockTtlSeconds` | integer | — | 3600 | Time-to-live in seconds for sync lock files. Locks expire after this duration, preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour). |

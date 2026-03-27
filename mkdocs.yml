@@ -56,6 +56,7 @@ nav:
     - Serve Scenarios: architecture/serve-scenarios.md
     - Serve Restart: architecture/serve-restart.md
     - Storage: architecture/storage.md
+    - Export: architecture/export.md
     - Notifications: architecture/notifications.md
     - MCP Server: architecture/mcp.md
   - Integrations:
