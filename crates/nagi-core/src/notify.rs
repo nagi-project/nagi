@@ -125,6 +125,14 @@ mod tests {
     }
 
     #[test]
+    fn halted_has_no_asset_name() {
+        let event = NotifyEvent::Halted {
+            reason: "manual halt".to_string(),
+        };
+        assert_eq!(event.asset_name(), None);
+    }
+
+    #[test]
     fn sync_lock_skipped_has_asset_name() {
         let event = NotifyEvent::SyncLockSkipped {
             asset_name: "daily-sales".to_string(),

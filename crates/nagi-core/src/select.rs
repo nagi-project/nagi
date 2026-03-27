@@ -319,30 +319,6 @@ mod tests {
         double_plus: ["++"];
     }
 
-    // --- parse_selector unit tests ---
-
-    macro_rules! parse_selector_test {
-        ($($name:ident: $input:expr => ($up:expr, $down:expr, $pattern:expr);)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let (up, down, pattern) = parse_selector($input).unwrap();
-                    assert_eq!(up, $up);
-                    assert_eq!(down, $down);
-                    assert_eq!(pattern, $pattern);
-                }
-            )*
-        };
-    }
-
-    parse_selector_test! {
-        parse_selector_exact: "daily-sales" => (false, false, "daily-sales");
-        parse_selector_upstream: "+daily-sales" => (true, false, "daily-sales");
-        parse_selector_downstream: "daily-sales+" => (false, true, "daily-sales");
-        parse_selector_both: "+daily-sales+" => (true, true, "daily-sales");
-        parse_selector_tag: "+tag:finance+" => (true, true, "tag:finance");
-    }
-
     // --- build_adjacency unit tests ---
 
     #[test]

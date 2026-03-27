@@ -137,6 +137,46 @@ run:
     }
 
     #[test]
+    fn validate_rejects_empty_pre_args() {
+        let spec = SyncSpec {
+            pre: Some(SyncStep {
+                step_type: StepType::Command,
+                args: vec![],
+                env: HashMap::new(),
+            }),
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: vec!["dbt".to_string()],
+                env: HashMap::new(),
+            },
+            post: None,
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, message }
+            if kind == KIND && message.contains("pre")));
+    }
+
+    #[test]
+    fn validate_rejects_empty_post_args() {
+        let spec = SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: vec!["dbt".to_string()],
+                env: HashMap::new(),
+            },
+            post: Some(SyncStep {
+                step_type: StepType::Command,
+                args: vec![],
+                env: HashMap::new(),
+            }),
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, message }
+            if kind == KIND && message.contains("post")));
+    }
+
+    #[test]
     fn validate_accepts_valid_spec() {
         let spec = SyncSpec {
             pre: None,

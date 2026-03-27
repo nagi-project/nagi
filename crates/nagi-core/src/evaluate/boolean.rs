@@ -37,6 +37,8 @@ mod tests {
     boolean_ready! {
         bool_true_is_ready: Value::Bool(true);
         string_true_is_ready: Value::String("true".to_string());
+        string_true_upper_is_ready: Value::String("TRUE".to_string());
+        string_true_mixed_is_ready: Value::String("True".to_string());
     }
 
     macro_rules! boolean_not_ready {
@@ -56,12 +58,22 @@ mod tests {
     boolean_not_ready! {
         bool_false_is_not_ready: Value::Bool(false);
         string_false_is_not_ready: Value::String("false".to_string());
+        string_false_upper_is_not_ready: Value::String("FALSE".to_string());
     }
 
     #[test]
     fn unexpected_value_returns_error() {
         assert!(matches!(
             evaluate_boolean(Value::Null),
+            Err(EvaluateError::UnexpectedResult(_))
+        ));
+        assert!(matches!(
+            evaluate_boolean(Value::Number(serde_json::Number::from(1))),
+            Err(EvaluateError::UnexpectedResult(_))
+        ));
+        // Non-boolean string is also unexpected
+        assert!(matches!(
+            evaluate_boolean(Value::String("yes".to_string())),
             Err(EvaluateError::UnexpectedResult(_))
         ));
     }
