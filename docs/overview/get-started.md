@@ -61,15 +61,11 @@ my-project/
 
 `resources/` にリソース定義用の YAML ファイルを配置します。
 
-目的ごとに必要となるリソースは異なります。Origin を設定済みの場合は、追加で必要となるリソース定義ファイルを配置してください。
+Origin を設定済みの場合、Asset は `nagi compile` で自動生成されるため、ここでは [Conditions](../reference/resources/conditions.md) を配置します。
 
-| 目的 | 追加するリソース |
-| --- | --- |
-| 期待状態の評価から始める | [Asset](../reference/resources/asset.md), [Conditions](../reference/resources/conditions.md), [Connection](../reference/resources/connection.md) |
-| 状態評価と収束操作を行う | [Asset](../reference/resources/asset.md), [Conditions](../reference/resources/conditions.md), [Connection](../reference/resources/connection.md), [Sync](../reference/resources/sync.md) |
+Origin を使用しない場合は、[Asset](../reference/resources/asset.md)、[Conditions](../reference/resources/conditions.md)、[Connection](../reference/resources/connection.md) を配置します。
 
-!!! tip
-    「期待状態の評価から始める」場合は、Asset に `autoSync: false` を設定してください。デフォルトの設定は自動収束です。
+各リソースの定義方法は [Resource Configurations](../reference/resources/index.md) を参照してください。
 
 ### 3. Compile
 
@@ -90,10 +86,23 @@ my-project/
     └── graph.json          # 依存グラフ
 ```
 
-target/ にファイルが生成されたら、セットアップは完了です。
+### 4. Evaluate
+
+```bash
+nagi evaluate
+```
+
+`target/` の Asset に対して期待状態の評価を実行します。すべて満たしていれば Ready、1つでも満たしていなければ Drifted と判定されます。
+
+特定の Asset のみを評価するには `--select` を使います。
+
+```bash
+nagi evaluate --select <asset-name>
+```
 
 ## What's Next
 
-- [`nagi evaluate`](../reference/cli.md#evaluate) — 期待状態の評価を実行する
+- [Concepts — From Monitoring to Automation](./concepts.md#from-monitoring-to-automation) — 自動収束へ段階的に進める流れを知る
 - [`nagi sync`](../reference/cli.md#sync) — 収束操作を手動実行する
-- [Serve Internals](../architecture/serve/internals.md) — 評価と収束のループの仕組みを知る
+- [`nagi serve`](../reference/cli.md#serve) — 評価と収束のループを継続的に実行する
+- [Serve Internals](../architecture/serve/internals.md) — ループの仕組みを知る

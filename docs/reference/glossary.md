@@ -45,7 +45,7 @@ Origin
 ## Asset Fields
 
 onDrift
-: 条件と Sync のペアをリストで定義するフィールド。エントリは上から順に評価され、最初に条件が Drifted のエントリの Sync が実行される（first-match）。
+: 期待状態と収束操作のペアをリストで定義するフィールド。エントリは上から順に評価され、最初に Drifted のエントリの収束操作が実行される（first-match）。
 
 autoSync
 : `nagi serve` での自動 Sync 実行を制御するフラグ。`true`（デフォルト）で自動実行、`false` で Evaluate のみ。
@@ -79,9 +79,6 @@ Guardrails
 
 Upstream Propagation
 : 上流 Asset が Drifted → Ready に遷移したとき、下流 Asset の Sync を Evaluate をスキップして直接起動する仕組み。Sync 完了後に re-evaluate で収束結果を確認する。上流が Drifted の間、下流の Evaluate と Sync はすべてブロックされる。
-
-Source Change Detection
-: Source テーブルの統計値（行数・バイト数）が前回から変化していない場合にキャッシュ済みの評価結果を返し、データウェアハウスへのクエリを省略するための最適化。
 
 SyncLock
 : 同じ Asset に対する Sync の同時実行を防ぐ排他ロック。TTL 付きでデッドロックを防止する。

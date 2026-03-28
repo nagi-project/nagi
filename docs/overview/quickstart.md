@@ -167,7 +167,7 @@ nagi serve
 
 `nagi serve` を起動すると、条件を定期的に評価し、Drifted を検知したら自動で Sync を実行します。
 
-#### 上流の変化が下流に伝播する
+#### Upstream Changes Propagate Downstream
 
 別のターミナルで `greeting.txt` を削除します。
 
@@ -182,7 +182,7 @@ rm greeting.txt
 
 上流 Asset が Ready に戻ると、下流 Asset は evaluate をスキップして直接 sync を実行します。
 
-#### 下流のみが Drifted になる
+#### Only Downstream Becomes Drifted
 
 `farewell.txt` のみを削除します。
 

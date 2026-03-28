@@ -43,18 +43,7 @@ Origin の `projectDir` は `--project-dir` オプションで使われます。
 
 ## Compile
 
-[`nagi compile`](../../reference/cli.md#compile) を実行すると、Origin が dbt プロジェクトを読み取り、以下のリソースを `target/` に生成します。
-
-| dbt resource | 生成されるリソース |
-| --- | --- |
-| model | [kind: Asset](../../reference/resources/asset.md) |
-| test (on model) | [kind: Conditions](../../reference/resources/conditions.md) + Asset の `onDrift` |
-| test (on source) | [kind: Conditions](../../reference/resources/conditions.md) + Asset の `onDrift`（`nagi-skip-sync` を使用） |
-| source | [kind: Asset](../../reference/resources/asset.md)（`upstreams` なし、テストがあれば `onDrift` 付き） |
-
-dbt source は Nagi では Asset として生成されます。dbt source にテストが定義されている場合、`onDrift` に条件が設定され、`nagi-skip-sync`（何もせず正常終了する Sync）が割り当てられます。Drifted になると下流 Asset がブロックされ、外部で修復されるまで待機します。
-
-dbt model と dbt source のリネージは Asset の `spec.upstreams` として依存関係に変換されます。
+[`nagi compile`](../../reference/cli.md#compile) を実行すると、Origin が dbt プロジェクトを読み取り、Asset / Conditions / Sync を `target/` に生成します。リソース生成のマッピングとマージの動作は [Resource Generation](./resource-generation.md) を参照してください。
 
 ## Evaluate
 
@@ -69,70 +58,4 @@ dbt CLI をサブプロセスとして実行します（例: `dbt run --select d
 
 ## Customization
 
-Origin が自動生成した Asset と同名の Asset を `resources/` に手書きすると、[`nagi compile`](../../reference/cli.md#compile) の中で `onDrift` がリスト結合されます。先に出現した Asset（Origin 自動生成）のフィールド（`tags`, `sources` 等）が維持され、後の Asset（ユーザー定義）の `onDrift` エントリが追加されます。
-
-これにより、dbt test 由来の Conditions はそのまま維持しつつ、鮮度条件などを個別に追加できます。
-
-### Example
-
-ユーザー定義の Conditions と Asset
-
-```yaml
-# resources/daily-sales-freshness.yaml（ユーザー定義）
-apiVersion: nagi.io/v1alpha1
-kind: Conditions
-metadata:
-  name: daily-sales-freshness
-spec:
-  - name: data-freshness
-    type: Freshness
-    maxAge: 24h
-    interval: 6h
----
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sales-freshness
-      sync: dbt-default
-```
-
-[`nagi compile`](../../reference/cli.md#compile) が Origin から自動生成する Conditions と Asset
-
-```yaml
-apiVersion: nagi.io/v1alpha1
-kind: Conditions
-metadata:
-  name: dbt-tests-daily-sales
-spec:
-  - name: dbt-test-daily-sales
-    type: Command
-    run: [dbt, test, --select, daily_sales]
----
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: dbt-tests-daily-sales
-      sync: dbt-default
-```
-
-[`nagi compile`](../../reference/cli.md#compile) でマージされた結果（Asset の `onDrift` がリスト結合される）
-
-```yaml
-# target/assets/daily-sales.yaml（compile 後）
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: dbt-tests-daily-sales
-      sync: dbt-default
-    - conditions: daily-sales-freshness
-      sync: dbt-default
-```
+Origin が自動生成した Asset と同名の Asset を `resources/` に定義すると、`onDrift` がリスト結合されます。マージのルールと具体例は [Resource Generation - Merge with User-defined Resources](./resource-generation.md#merge-with-user-defined-resources) を参照してください。

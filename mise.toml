@@ -31,9 +31,13 @@ uv run ty check python/
 uv run pytest python/tests/ -v
 """
 
+[tasks.check-docs]
+description = "Check documentation conventions"
+run = "bash scripts/check_doc_rules.sh"
+
 [tasks.check]
-description = "Run all checks (Rust then Python)"
-depends = ["check-rust", "check-python"]
+description = "Run all checks (Rust, Python, docs)"
+depends = ["check-rust", "check-python", "check-docs"]
 
 [tasks.coverage]
 description = "Generate test coverage report (requires cargo-llvm-cov)"

@@ -23,6 +23,9 @@ theme:
     - navigation.indexes
     - content.code.copy
 
+extra_css:
+  - stylesheets/extra.css
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -53,6 +56,12 @@ nav:
     - Export: architecture/export.md
     - Notifications: architecture/notifications.md
     - MCP Server: architecture/mcp.md
+  - Operations:
+    - Deployment:
+      - operations/deployment/index.md
+      - Local: operations/deployment/local.md
+      - VM: operations/deployment/vm.md
+      - Container: operations/deployment/container.md
   - Reference:
     - Project Config: reference/project.md
     - Resource Config:
@@ -67,5 +76,6 @@ nav:
   - Integrations:
     - integrations/index.md
     - dbt:
+      - Resource Generation: integrations/dbt/resource-generation.md
       - dbt Core: integrations/dbt/core.md
       - dbt Cloud: integrations/dbt/cloud.md

@@ -2,21 +2,9 @@
 
 dbt Cloud を使用している環境での Nagi の利用方法について記載しています。
 
-## Operation Models
+## Recommended Approach
 
-dbt Cloud 環境と併用する場合では、以下の2つの運用モデルがあります。
-
-### a. Nagi orchestrates (dbt Core + dbt Cloud)
-
-Nagi が dbt Core CLI（`dbt run --select <model>`）を Asset 単位で実行します。dbt Cloud のジョブスケジューラは使用せず、Nagi の reconciliation loop が実行を制御します。
-
-dbt Cloud 環境との併用として、`dbtCloud` フィールドを Connection に設定すると、Sync 実行前に dbt Cloud API で実行中のジョブを確認し、競合を防止します。詳細は [Sync Control](#sync-control) を参照してください。
-
-### b. Nagi observes (dbt Cloud orchestrates)
-
-Nagi は evaluate と通知のみを実行します。Sync は実行しません。dbt Cloud のジョブが既存のスケジュールでモデルを更新し、Nagi は定期的にデータの状態を検査して drift を検出したら通知します。
-
-[Origin](../../reference/resources/origin.md) に `autoSync: false` を設定すると、自動生成される全 Asset に適用されます。
+dbt Cloud 環境と併用する場合は、Nagi は状態評価と通知から始めることを推奨します。[Origin](../../reference/resources/origin.md) に `autoSync: false` を設定すると、自動生成されるすべての Asset に適用されます。
 
 ```yaml
 kind: Origin
@@ -27,11 +15,7 @@ spec:
   autoSync: false
 ```
 
-### Choosing a Model
-
-Nagi の reconciliation loop は Asset 単位で evaluate → sync → re-evaluate を実行します。一方、dbt Cloud のジョブは `dbt build` のように DAG 全体を一括処理する設計です。この粒度の違いから、Nagi が dbt Cloud ジョブを直接トリガーする運用には対応していません。
-
-モデル a は dbt Core CLI による Asset 単位の実行で reconciliation loop を機能させます。モデル b は既存の dbt Cloud ジョブをそのまま使い、Nagi を監視・通知に限定します。
+dbt Cloud のジョブが既存のスケジュールでモデルを更新し、Nagi は定期的にデータの状態を検査して drift を検出したら通知します。段階的に自動収束へ進める流れは [Concepts — From Monitoring to Automation](../../overview/concepts.md#from-monitoring-to-automation) を参照してください。
 
 ## Prerequisites
 
@@ -62,22 +46,21 @@ spec:
 
 ## Compile
 
-[dbt Core](./core.md) と同じく、ローカルにある dbt プロジェクトに対して `dbt compile` を実行し `manifest.json` を生成します。
+[dbt Core](./core.md) と同じく、ローカルにある dbt プロジェクトに対して `dbt compile` を実行し `manifest.json` を生成します。リソース生成の詳細は [Resource Generation](./resource-generation.md) を参照してください。
 
 ## Evaluate
 
-Evaluate は Nagi が直接実行します。
-
-- **Freshness / SQL 条件**: Nagi が Connection の接続情報で データウェアハウスに直接クエリを発行します
-- **Command 条件（dbt test）**: dbt CLI をサブプロセスとして実行します
+[dbt Core](./core.md#evaluate) と同じです。
 
 ## Sync
 
-dbt CLI をサブプロセスとして実行します（例: `dbt run --select daily_sales`）。
+Sync を実行する場合は、dbt Core と同様に dbt CLI をサブプロセスとして実行します。
+
+dbt Cloud 環境では、Nagi の Sync と dbt Cloud のジョブが同じモデルを同時に更新する可能性があります。これを防ぐため、Sync Control による実行中ジョブの確認を組み込んでいます。
 
 ## Sync Control
 
-運用モデル a で Nagi が Sync を実行する場合、`dbtCloud` が設定されていれば Sync 実行前に dbt Cloud API で実行中のジョブを確認します。compile 時に各 dbt Cloud ジョブの `execute_steps` を解析し、対象 Asset を含むジョブを特定します。Sync 実行時にそのジョブが実行中であれば Sync を中断します。
+Asset の Connection に `dbtCloud` が設定されている場合、Sync 実行前に dbt Cloud で実行中のジョブがないか確認します。compile 時に各 dbt Cloud ジョブの `execute_steps` を解析し、対象 Asset を含むジョブを特定します。Sync 実行時にそのジョブが実行中であれば Sync を中断します。
 
 1. compile 時に Jobs API から全ジョブを取得し、`execute_steps` の `--select` からモデル名を抽出して Asset ごとに関連ジョブを特定する
 2. Sync 実行時に Runs API で実行中のジョブを取得し、対象 Asset に関連するジョブが実行中か確認する
@@ -106,4 +89,4 @@ dbt Cloud の API トークンには以下の権限が必要です。
 
 ## Customization
 
-[dbt Core](./core.md#customization) と同じです。Origin が自動生成する Asset と同名の Asset を `resources/` に作成すると、`onDrift` がリスト結合されます。
+[dbt Core](./core.md#customization) と同じです。
