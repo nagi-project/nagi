@@ -104,6 +104,62 @@ pub enum ResolvedConnection {
         /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
         dbt_cloud_credentials_file: Option<String>,
     },
+    /// Direct BigQuery connection without dbt profiles.yml.
+    #[serde(rename = "bigquery", rename_all = "camelCase")]
+    BigQuery {
+        name: String,
+        project: String,
+        dataset: String,
+        execution_project: Option<String>,
+        method: Option<String>,
+        keyfile: Option<String>,
+        timeout_seconds: Option<u32>,
+    },
+}
+
+impl ResolvedConnection {
+    pub fn name(&self) -> &str {
+        match self {
+            ResolvedConnection::Dbt { name, .. } | ResolvedConnection::BigQuery { name, .. } => {
+                name
+            }
+        }
+    }
+
+    /// Creates a `Box<dyn Connection>` from the resolved connection info.
+    pub fn connect(&self) -> Result<Box<dyn crate::db::Connection>, crate::db::ConnectionError> {
+        match self {
+            ResolvedConnection::Dbt {
+                profile, target, ..
+            } => {
+                let f = crate::dbt::profile::DbtProfilesFile::load_default()
+                    .map_err(|e| crate::db::ConnectionError::AuthFailed(e.to_string()))?;
+                let output = f
+                    .resolve(profile, target.as_deref())
+                    .map_err(|e| crate::db::ConnectionError::AuthFailed(e.to_string()))?;
+                crate::db::create_connection(output)
+            }
+            ResolvedConnection::BigQuery {
+                project,
+                dataset,
+                execution_project,
+                method,
+                keyfile,
+                timeout_seconds,
+                ..
+            } => {
+                let conn = crate::db::bigquery::BigQueryConnection::from_resolved(
+                    project,
+                    dataset,
+                    execution_project,
+                    method.as_deref(),
+                    keyfile,
+                    *timeout_seconds,
+                )?;
+                Ok(Box::new(conn))
+            }
+        }
+    }
 }
 
 /// Applies dbt Cloud job-to-model mapping to resolved assets.
@@ -186,16 +242,19 @@ fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOriginConfig> {
     let connection_profiles: HashMap<&str, (&str, Option<&str>)> = resources
         .iter()
         .filter_map(|r| match r {
-            NagiKind::Connection { metadata, spec, .. } => match spec {
-                ConnectionSpec::Dbt {
-                    ref profile,
-                    ref target,
-                    ..
-                } => Some((
-                    metadata.name.as_str(),
-                    (profile.as_str(), target.as_deref()),
-                )),
-            },
+            NagiKind::Connection {
+                metadata,
+                spec:
+                    ConnectionSpec::Dbt {
+                        ref profile,
+                        ref target,
+                        ..
+                    },
+                ..
+            } => Some((
+                metadata.name.as_str(),
+                (profile.as_str(), target.as_deref()),
+            )),
             _ => None,
         })
         .collect();
@@ -597,7 +656,11 @@ fn resolve_asset(
 
     let resolved_on_drift =
         resolve_on_drift(&metadata.name, &spec.on_drift, conditions_groups, syncs)?;
-    let connection = resolve_connection(&spec.connection, connections)?;
+    let connection = spec
+        .connection
+        .as_deref()
+        .map(|name| resolve_connection_by_name(name, connections))
+        .transpose()?;
 
     Ok(ResolvedAsset {
         metadata,
@@ -647,27 +710,24 @@ fn resolve_on_drift(
     Ok(resolved)
 }
 
-/// Validates and resolves the connection reference.
-fn resolve_connection(
-    connection_ref: &Option<String>,
+/// Resolves a named `ConnectionSpec` into a `ResolvedConnection`.
+pub fn resolve_connection_by_name(
+    conn_name: &str,
     connections: &HashMap<String, ConnectionSpec>,
-) -> Result<Option<ResolvedConnection>, CompileError> {
-    let Some(conn_name) = connection_ref else {
-        return Ok(None);
-    };
+) -> Result<ResolvedConnection, CompileError> {
     let conn_spec = connections
         .get(conn_name)
         .ok_or_else(|| CompileError::UnresolvedRef {
             kind: "Connection".to_string(),
-            name: conn_name.clone(),
+            name: conn_name.to_string(),
         })?;
     match conn_spec {
         ConnectionSpec::Dbt {
             ref profile,
             ref target,
             ref dbt_cloud,
-        } => Ok(Some(ResolvedConnection::Dbt {
-            name: conn_name.clone(),
+        } => Ok(ResolvedConnection::Dbt {
+            name: conn_name.to_string(),
             profile: profile.clone(),
             target: target.clone(),
             dbt_cloud_credentials_file: dbt_cloud.as_ref().map(|c| {
@@ -675,7 +735,23 @@ fn resolve_connection(
                     .clone()
                     .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
             }),
-        })),
+        }),
+        ConnectionSpec::BigQuery {
+            ref project,
+            ref dataset,
+            ref execution_project,
+            ref method,
+            ref keyfile,
+            ref timeout_seconds,
+        } => Ok(ResolvedConnection::BigQuery {
+            name: conn_name.to_string(),
+            project: project.clone(),
+            dataset: dataset.clone(),
+            execution_project: execution_project.clone(),
+            method: method.clone(),
+            keyfile: keyfile.clone(),
+            timeout_seconds: *timeout_seconds,
+        }),
     }
 }
 
@@ -920,14 +996,7 @@ spec:
     // ── resolve_connection tests ───────────────────────────────────────
 
     #[test]
-    fn resolve_connection_none_returns_none() {
-        let connections = HashMap::new();
-        let result = resolve_connection(&None, &connections).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn resolve_connection_valid_ref() {
+    fn resolve_connection_by_name_dbt() {
         let mut connections = HashMap::new();
         connections.insert(
             "my-bq".to_string(),
@@ -937,16 +1006,52 @@ spec:
                 dbt_cloud: None,
             },
         );
-        let result = resolve_connection(&Some("my-bq".to_string()), &connections).unwrap();
-        let conn = result.unwrap();
+        let conn = resolve_connection_by_name("my-bq", &connections).unwrap();
         assert!(matches!(conn, ResolvedConnection::Dbt { name, profile, .. }
             if name == "my-bq" && profile == "proj"));
     }
 
     #[test]
-    fn resolve_connection_invalid_ref() {
+    fn resolve_connection_by_name_bigquery() {
+        let mut connections = HashMap::new();
+        connections.insert(
+            "my-bq-direct".to_string(),
+            ConnectionSpec::BigQuery {
+                project: "my-gcp-project".to_string(),
+                dataset: "raw".to_string(),
+                execution_project: Some("billing-proj".to_string()),
+                method: Some("oauth".to_string()),
+                keyfile: None,
+                timeout_seconds: Some(30),
+            },
+        );
+        let conn = resolve_connection_by_name("my-bq-direct", &connections).unwrap();
+        match conn {
+            ResolvedConnection::BigQuery {
+                name,
+                project,
+                dataset,
+                execution_project,
+                method,
+                keyfile,
+                timeout_seconds,
+            } => {
+                assert_eq!(name, "my-bq-direct");
+                assert_eq!(project, "my-gcp-project");
+                assert_eq!(dataset, "raw");
+                assert_eq!(execution_project, Some("billing-proj".to_string()));
+                assert_eq!(method, Some("oauth".to_string()));
+                assert!(keyfile.is_none());
+                assert_eq!(timeout_seconds, Some(30));
+            }
+            other => panic!("expected BigQuery, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_connection_by_name_missing() {
         let connections = HashMap::new();
-        let err = resolve_connection(&Some("missing".to_string()), &connections).unwrap_err();
+        let err = resolve_connection_by_name("missing", &connections).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
             if kind == "Connection" && name == "missing"));
     }

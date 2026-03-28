@@ -21,6 +21,20 @@ pub enum ConnectionSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dbt_cloud: Option<DbtCloudSpec>,
     },
+    /// Direct BigQuery connection without dbt profiles.yml.
+    #[serde(rename = "bigquery", rename_all = "camelCase")]
+    BigQuery {
+        project: String,
+        dataset: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        execution_project: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        method: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keyfile: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<u32>,
+    },
 }
 
 /// dbt Cloud configuration for pre-sync running-job checks.
@@ -35,16 +49,43 @@ impl ConnectionSpec {
     pub fn validate(&self) -> Result<(), KindError> {
         match self {
             ConnectionSpec::Dbt { profile, .. } => {
-                if profile.is_empty() {
-                    return Err(KindError::InvalidSpec {
-                        kind: KIND.to_string(),
-                        message: "profile must not be empty".to_string(),
-                    });
-                }
+                reject_empty("profile", profile)?;
+                Ok(())
+            }
+            ConnectionSpec::BigQuery {
+                project,
+                dataset,
+                execution_project,
+                ..
+            } => {
+                reject_empty("project", project)?;
+                reject_empty("dataset", dataset)?;
+                reject_empty_optional("executionProject", execution_project.as_deref())?;
                 Ok(())
             }
         }
     }
+}
+
+fn spec_error(message: String) -> KindError {
+    KindError::InvalidSpec {
+        kind: KIND.to_string(),
+        message,
+    }
+}
+
+fn reject_empty(field: &str, value: &str) -> Result<(), KindError> {
+    if value.is_empty() {
+        return Err(spec_error(format!("{field} must not be empty")));
+    }
+    Ok(())
+}
+
+fn reject_empty_optional(field: &str, value: Option<&str>) -> Result<(), KindError> {
+    if let Some(v) = value {
+        reject_empty(field, v)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -69,6 +110,7 @@ target: dev
                 assert_eq!(target, &Some("dev".to_string()));
                 assert!(dbt_cloud.is_none());
             }
+            other => panic!("expected Dbt, got {other:?}"),
         }
     }
 
@@ -83,6 +125,7 @@ profile: my_project
             ConnectionSpec::Dbt { target, .. } => {
                 assert_eq!(target, &None);
             }
+            other => panic!("expected Dbt, got {other:?}"),
         }
     }
 
@@ -104,6 +147,7 @@ dbtCloud:
                     Some("~/.dbt/dbt_cloud.yml".to_string())
                 );
             }
+            other => panic!("expected Dbt, got {other:?}"),
         }
     }
 
@@ -120,27 +164,162 @@ dbtCloud: {}
                 let cloud = dbt_cloud.as_ref().unwrap();
                 assert!(cloud.credentials_file.is_none());
             }
+            other => panic!("expected Dbt, got {other:?}"),
+        }
+    }
+
+    // ── BigQuery parsing tests ───────────────────────────────────────────
+
+    #[test]
+    fn parse_bigquery_all_fields() {
+        let yaml = r#"
+type: bigquery
+project: my-gcp-project
+dataset: raw
+executionProject: my-billing-proj
+method: service-account
+keyfile: /path/to/key.json
+timeoutSeconds: 30
+"#;
+        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            ConnectionSpec::BigQuery {
+                project,
+                dataset,
+                execution_project,
+                method,
+                keyfile,
+                timeout_seconds,
+            } => {
+                assert_eq!(project, "my-gcp-project");
+                assert_eq!(dataset, "raw");
+                assert_eq!(execution_project, &Some("my-billing-proj".to_string()));
+                assert_eq!(method, &Some("service-account".to_string()));
+                assert_eq!(keyfile, &Some("/path/to/key.json".to_string()));
+                assert_eq!(timeout_seconds, &Some(30));
+            }
+            other => panic!("expected BigQuery, got {other:?}"),
         }
     }
 
     #[test]
-    fn validate_rejects_empty_profile() {
-        let spec = ConnectionSpec::Dbt {
-            profile: "".to_string(),
-            target: None,
-            dbt_cloud: None,
-        };
-        let err = spec.validate().unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
+    fn parse_bigquery_required_fields_only() {
+        let yaml = r#"
+type: bigquery
+project: my-gcp-project
+dataset: raw
+"#;
+        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            ConnectionSpec::BigQuery {
+                project,
+                dataset,
+                execution_project,
+                method,
+                keyfile,
+                timeout_seconds,
+            } => {
+                assert_eq!(project, "my-gcp-project");
+                assert_eq!(dataset, "raw");
+                assert!(execution_project.is_none());
+                assert!(method.is_none());
+                assert!(keyfile.is_none());
+                assert!(timeout_seconds.is_none());
+            }
+            other => panic!("expected BigQuery, got {other:?}"),
+        }
     }
 
-    #[test]
-    fn validate_accepts_valid_spec() {
-        let spec = ConnectionSpec::Dbt {
-            profile: "my_project".to_string(),
-            target: Some("dev".to_string()),
-            dbt_cloud: None,
+    // ── Validation tests ─────────────────────────────────────────────────
+
+    macro_rules! validate_accept_test {
+        ($($name:ident: $spec:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert!($spec.validate().is_ok());
+                }
+            )*
         };
-        assert!(spec.validate().is_ok());
+    }
+
+    validate_accept_test! {
+        validate_dbt_valid:
+            ConnectionSpec::Dbt {
+                profile: "my_project".to_string(),
+                target: Some("dev".to_string()),
+                dbt_cloud: None,
+            };
+        validate_bigquery_oauth:
+            ConnectionSpec::BigQuery {
+                project: "my-gcp-project".to_string(),
+                dataset: "raw".to_string(),
+                execution_project: None,
+                method: Some("oauth".to_string()),
+                keyfile: None,
+                timeout_seconds: None,
+            };
+        validate_bigquery_service_account:
+            ConnectionSpec::BigQuery {
+                project: "p".to_string(),
+                dataset: "d".to_string(),
+                execution_project: None,
+                method: Some("service-account".to_string()),
+                keyfile: Some("/path/to/key.json".to_string()),
+                timeout_seconds: None,
+            };
+    }
+
+    macro_rules! validate_reject_test {
+        ($($name:ident: $spec:expr => $msg:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let err = $spec.validate().unwrap_err();
+                    match err {
+                        KindError::InvalidSpec { message, .. } => {
+                            assert!(message.contains($msg), "expected '{}' in '{message}'", $msg);
+                        }
+                        other => panic!("expected InvalidSpec, got {other:?}"),
+                    }
+                }
+            )*
+        };
+    }
+
+    validate_reject_test! {
+        validate_dbt_rejects_empty_profile:
+            ConnectionSpec::Dbt {
+                profile: "".to_string(),
+                target: None,
+                dbt_cloud: None,
+            } => "profile must not be empty";
+        validate_bigquery_rejects_empty_project:
+            ConnectionSpec::BigQuery {
+                project: "".to_string(),
+                dataset: "d".to_string(),
+                execution_project: None,
+                method: None,
+                keyfile: None,
+                timeout_seconds: None,
+            } => "project must not be empty";
+        validate_bigquery_rejects_empty_dataset:
+            ConnectionSpec::BigQuery {
+                project: "p".to_string(),
+                dataset: "".to_string(),
+                execution_project: None,
+                method: None,
+                keyfile: None,
+                timeout_seconds: None,
+            } => "dataset must not be empty";
+        validate_bigquery_rejects_empty_execution_project:
+            ConnectionSpec::BigQuery {
+                project: "p".to_string(),
+                dataset: "d".to_string(),
+                execution_project: Some("".to_string()),
+                method: None,
+                keyfile: None,
+                timeout_seconds: None,
+            } => "executionProject must not be empty";
     }
 }

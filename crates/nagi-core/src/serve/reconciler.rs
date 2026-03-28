@@ -32,7 +32,7 @@ pub async fn evaluate_and_cache(
     let conn = compiled
         .connection
         .as_ref()
-        .map(crate::evaluate::resolve_connection)
+        .map(|c| c.connect().map_err(EvaluateError::Connection))
         .transpose()?;
 
     let nagi_dir = crate::config::resolve_nagi_dir(std::path::Path::new("."));

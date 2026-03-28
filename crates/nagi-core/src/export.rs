@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -518,31 +519,20 @@ pub fn resolve_export_connection(
     let resources = crate::compile::load_resources(resources_dir)
         .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
-    for r in &resources {
-        if let NagiKind::Connection { metadata, spec, .. } = r {
-            if metadata.name == connection_name {
-                let profiles = crate::dbt::profile::DbtProfilesFile::load_default()
-                    .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
-                let (profile, target) = match spec {
-                    ConnectionSpec::Dbt {
-                        ref profile,
-                        ref target,
-                        ..
-                    } => (profile, target),
-                };
-                let adapter = profiles
-                    .resolve(profile, target.as_deref())
-                    .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
-                return crate::db::create_connection(adapter).map_err(ExportError::Connection);
+    let connections: HashMap<String, ConnectionSpec> = resources
+        .iter()
+        .filter_map(|r| match r {
+            NagiKind::Connection { metadata, spec, .. } => {
+                Some((metadata.name.clone(), spec.clone()))
             }
-        }
-    }
+            _ => None,
+        })
+        .collect();
 
-    Err(ExportError::Io(std::io::Error::other(format!(
-        "connection '{}' not found in {}",
-        connection_name,
-        resources_dir.display()
-    ))))
+    let resolved = crate::compile::resolve_connection_by_name(connection_name, &connections)
+        .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
+
+    resolved.connect().map_err(ExportError::Connection)
 }
 
 /// Checks whether enough time has elapsed since the last export.

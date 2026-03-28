@@ -152,17 +152,11 @@ fn collect_assets(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsAsset> {
 }
 
 fn collect_connections(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsConnection> {
-    let mut connections = BTreeSet::new();
-    for (_, compiled) in compiled_assets {
-        if let Some(conn) = &compiled.connection {
-            match conn {
-                crate::compile::ResolvedConnection::Dbt { name, .. } => {
-                    connections.insert(name.clone());
-                }
-            }
-        }
-    }
-    connections
+    compiled_assets
+        .iter()
+        .filter_map(|(_, compiled)| compiled.connection.as_ref())
+        .map(|conn| conn.name().to_string())
+        .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|name| LsConnection { name })
         .collect()

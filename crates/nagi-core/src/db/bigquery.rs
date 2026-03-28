@@ -23,12 +23,14 @@ pub enum AuthMethod {
     ServiceAccount { keyfile: String },
 }
 
-/// Resolved BigQuery connection configuration parsed from `profiles.yml`.
+/// Resolved BigQuery connection configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BigQueryConfig {
-    pub project: String,
-    pub dataset: String,
     pub auth: AuthMethod,
+    pub project: String,
+    /// API endpoint project for billing. Falls back to `project` when `None`.
+    pub execution_project: Option<String>,
+    pub dataset: String,
     /// Query timeout in milliseconds. `None` defers to the BigQuery server default.
     pub timeout_ms: Option<u32>,
 }
@@ -71,10 +73,16 @@ impl BigQueryConfig {
                 })
             })
             .transpose()?;
+        let execution_project = output
+            .fields
+            .get("execution_project")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         Ok(Self {
-            project,
-            dataset,
             auth,
+            project,
+            execution_project,
+            dataset,
             timeout_ms,
         })
     }
@@ -247,6 +255,40 @@ pub struct BigQueryConnection {
 }
 
 impl BigQueryConnection {
+    /// Creates a `BigQueryConnection` from a `ResolvedConnection::BigQuery`.
+    pub fn from_resolved(
+        project: &str,
+        dataset: &str,
+        execution_project: &Option<String>,
+        method: Option<&str>,
+        keyfile: &Option<String>,
+        timeout_seconds: Option<u32>,
+    ) -> Result<Self, super::ConnectionError> {
+        let auth = match method.unwrap_or("oauth") {
+            "oauth" => AuthMethod::OAuth,
+            "service-account" => AuthMethod::ServiceAccount {
+                keyfile: keyfile
+                    .clone()
+                    .ok_or_else(|| super::ConnectionError::MissingField {
+                        field: "keyfile".to_string(),
+                    })?,
+            },
+            other => {
+                return Err(super::ConnectionError::UnsupportedAdapter(format!(
+                    "bigquery auth method '{other}'"
+                )))
+            }
+        };
+        let config = BigQueryConfig {
+            auth,
+            project: project.to_string(),
+            execution_project: execution_project.clone(),
+            dataset: dataset.to_string(),
+            timeout_ms: timeout_seconds.map(|s| s.saturating_mul(1000)),
+        };
+        Ok(Self::new(config))
+    }
+
     pub fn new(config: BigQueryConfig) -> Self {
         Self {
             config,
@@ -268,10 +310,13 @@ impl BigQueryConnection {
 impl Connection for BigQueryConnection {
     async fn query_scalar(&self, sql: &str) -> Result<Value, ConnectionError> {
         let token = self.access_token().await?;
-        let url = format!(
-            "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
-            self.config.project
-        );
+        let api_project = self
+            .config
+            .execution_project
+            .as_deref()
+            .unwrap_or(&self.config.project);
+        let url =
+            format!("https://bigquery.googleapis.com/bigquery/v2/projects/{api_project}/queries",);
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct QueryRequest<'a> {
@@ -364,10 +409,13 @@ impl Connection for BigQueryConnection {
 
     async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError> {
         let token = self.access_token().await?;
-        let url = format!(
-            "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
-            self.config.project
-        );
+        let api_project = self
+            .config
+            .execution_project
+            .as_deref()
+            .unwrap_or(&self.config.project);
+        let url =
+            format!("https://bigquery.googleapis.com/bigquery/v2/projects/{api_project}/queries",);
 
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -441,10 +489,14 @@ impl Connection for BigQueryConnection {
         let content = std::fs::read(jsonl_path)
             .map_err(|e| ConnectionError::QueryFailed(format!("cannot read JSONL file: {e}")))?;
 
+        let api_project = self
+            .config
+            .execution_project
+            .as_deref()
+            .unwrap_or(&self.config.project);
         let url = format!(
-            "https://bigquery.googleapis.com/upload/bigquery/v2/projects/{}/jobs?\
+            "https://bigquery.googleapis.com/upload/bigquery/v2/projects/{api_project}/jobs?\
              uploadType=multipart",
-            self.config.project,
         );
 
         let job_config = serde_json::json!({
@@ -538,6 +590,12 @@ my_project:
       dataset: raw
       method: oauth
       job_execution_timeout_seconds: 30
+    with_exec_project:
+      type: bigquery
+      project: my-gcp-project
+      dataset: raw
+      method: oauth
+      execution_project: my-billing-proj
 "#;
 
     fn profiles() -> DbtProfilesFile {
@@ -611,6 +669,22 @@ my_project:
     }
 
     #[test]
+    fn parses_execution_project() {
+        let f = profiles();
+        let out = f.resolve("my_project", Some("with_exec_project")).unwrap();
+        let cfg = BigQueryConfig::from_output(out).unwrap();
+        assert_eq!(cfg.execution_project, Some("my-billing-proj".to_string()));
+    }
+
+    #[test]
+    fn execution_project_is_none_when_omitted() {
+        let f = profiles();
+        let out = f.resolve("my_project", Some("dev")).unwrap();
+        let cfg = BigQueryConfig::from_output(out).unwrap();
+        assert_eq!(cfg.execution_project, None);
+    }
+
+    #[test]
     fn timeout_is_none_when_omitted() {
         let f = profiles();
         let out = f.resolve("my_project", Some("dev")).unwrap();
@@ -645,9 +719,10 @@ my_project:
 
     fn dummy_conn() -> BigQueryConnection {
         BigQueryConnection::new(BigQueryConfig {
-            project: "p".to_string(),
-            dataset: "d".to_string(),
             auth: AuthMethod::OAuth,
+            project: "p".to_string(),
+            execution_project: None,
+            dataset: "d".to_string(),
             timeout_ms: None,
         })
     }

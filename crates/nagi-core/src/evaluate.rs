@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::compile::{CompiledAsset, ResolvedOnDriftEntry};
 use crate::db::{Connection, ConnectionError};
-use crate::dbt::profile::DbtProfilesFile;
 use crate::kind::asset::DesiredCondition;
 use crate::log::{LogError, LogStore};
 use crate::storage::local::LocalCache;
@@ -183,23 +182,6 @@ pub fn dry_run_asset(asset_name: &str, on_drift: &[ResolvedOnDriftEntry]) -> Dry
     }
 }
 
-pub(crate) fn resolve_connection(
-    conn_info: &crate::compile::ResolvedConnection,
-) -> Result<Box<dyn Connection>, EvaluateError> {
-    match conn_info {
-        crate::compile::ResolvedConnection::Dbt {
-            profile, target, ..
-        } => {
-            let f = DbtProfilesFile::load_default()
-                .map_err(|e| EvaluateError::Profile(e.to_string()))?;
-            let output = f
-                .resolve(profile, target.as_deref())
-                .map_err(|e| EvaluateError::Profile(e.to_string()))?;
-            crate::db::create_connection(output).map_err(EvaluateError::Connection)
-        }
-    }
-}
-
 /// Evaluates an asset from its compiled YAML.
 ///
 /// Handles connection resolution, logging, and cache — callers pass only paths.
@@ -221,7 +203,7 @@ pub async fn evaluate_from_compiled(
     let conn = compiled
         .connection
         .as_ref()
-        .map(resolve_connection)
+        .map(|c| c.connect().map_err(EvaluateError::Connection))
         .transpose()?;
 
     let conn_ref = conn.as_deref();
