@@ -4,8 +4,13 @@
 
 Nagi is a reconciliation engine that declaratively defines the desired state of data and automatically converges toward that state. It applies the same concept as the Kubernetes Reconciliation Loop to the data domain.
 
-See `project_spec.md` for the full specification. All design-related information must be written in `project_spec.md`, not in this file.
-Note: `project_spec.md` is gitignored. When committing spec-related changes, the spec file itself will not appear in `git status`.
+Design specs are split into files under `spec/` (all gitignored). Read only files relevant to the current task.
+
+- `spec/overview.md` — Project overview and design principles
+- `spec/resource-definition.md` — YAML resource definitions
+- `spec/cli.md` — CLI interface
+- `spec/serve.md` — Reconciliation loop runtime
+- `spec/tech-stack.md` — Tech stack and directory layout
 
 ## Environment Management
 
@@ -91,7 +96,7 @@ parse_duration_test! {
 
 - Never modify code directly on main. Always create a worktree (`isolation: "worktree"` in Agent tool) or a feature branch before making changes.
 - Branch/worktree names must describe the work (e.g. `feat/python-3.10-support`, `fix/compile-error-handling`). Do not use auto-generated names like `worktree-agent-abc123`.
-- After creating a worktree, copy gitignored files that are needed for the task (e.g. `project_spec.md`). Worktrees do not include gitignored files.
+- After creating a worktree, copy gitignored files that are needed for the task (e.g. `spec/`). Worktrees do not include gitignored files.
 
 ### General
 
