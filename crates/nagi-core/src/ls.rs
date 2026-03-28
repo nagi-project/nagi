@@ -1,8 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
+use thiserror::Error;
 
 use crate::compile::{load_compiled_assets, CompiledAsset};
+
+#[derive(Debug, Error)]
+pub enum LsError {
+    #[error(transparent)]
+    Compile(#[from] crate::compile::CompileError),
+
+    #[error("failed to parse compiled asset: {0}")]
+    Parse(String),
+}
 
 #[derive(Debug, Serialize)]
 pub struct LsOutput {
@@ -53,10 +63,10 @@ pub struct LsSync {
 // it is expanded into Assets during compilation).
 const VALID_KINDS: &[&str] = &["asset", "connection", "conditions", "sync"];
 
-fn validate_kinds(kinds: &[&str]) -> Result<(), crate::compile::CompileError> {
+fn validate_kinds(kinds: &[&str]) -> Result<(), LsError> {
     for kind in kinds {
         if !VALID_KINDS.contains(&kind.to_lowercase().as_str()) {
-            return Err(crate::compile::CompileError::InvalidKind(kind.to_string()));
+            return Err(crate::compile::CompileError::InvalidKind(kind.to_string()).into());
         }
     }
     Ok(())
@@ -67,10 +77,7 @@ fn has_kind(kinds: &[String], kind: &str) -> bool {
 }
 
 /// Reads compiled target/ directory and returns a structured listing of all resources.
-pub fn ls(
-    target_dir: &std::path::Path,
-    kinds: &[&str],
-) -> Result<LsOutput, crate::compile::CompileError> {
+pub fn ls(target_dir: &std::path::Path, kinds: &[&str]) -> Result<LsOutput, LsError> {
     validate_kinds(kinds)?;
 
     let normalized: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();
@@ -109,12 +116,12 @@ pub fn ls(
 
 fn parse_compiled_assets(
     loaded: &[(String, String)],
-) -> Result<Vec<(String, CompiledAsset)>, crate::compile::CompileError> {
+) -> Result<Vec<(String, CompiledAsset)>, LsError> {
     loaded
         .iter()
         .map(|(name, yaml)| {
-            let compiled: CompiledAsset = serde_yaml::from_str(yaml)
-                .map_err(|e| crate::compile::CompileError::ManifestParse(e.to_string()))?;
+            let compiled: CompiledAsset =
+                serde_yaml::from_str(yaml).map_err(|e| LsError::Parse(e.to_string()))?;
             Ok((name.clone(), compiled))
         })
         .collect()
