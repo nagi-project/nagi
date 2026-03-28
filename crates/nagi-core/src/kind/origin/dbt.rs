@@ -5,9 +5,8 @@ use thiserror::Error;
 use crate::compile::CompileError;
 
 pub mod cloud;
+pub mod expand;
 pub mod manifest;
-pub mod origin;
-pub mod profile;
 
 #[derive(Debug, Error)]
 pub enum DbtError {

@@ -1,8 +1,8 @@
 use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
 
-use crate::db::Connection;
 use crate::kind::asset::DesiredCondition;
+use crate::kind::connection::Connection;
 
 use super::{boolean, command, freshness, ConditionResult, EvaluateError};
 

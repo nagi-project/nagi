@@ -1,3 +1,5 @@
+pub mod dbt;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
@@ -125,17 +127,24 @@ impl ResolvedConnection {
     }
 
     /// Creates a `Box<dyn Connection>` from the resolved connection info.
-    pub fn connect(&self) -> Result<Box<dyn crate::db::Connection>, crate::db::ConnectionError> {
+    pub fn connect(
+        &self,
+    ) -> Result<
+        Box<dyn crate::kind::connection::Connection>,
+        crate::kind::connection::ConnectionError,
+    > {
         match self {
             ResolvedConnection::Dbt {
                 profile, target, ..
             } => {
-                let f = crate::dbt::profile::DbtProfilesFile::load_default()
-                    .map_err(|e| crate::db::ConnectionError::AuthFailed(e.to_string()))?;
-                let output = f
-                    .resolve(profile, target.as_deref())
-                    .map_err(|e| crate::db::ConnectionError::AuthFailed(e.to_string()))?;
-                crate::db::create_connection(output)
+                let f =
+                    crate::kind::connection::dbt::DbtProfilesFile::load_default().map_err(|e| {
+                        crate::kind::connection::ConnectionError::AuthFailed(e.to_string())
+                    })?;
+                let output = f.resolve(profile, target.as_deref()).map_err(|e| {
+                    crate::kind::connection::ConnectionError::AuthFailed(e.to_string())
+                })?;
+                crate::kind::connection::create_connection(output)
             }
             ResolvedConnection::BigQuery {
                 project,
@@ -146,7 +155,7 @@ impl ResolvedConnection {
                 timeout_seconds,
                 ..
             } => {
-                let conn = crate::db::bigquery::BigQueryConnection::from_resolved(
+                let conn = crate::kind::connection::bigquery::BigQueryConnection::from_resolved(
                     project,
                     dataset,
                     execution_project,
@@ -169,7 +178,7 @@ pub fn compile(
 ) -> Result<CompileOutput, CompileError> {
     let resources = load_resources(resources_dir)?;
 
-    let mut resources = crate::origin::expand(resources)?;
+    let mut resources = crate::kind::origin::expand(resources)?;
 
     if let Some(cfg) = export_config {
         resources.extend(crate::export::generate_export_resources(cfg));
@@ -441,7 +450,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         if let Some(reason) = steps
             .into_iter()
             .flatten()
-            .find_map(|step| crate::origin::detect_multi_asset_command(&step.args))
+            .find_map(|step| dbt::detect_multi_asset_step(&step.args))
         {
             tracing::warn!(
                 sync = name.as_str(),
@@ -1670,7 +1679,8 @@ spec:
     fn expand_origins_generates_resources_from_manifest() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded = crate::dbt::origin::expand_with_manifests(resources, &manifests).unwrap();
+        let expanded =
+            crate::kind::origin::dbt::expand::expand_with_manifests(resources, &manifests).unwrap();
 
         let assets: Vec<_> = expanded.iter().filter(|r| r.kind() == "Asset").collect();
         // 1 dbt source Asset + 2 model Assets
@@ -1686,7 +1696,8 @@ spec:
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, ASSET_RAW_SALES]));
         let count = resources.len();
         let expanded =
-            crate::dbt::origin::expand_with_manifests(resources, &HashMap::new()).unwrap();
+            crate::kind::origin::dbt::expand::expand_with_manifests(resources, &HashMap::new())
+                .unwrap();
         assert_eq!(expanded.len(), count);
     }
 
@@ -1694,7 +1705,8 @@ spec:
     fn expand_origins_error_when_no_manifest() {
         let resources = parse(ORIGIN_YAML);
         let err =
-            crate::dbt::origin::expand_with_manifests(resources, &HashMap::new()).unwrap_err();
+            crate::kind::origin::dbt::expand::expand_with_manifests(resources, &HashMap::new())
+                .unwrap_err();
         assert!(matches!(err, CompileError::ManifestParse(_)));
     }
 
@@ -1702,7 +1714,8 @@ spec:
     fn resolve_with_origin_expansion() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded = crate::dbt::origin::expand_with_manifests(resources, &manifests).unwrap();
+        let expanded =
+            crate::kind::origin::dbt::expand::expand_with_manifests(resources, &manifests).unwrap();
         let output = resolve(expanded).unwrap();
 
         // 1 dbt source Asset + 2 model Assets
@@ -1747,7 +1760,8 @@ spec:
 
         let resources = load_resources(&resources_dir).unwrap();
         let manifests = manifests_for("my-dbt");
-        let resources = crate::dbt::origin::expand_with_manifests(resources, &manifests).unwrap();
+        let resources =
+            crate::kind::origin::dbt::expand::expand_with_manifests(resources, &manifests).unwrap();
         let output = resolve(resources).unwrap();
         write_output(&output, &target_dir).unwrap();
 

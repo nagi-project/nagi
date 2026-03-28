@@ -1,8 +1,6 @@
 pub mod compile;
 pub mod config;
 pub mod cron;
-pub mod db;
-pub mod dbt;
 pub mod duration;
 pub mod evaluate;
 pub mod export;
@@ -11,7 +9,6 @@ pub mod kind;
 pub mod log;
 pub mod ls;
 pub mod notify;
-pub mod origin;
 pub mod schema;
 pub mod select;
 pub mod serve;

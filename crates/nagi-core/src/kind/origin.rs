@@ -1,9 +1,12 @@
+pub mod dbt;
+
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::KindError;
+use super::{KindError, NagiKind};
+use crate::compile::CompileError;
 
 pub const KIND: &str = "Origin";
 
@@ -60,6 +63,13 @@ impl OriginSpec {
             }
         }
     }
+}
+
+/// Expands Origin resources by loading external project data and generating Assets/Syncs.
+pub fn expand(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
+    // Currently only DBT Origins exist. When new Origin types are added,
+    // dispatch by OriginSpec variant here.
+    dbt::expand::expand(resources)
 }
 
 #[cfg(test)]

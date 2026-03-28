@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::compile::CompileError;
-use crate::dbt::manifest::{self, DbtManifest};
 use crate::kind::connection::ConnectionSpec;
+use crate::kind::origin::dbt::manifest::{self, DbtManifest};
 use crate::kind::origin::OriginSpec;
 use crate::kind::NagiKind;
 
@@ -80,7 +80,7 @@ pub fn expand(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
 
     let mut manifests = HashMap::new();
     for config in &configs {
-        let manifest_json = crate::dbt::load_manifest(
+        let manifest_json = crate::kind::origin::dbt::load_manifest(
             Path::new(&config.project_dir),
             &config.profile,
             config.target.as_deref(),
@@ -143,21 +143,6 @@ pub fn apply_cloud_job_mapping(
             asset.dbt_cloud_job_ids = Some(job_ids.clone());
         }
     }
-}
-
-/// Detects if a sync step uses a dbt command that updates multiple Assets.
-pub(crate) fn detect_multi_asset_step(args: &[String]) -> Option<String> {
-    if args.iter().any(|a| a == "dbt") && args.iter().any(|a| a == "build") {
-        return Some(
-            "uses `dbt build` which updates multiple models in a single execution".to_string(),
-        );
-    }
-    if let Some(tag) = args.iter().find(|a| a.starts_with("tag:")) {
-        return Some(format!(
-            "uses tag-based selector '{tag}' which may update multiple models in a single execution",
-        ));
-    }
-    None
 }
 
 #[cfg(test)]
@@ -291,34 +276,5 @@ spec:
         assert_eq!(sub.project_dir, "../dbt-sub");
         assert_eq!(sub.profile, "dev_profile");
         assert_eq!(sub.target, None);
-    }
-
-    // ── detect_multi_asset_step tests ───────────────────────────────
-
-    fn args(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(|s| s.to_string()).collect()
-    }
-
-    macro_rules! detect_multi_asset_step_test {
-        ($($name:ident: $args:expr => $expected:expr;)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let a = args($args);
-                    let result = detect_multi_asset_step(&a);
-                    assert_eq!(result.is_some(), $expected);
-                }
-            )*
-        };
-    }
-
-    detect_multi_asset_step_test! {
-        detect_dbt_build: &["dbt", "build", "--select", "model_a"] => true;
-        detect_dbt_build_no_select: &["dbt", "build"] => true;
-        detect_tag_selector: &["dbt", "run", "--select", "tag:finance"] => true;
-        detect_tag_selector_combo: &["dbt", "run", "-s", "tag:finance,tag:daily"] => true;
-        ignore_model_select: &["dbt", "run", "--select", "my_model"] => false;
-        ignore_non_dbt_command: &["python", "run.py"] => false;
-        ignore_empty_args: &[] => false;
     }
 }
