@@ -156,7 +156,7 @@ fn collect_connections(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsCon
     for (_, compiled) in compiled_assets {
         if let Some(conn) = &compiled.connection {
             match conn {
-                crate::compile::ResolvedConnection::DbtProfile { name, .. } => {
+                crate::compile::ResolvedConnection::Dbt { name, .. } => {
                     connections.insert(name.clone());
                 }
             }
@@ -229,9 +229,9 @@ kind: Connection
 metadata:
   name: my-bq
 spec:
-  dbtProfile:
-    profile: my_project
-    target: dev";
+  type: dbt
+  profile: my_project
+  target: dev";
 
     const UPSTREAM_ASSET: &str = "\
 apiVersion: nagi.io/v1alpha1

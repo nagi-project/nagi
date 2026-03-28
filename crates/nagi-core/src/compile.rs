@@ -96,7 +96,7 @@ pub struct ResolvedOnDriftEntry {
 pub enum ResolvedConnection {
     /// Connection resolved via dbt profiles.yml.
     #[serde(rename_all = "camelCase")]
-    DbtProfile {
+    Dbt {
         /// Original Connection resource name.
         name: String,
         profile: String,
@@ -186,13 +186,16 @@ fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOriginConfig> {
     let connection_profiles: HashMap<&str, (&str, Option<&str>)> = resources
         .iter()
         .filter_map(|r| match r {
-            NagiKind::Connection { metadata, spec, .. } => Some((
-                metadata.name.as_str(),
-                (
-                    spec.dbt_profile.profile.as_str(),
-                    spec.dbt_profile.target.as_deref(),
-                ),
-            )),
+            NagiKind::Connection { metadata, spec, .. } => match spec {
+                ConnectionSpec::Dbt {
+                    ref profile,
+                    ref target,
+                    ..
+                } => Some((
+                    metadata.name.as_str(),
+                    (profile.as_str(), target.as_deref()),
+                )),
+            },
             _ => None,
         })
         .collect();
@@ -658,16 +661,22 @@ fn resolve_connection(
             kind: "Connection".to_string(),
             name: conn_name.clone(),
         })?;
-    Ok(Some(ResolvedConnection::DbtProfile {
-        name: conn_name.clone(),
-        profile: conn_spec.dbt_profile.profile.clone(),
-        target: conn_spec.dbt_profile.target.clone(),
-        dbt_cloud_credentials_file: conn_spec.dbt_cloud.as_ref().map(|c| {
-            c.credentials_file
-                .clone()
-                .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
-        }),
-    }))
+    match conn_spec {
+        ConnectionSpec::Dbt {
+            ref profile,
+            ref target,
+            ref dbt_cloud,
+        } => Ok(Some(ResolvedConnection::Dbt {
+            name: conn_name.clone(),
+            profile: profile.clone(),
+            target: target.clone(),
+            dbt_cloud_credentials_file: dbt_cloud.as_ref().map(|c| {
+                c.credentials_file
+                    .clone()
+                    .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
+            }),
+        })),
+    }
 }
 
 fn build_graph(assets: &[ResolvedAsset]) -> Result<DependencyGraph, CompileError> {
@@ -853,8 +862,8 @@ kind: Connection
 metadata:
   name: my-bq
 spec:
-  dbtProfile:
-    profile: my_project";
+  type: dbt
+  profile: my_project";
 
     const ASSET_RAW_SALES: &str = "\
 apiVersion: nagi.io/v1alpha1
@@ -922,20 +931,16 @@ spec:
         let mut connections = HashMap::new();
         connections.insert(
             "my-bq".to_string(),
-            ConnectionSpec {
-                dbt_profile: crate::kind::connection::DbtProfile {
-                    profile: "proj".to_string(),
-                    target: Some("dev".to_string()),
-                },
+            ConnectionSpec::Dbt {
+                profile: "proj".to_string(),
+                target: Some("dev".to_string()),
                 dbt_cloud: None,
             },
         );
         let result = resolve_connection(&Some("my-bq".to_string()), &connections).unwrap();
         let conn = result.unwrap();
-        assert!(
-            matches!(conn, ResolvedConnection::DbtProfile { name, profile, .. }
-            if name == "my-bq" && profile == "proj")
-        );
+        assert!(matches!(conn, ResolvedConnection::Dbt { name, profile, .. }
+            if name == "my-bq" && profile == "proj"));
     }
 
     #[test]
@@ -1813,9 +1818,9 @@ kind: Connection
 metadata:
   name: my-bq
 spec:
-  dbtProfile:
-    profile: my_project
-    target: prod
+  type: dbt
+  profile: my_project
+  target: prod
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Origin
@@ -1842,8 +1847,8 @@ kind: Connection
 metadata:
   name: my-bq
 spec:
-  dbtProfile:
-    profile: my_project
+  type: dbt
+  profile: my_project
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Origin
@@ -1868,9 +1873,9 @@ kind: Connection
 metadata:
   name: my-bq
 spec:
-  dbtProfile:
-    profile: my_project
-    target: dev";
+  type: dbt
+  profile: my_project
+  target: dev";
         let resources = parse_kinds(yaml).unwrap();
         let configs = collect_dbt_origin_configs(&resources);
         assert!(configs.is_empty());
@@ -1884,17 +1889,17 @@ kind: Connection
 metadata:
   name: bq-prod
 spec:
-  dbtProfile:
-    profile: prod_profile
-    target: prod
+  type: dbt
+  profile: prod_profile
+  target: prod
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Connection
 metadata:
   name: bq-dev
 spec:
-  dbtProfile:
-    profile: dev_profile
+  type: dbt
+  profile: dev_profile
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Origin

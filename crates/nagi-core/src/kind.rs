@@ -167,9 +167,9 @@ kind: Connection
 metadata:
   name: my-bigquery
 spec:
-  dbtProfile:
-    profile: my_project
-    target: dev
+  type: dbt
+  profile: my_project
+  target: dev
 "#;
         let resource = parse_kind(yaml).unwrap();
         assert_eq!(resource.kind(), connection::KIND);
@@ -177,8 +177,9 @@ spec:
         assert!(matches!(
             &resource,
             NagiKind::Connection { spec, .. }
-                if spec.dbt_profile.profile == "my_project"
-                && spec.dbt_profile.target == Some("dev".to_string())
+                if matches!(spec, connection::ConnectionSpec::Dbt { profile, target, .. }
+                    if profile == "my_project"
+                    && *target == Some("dev".to_string()))
         ));
     }
 
@@ -223,8 +224,8 @@ kind: Connection
 metadata:
   name: my-bigquery
 spec:
-  dbtProfile:
-    profile: my_project
+  type: dbt
+  profile: my_project
 ---
 apiVersion: nagi.io/v1alpha1
 kind: Asset

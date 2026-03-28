@@ -187,7 +187,7 @@ pub(crate) fn resolve_connection(
     conn_info: &crate::compile::ResolvedConnection,
 ) -> Result<Box<dyn Connection>, EvaluateError> {
     match conn_info {
-        crate::compile::ResolvedConnection::DbtProfile {
+        crate::compile::ResolvedConnection::Dbt {
             profile, target, ..
         } => {
             let f = DbtProfilesFile::load_default()

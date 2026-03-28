@@ -375,20 +375,13 @@ pub struct SyncProposalEvaluation {
 }
 
 /// Checks dbt Cloud for running jobs. Returns an error if any are found.
-async fn check_dbt_cloud_preflight(compiled: &CompiledAsset) -> Result<(), SyncError> {
-    let Some(job_ids) = &compiled.spec.dbt_cloud_job_ids else {
-        return Ok(());
-    };
-    let cred_path = compiled.connection.as_ref().and_then(|c| match c {
-        crate::compile::ResolvedConnection::DbtProfile {
-            dbt_cloud_credentials_file,
-            ..
-        } => dbt_cloud_credentials_file.as_ref(),
-    });
-    let Some(cred_path) = cred_path else {
-        return Ok(());
-    };
-
+///
+/// Only called when the Connection is `Dbt`.
+async fn check_dbt_cloud_preflight(
+    asset_name: &str,
+    cred_path: &str,
+    job_ids: &std::collections::HashSet<i64>,
+) -> Result<(), SyncError> {
     let jobs = crate::dbt::cloud::check_running_jobs_for_asset(Path::new(cred_path), job_ids)
         .await
         .map_err(|e| SyncError::DbtCloud(e.to_string()))?;
@@ -400,7 +393,7 @@ async fn check_dbt_cloud_preflight(compiled: &CompiledAsset) -> Result<(), SyncE
             .collect();
         return Err(SyncError::DbtCloud(format!(
             "dbt Cloud has running jobs that include asset '{}':\n{}\nUse --force to override.",
-            compiled.metadata.name,
+            asset_name,
             details.join("\n")
         )));
     }
@@ -456,7 +449,16 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
     }
 
     if !params.force {
-        check_dbt_cloud_preflight(&compiled).await?;
+        if let (
+            Some(crate::compile::ResolvedConnection::Dbt {
+                dbt_cloud_credentials_file: Some(cred_path),
+                ..
+            }),
+            Some(job_ids),
+        ) = (&compiled.connection, &compiled.spec.dbt_cloud_job_ids)
+        {
+            check_dbt_cloud_preflight(&compiled.metadata.name, cred_path, job_ids).await?;
+        }
     }
 
     let log_store = open_log_store(params.db_path, params.logs_dir)?;

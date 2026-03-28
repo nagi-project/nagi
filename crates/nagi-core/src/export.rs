@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::config::ExportConfig;
 use crate::db::Connection;
+use crate::kind::connection::ConnectionSpec;
 use crate::kind::{self, NagiKind};
 use crate::log::LogStore;
 
@@ -522,11 +523,15 @@ pub fn resolve_export_connection(
             if metadata.name == connection_name {
                 let profiles = crate::dbt::profile::DbtProfilesFile::load_default()
                     .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
+                let (profile, target) = match spec {
+                    ConnectionSpec::Dbt {
+                        ref profile,
+                        ref target,
+                        ..
+                    } => (profile, target),
+                };
                 let adapter = profiles
-                    .resolve(
-                        &spec.dbt_profile.profile,
-                        spec.dbt_profile.target.as_deref(),
-                    )
+                    .resolve(profile, target.as_deref())
                     .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
                 return crate::db::create_connection(adapter).map_err(ExportError::Connection);
             }

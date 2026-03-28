@@ -100,11 +100,11 @@ pub fn build_connection_yaml(profile: &str, target: Option<&str>) -> String {
          metadata:\n\
          \x20 name: {name}\n\
          spec:\n\
-         \x20 dbtProfile:\n\
-         \x20   profile: {profile}\n"
+         \x20 type: dbt\n\
+         \x20 profile: {profile}\n"
     );
     if let Some(t) = target {
-        yaml.push_str(&format!("    target: {t}\n"));
+        yaml.push_str(&format!("  target: {t}\n"));
     }
     yaml
 }

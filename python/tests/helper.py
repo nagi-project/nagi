@@ -18,8 +18,8 @@ CONNECTION_YAML = (
     "metadata:\n"
     f"  name: {CONNECTION_NAME}\n"
     "spec:\n"
-    "  dbtProfile:\n"
-    "    profile: my_project\n"
+    "  type: dbt\n"
+    "  profile: my_project\n"
 )
 
 UPSTREAM_ASSET_YAML = (
