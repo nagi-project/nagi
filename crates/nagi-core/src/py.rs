@@ -98,9 +98,10 @@ pub fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
 
 /// Lists all compiled resources in target/ as JSON.
 #[pyfunction]
-#[pyo3(signature = (target_dir))]
-pub fn list_resources(target_dir: &str) -> PyResult<String> {
-    let output = crate::ls::ls(std::path::Path::new(target_dir)).map_err(to_py_err)?;
+#[pyo3(signature = (target_dir, kinds))]
+pub fn list_resources(target_dir: &str, kinds: Vec<String>) -> PyResult<String> {
+    let kind_refs: Vec<&str> = kinds.iter().map(|s| s.as_str()).collect();
+    let output = crate::ls::ls(std::path::Path::new(target_dir), &kind_refs).map_err(to_py_err)?;
     serde_json::to_string(&output).map_err(to_py_err)
 }
 

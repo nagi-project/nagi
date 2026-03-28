@@ -34,6 +34,9 @@ pub enum CompileError {
 
     #[error("manifest.json parse error: {0}")]
     ManifestParse(String),
+
+    #[error("invalid kind filter: '{0}'. Valid values: Asset, Connection, Conditions, Sync")]
+    InvalidKind(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

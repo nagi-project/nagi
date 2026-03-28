@@ -49,16 +49,55 @@ pub struct LsSync {
     pub name: String,
 }
 
-/// Reads compiled target/ directory and returns a structured listing of all resources.
-pub fn ls(target_dir: &std::path::Path) -> Result<LsOutput, crate::compile::CompileError> {
-    let loaded = load_compiled_assets(target_dir, &[])?;
+// Lowercase list of kinds present in compiled output (Origin is excluded because
+// it is expanded into Assets during compilation).
+const VALID_KINDS: &[&str] = &["asset", "connection", "conditions", "sync"];
 
+fn validate_kinds(kinds: &[&str]) -> Result<(), crate::compile::CompileError> {
+    for kind in kinds {
+        if !VALID_KINDS.contains(&kind.to_lowercase().as_str()) {
+            return Err(crate::compile::CompileError::InvalidKind(kind.to_string()));
+        }
+    }
+    Ok(())
+}
+
+fn has_kind(kinds: &[String], kind: &str) -> bool {
+    kinds.is_empty() || kinds.iter().any(|k| k == kind)
+}
+
+/// Reads compiled target/ directory and returns a structured listing of all resources.
+pub fn ls(
+    target_dir: &std::path::Path,
+    kinds: &[&str],
+) -> Result<LsOutput, crate::compile::CompileError> {
+    validate_kinds(kinds)?;
+
+    let normalized: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();
+
+    let loaded = load_compiled_assets(target_dir, &[])?;
     let compiled_assets = parse_compiled_assets(&loaded)?;
 
-    let assets = collect_assets(&compiled_assets);
-    let connections = collect_connections(&compiled_assets);
-    let conditions = collect_conditions(&compiled_assets);
-    let syncs = collect_syncs(&compiled_assets);
+    let assets = if has_kind(&normalized, "asset") {
+        collect_assets(&compiled_assets)
+    } else {
+        Vec::new()
+    };
+    let connections = if has_kind(&normalized, "connection") {
+        collect_connections(&compiled_assets)
+    } else {
+        Vec::new()
+    };
+    let conditions = if has_kind(&normalized, "conditions") {
+        collect_conditions(&compiled_assets)
+    } else {
+        Vec::new()
+    };
+    let syncs = if has_kind(&normalized, "sync") {
+        collect_syncs(&compiled_assets)
+    } else {
+        Vec::new()
+    };
 
     Ok(LsOutput {
         assets,
@@ -434,7 +473,7 @@ spec:
     #[test]
     fn ls_returns_all_resource_kinds() {
         let (_dir, target) = setup_target(&yaml_docs(ALL_YAML));
-        let output = ls(&target).unwrap();
+        let output = ls(&target, &[]).unwrap();
 
         assert_eq!(output.assets.len(), 2);
         assert_eq!(output.connections.len(), 1);
@@ -444,7 +483,59 @@ spec:
 
     #[test]
     fn ls_returns_error_for_missing_target() {
-        let result = ls(std::path::Path::new("/nonexistent/target"));
+        let result = ls(std::path::Path::new("/nonexistent/target"), &[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn ls_filter_single_kind() {
+        let (_dir, target) = setup_target(&yaml_docs(ALL_YAML));
+        let output = ls(&target, &["Asset"]).unwrap();
+
+        assert_eq!(output.assets.len(), 2);
+        assert!(output.connections.is_empty());
+        assert!(output.conditions.is_empty());
+        assert!(output.syncs.is_empty());
+    }
+
+    #[test]
+    fn ls_filter_multiple_kinds() {
+        let (_dir, target) = setup_target(&yaml_docs(ALL_YAML));
+        let output = ls(&target, &["Asset", "Sync"]).unwrap();
+
+        assert_eq!(output.assets.len(), 2);
+        assert!(output.connections.is_empty());
+        assert!(output.conditions.is_empty());
+        assert_eq!(output.syncs.len(), 1);
+    }
+
+    #[test]
+    fn ls_filter_invalid_kind_returns_error() {
+        let (_dir, target) = setup_target(&yaml_docs(ALL_YAML));
+        let result = ls(&target, &["Invalid"]);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid"));
+    }
+
+    macro_rules! ls_filter_case_insensitive_test {
+        ($($name:ident: $input:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let (_dir, target) = setup_target(&yaml_docs(ALL_YAML));
+                    let output = ls(&target, &[$input]).unwrap();
+                    assert_eq!(output.assets.len(), 2);
+                    assert!(output.connections.is_empty());
+                }
+            )*
+        };
+    }
+
+    ls_filter_case_insensitive_test! {
+        ls_filter_case_lower: "asset";
+        ls_filter_case_upper: "ASSET";
+        ls_filter_case_mixed: "Asset";
     }
 }
