@@ -1,0 +1,383 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+pub mod asset;
+pub mod condition;
+pub mod connection;
+pub mod origin;
+pub mod sync;
+
+pub use asset::AssetSpec;
+pub use condition::ConditionsSpec;
+pub use connection::ConnectionSpec;
+pub use origin::OriginSpec;
+pub use sync::SyncSpec;
+
+pub const API_VERSION: &str = "nagi.io/v1alpha1";
+
+#[derive(Debug, Error)]
+pub enum KindError {
+    #[error("failed to parse YAML: {0}")]
+    YamlParse(#[from] serde_yaml::Error),
+
+    #[error("invalid spec for kind {kind}: {message}")]
+    InvalidSpec { kind: String, message: String },
+
+    #[error("unsupported apiVersion '{version}': expected '{expected}'")]
+    UnsupportedApiVersion { version: String, expected: String },
+}
+
+/// Common metadata shared by all resource kinds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Metadata {
+    pub name: String,
+}
+
+/// A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention.
+/// Includes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind")]
+pub enum NagiKind {
+    Connection {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: ConnectionSpec,
+    },
+    Asset {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: AssetSpec,
+    },
+    Conditions {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: ConditionsSpec,
+    },
+    Sync {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: SyncSpec,
+    },
+    Origin {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: OriginSpec,
+    },
+}
+
+impl NagiKind {
+    pub fn api_version(&self) -> &str {
+        match self {
+            NagiKind::Connection { api_version, .. } => api_version,
+            NagiKind::Asset { api_version, .. } => api_version,
+            NagiKind::Conditions { api_version, .. } => api_version,
+            NagiKind::Sync { api_version, .. } => api_version,
+            NagiKind::Origin { api_version, .. } => api_version,
+        }
+    }
+
+    pub fn metadata(&self) -> &Metadata {
+        match self {
+            NagiKind::Connection { metadata, .. } => metadata,
+            NagiKind::Asset { metadata, .. } => metadata,
+            NagiKind::Conditions { metadata, .. } => metadata,
+            NagiKind::Sync { metadata, .. } => metadata,
+            NagiKind::Origin { metadata, .. } => metadata,
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            NagiKind::Connection { .. } => connection::KIND,
+            NagiKind::Asset { .. } => asset::KIND,
+            NagiKind::Conditions { .. } => condition::KIND,
+            NagiKind::Sync { .. } => sync::KIND,
+            NagiKind::Origin { .. } => origin::KIND,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), KindError> {
+        let version = self.api_version();
+        if version != API_VERSION {
+            return Err(KindError::UnsupportedApiVersion {
+                version: version.to_string(),
+                expected: API_VERSION.to_string(),
+            });
+        }
+        let name = &self.metadata().name;
+        if name.is_empty() {
+            return Err(KindError::InvalidSpec {
+                kind: self.kind().to_string(),
+                message: "metadata.name must not be empty".to_string(),
+            });
+        }
+        if name.contains('/')
+            || name.contains('\\')
+            || name.contains("..")
+            || name.contains('\'')
+            || name.contains('`')
+        {
+            return Err(KindError::InvalidSpec {
+                kind: self.kind().to_string(),
+                message: "metadata.name must not contain path separators, '..', or SQL metacharacters ('`)".to_string(),
+            });
+        }
+        match self {
+            NagiKind::Connection { spec, .. } => spec.validate(),
+            NagiKind::Asset { spec, .. } => spec.validate(),
+            NagiKind::Conditions { spec, .. } => spec.validate(),
+            NagiKind::Sync { spec, .. } => spec.validate(),
+            NagiKind::Origin { spec, .. } => spec.validate(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn parse_kind(yaml: &str) -> Result<NagiKind, KindError> {
+    let kind: NagiKind = serde_yaml::from_str(yaml)?;
+    kind.validate()?;
+    Ok(kind)
+}
+
+/// Parses multiple resources from a single YAML string. Supports `---` document separators.
+pub fn parse_kinds(yaml: &str) -> Result<Vec<NagiKind>, KindError> {
+    let mut kinds = Vec::new();
+    for document in serde_yaml::Deserializer::from_str(yaml) {
+        let kind = NagiKind::deserialize(document)?;
+        kind.validate()?;
+        kinds.push(kind);
+    }
+    Ok(kinds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_connection_resource() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  type: dbt
+  profile: my_project
+  target: dev
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.kind(), connection::KIND);
+        assert_eq!(resource.metadata().name, "my-bigquery");
+        assert!(matches!(
+            &resource,
+            NagiKind::Connection { spec, .. }
+                if matches!(spec, connection::ConnectionSpec::Dbt { profile, target, .. }
+                    if profile == "my_project"
+                    && *target == Some("dev".to_string()))
+        ));
+    }
+
+    #[test]
+    fn parse_asset_resource() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec:
+  upstreams:
+    - raw-sales
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.kind(), asset::KIND);
+        assert_eq!(resource.metadata().name, "daily-sales");
+    }
+
+    #[test]
+    fn parse_sync_resource() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: dbt-default
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.name }}"]
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.kind(), sync::KIND);
+        assert_eq!(resource.metadata().name, "dbt-default");
+    }
+
+    #[test]
+    fn parse_multiple_resources() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  type: dbt
+  profile: my_project
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+spec: {}
+"#;
+        let resources = parse_kinds(yaml).unwrap();
+        assert_eq!(resources.len(), 2);
+        assert_eq!(resources[0].kind(), connection::KIND);
+        assert_eq!(resources[1].kind(), asset::KIND);
+    }
+
+    #[test]
+    fn parse_kind_rejects_empty_name() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: ""
+spec: {}
+"#;
+        let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { .. }));
+    }
+
+    #[test]
+    fn parse_kind_rejects_path_traversal_in_name() {
+        let cases = [
+            ("../../etc/cron", "path traversal with .."),
+            ("foo/bar", "forward slash"),
+            ("name..evil", "double dot"),
+        ];
+        for (name, desc) in cases {
+            let yaml = format!(
+                r#"
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: "{name}"
+spec: {{}}
+"#
+            );
+            let err = parse_kind(&yaml).unwrap_err();
+            assert!(
+                matches!(err, KindError::InvalidSpec { .. }),
+                "expected InvalidSpec for {desc} (name '{name}'), got {err:?}"
+            );
+        }
+        // Backslash tested via direct construction to avoid YAML escape issues.
+        let resource = NagiKind::Asset {
+            api_version: API_VERSION.to_string(),
+            metadata: Metadata {
+                name: "foo\\bar".to_string(),
+            },
+            spec: AssetSpec {
+                tags: vec![],
+                connection: None,
+                upstreams: vec![],
+                on_drift: vec![],
+                auto_sync: true,
+                evaluate_cache_ttl: None,
+            },
+        };
+        let err = resource.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { .. }));
+    }
+
+    #[test]
+    fn parse_kind_rejects_sql_metacharacters_in_name() {
+        let cases = [("tab'le", "single quote"), ("tab`le", "backtick")];
+        for (name, desc) in cases {
+            let resource = NagiKind::Asset {
+                api_version: API_VERSION.to_string(),
+                metadata: Metadata {
+                    name: name.to_string(),
+                },
+                spec: AssetSpec {
+                    tags: vec![],
+                    connection: None,
+                    upstreams: vec![],
+                    on_drift: vec![],
+                    auto_sync: true,
+                    evaluate_cache_ttl: None,
+                },
+            };
+            let err = resource.validate().unwrap_err();
+            assert!(
+                matches!(err, KindError::InvalidSpec { .. }),
+                "expected InvalidSpec for {desc} (name '{name}'), got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_accessor_works_for_all_kinds() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: my-sync
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run"]
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.metadata().name, "my-sync");
+    }
+
+    #[test]
+    fn parse_kind_rejects_unsupported_api_version() {
+        let yaml = r#"
+apiVersion: nagi.io/v2
+kind: Asset
+metadata:
+  name: raw-sales
+spec: {}
+"#;
+        let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::UnsupportedApiVersion { .. }));
+    }
+
+    #[test]
+    fn parse_kind_rejects_missing_api_version() {
+        let yaml = r#"
+kind: Asset
+metadata:
+  name: raw-sales
+spec: {}
+"#;
+        let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::YamlParse(_)));
+    }
+
+    #[test]
+    fn parse_origin_resource() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: my-dbt-project
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  defaultSync:
+    sync: dbt-default
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.kind(), origin::KIND);
+        assert_eq!(resource.metadata().name, "my-dbt-project");
+    }
+}
