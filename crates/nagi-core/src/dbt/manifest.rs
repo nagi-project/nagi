@@ -48,6 +48,8 @@ pub struct DbtSource {
     pub unique_id: String,
     pub name: String,
     pub source_name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Converts a parsed dbt manifest into Nagi resources.
@@ -59,7 +61,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         ..
     } = origin;
 
-    let (dbt_source_map, dbt_source_names) = collect_dbt_source_names(manifest);
+    let (dbt_source_map, dbt_source_names, dbt_source_tags) = collect_dbt_source_names(manifest);
     let (model_names, model_nodes) = collect_models(manifest);
     let dbt_source_tests = collect_tests(manifest, &dbt_source_map);
     let model_tests = collect_tests(manifest, &model_names);
@@ -69,6 +71,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         &dbt_source_names,
         &dbt_source_map,
         &dbt_source_tests,
+        &dbt_source_tags,
         connection,
         auto_sync_val,
     );
@@ -157,6 +160,7 @@ fn build_dbt_source_assets(
     names: &[String],
     dbt_source_map: &HashMap<String, String>,
     dbt_source_tests: &HashMap<String, Vec<&DbtNode>>,
+    dbt_source_tags: &HashMap<String, Vec<String>>,
     connection: &str,
     auto_sync: bool,
 ) -> (Vec<NagiKind>, bool) {
@@ -196,7 +200,7 @@ fn build_dbt_source_assets(
             api_version: API_VERSION.to_string(),
             metadata: Metadata { name: name.clone() },
             spec: AssetSpec {
-                tags: vec![],
+                tags: dbt_source_tags.get(name).cloned().unwrap_or_default(),
                 connection: Some(connection.to_string()),
                 upstreams: vec![],
                 on_drift,
@@ -251,20 +255,30 @@ fn build_model_assets(
 }
 
 /// Builds a dbt source unique_id → nagi Asset name lookup and a deduplicated list of names.
-fn collect_dbt_source_names(manifest: &DbtManifest) -> (HashMap<String, String>, Vec<String>) {
+/// Returns (id_to_name, sorted_names, name_to_tags).
+#[allow(clippy::type_complexity)]
+fn collect_dbt_source_names(
+    manifest: &DbtManifest,
+) -> (
+    HashMap<String, String>,
+    Vec<String>,
+    HashMap<String, Vec<String>>,
+) {
     let mut id_to_name: HashMap<String, String> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut names: Vec<String> = Vec::new();
+    let mut name_to_tags: HashMap<String, Vec<String>> = HashMap::new();
 
     for dbt_src in manifest.sources.values() {
         let nagi_name = format!("{}.{}", dbt_src.source_name, dbt_src.name);
         id_to_name.insert(dbt_src.unique_id.clone(), nagi_name.clone());
+        name_to_tags.insert(nagi_name.clone(), dbt_src.tags.clone());
         if seen.insert(nagi_name.clone()) {
             names.push(nagi_name);
         }
     }
     names.sort();
-    (id_to_name, names)
+    (id_to_name, names, name_to_tags)
 }
 
 /// Extracts model nodes sorted by name and builds a unique_id → name lookup.
@@ -515,7 +529,8 @@ mod tests {
     "source.jaffle_shop.raw.orders": {
       "unique_id": "source.jaffle_shop.raw.orders",
       "name": "orders",
-      "source_name": "raw"
+      "source_name": "raw",
+      "tags": ["external"]
     }
   }
 }"#
@@ -577,6 +592,32 @@ mod tests {
             assert!(spec.tags.contains(&"daily".to_string()));
         } else {
             panic!("orders should be an Asset");
+        }
+    }
+
+    #[test]
+    fn manifest_to_resources_maps_dbt_source_tags() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+
+        let raw_orders = resources
+            .iter()
+            .find(|r| r.metadata().name == "raw.orders")
+            .unwrap();
+        if let NagiKind::Asset { spec, .. } = raw_orders {
+            assert_eq!(spec.tags, vec!["external"]);
+        } else {
+            panic!("raw.orders should be an Asset");
+        }
+
+        let raw_customers = resources
+            .iter()
+            .find(|r| r.metadata().name == "raw.customers")
+            .unwrap();
+        if let NagiKind::Asset { spec, .. } = raw_customers {
+            assert!(spec.tags.is_empty());
+        } else {
+            panic!("raw.customers should be an Asset");
         }
     }
 
@@ -793,7 +834,7 @@ mod tests {
     #[test]
     fn collect_dbt_source_names_deduplicates() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (id_to_name, names) = collect_dbt_source_names(&manifest);
+        let (id_to_name, names, _dbt_source_tags) = collect_dbt_source_names(&manifest);
 
         assert_eq!(id_to_name.len(), 2);
         assert_eq!(names.len(), 2);
@@ -892,13 +933,15 @@ mod tests {
     #[test]
     fn build_dbt_source_assets_with_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, dbt_source_names) = collect_dbt_source_names(&manifest);
+        let (dbt_source_map, dbt_source_names, dbt_source_tags) =
+            collect_dbt_source_names(&manifest);
         let dbt_source_tests = collect_tests(&manifest, &dbt_source_map);
 
         let (resources, needs_skip_sync) = build_dbt_source_assets(
             &dbt_source_names,
             &dbt_source_map,
             &dbt_source_tests,
+            &dbt_source_tags,
             "my-bq",
             true,
         );
@@ -924,9 +967,16 @@ mod tests {
         let names = vec!["raw.customers".to_string()];
         let dbt_source_map = HashMap::new();
         let dbt_source_tests = HashMap::new();
+        let dbt_source_tags = HashMap::new();
 
-        let (resources, needs_skip_sync) =
-            build_dbt_source_assets(&names, &dbt_source_map, &dbt_source_tests, "my-bq", true);
+        let (resources, needs_skip_sync) = build_dbt_source_assets(
+            &names,
+            &dbt_source_map,
+            &dbt_source_tests,
+            &dbt_source_tags,
+            "my-bq",
+            true,
+        );
 
         assert!(!needs_skip_sync);
         assert_eq!(resources.len(), 1);
@@ -941,7 +991,7 @@ mod tests {
     #[test]
     fn build_model_assets_includes_upstreams_and_on_drift() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _) = collect_dbt_source_names(&manifest);
+        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
         let ds = DefaultSync {
@@ -978,7 +1028,7 @@ mod tests {
     #[test]
     fn build_model_assets_with_custom_sync_with() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _) = collect_dbt_source_names(&manifest);
+        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
         let ds = DefaultSync {
@@ -1014,7 +1064,7 @@ mod tests {
     #[test]
     fn build_model_assets_does_not_include_syncs() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _) = collect_dbt_source_names(&manifest);
+        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
         let model_tests = collect_tests(&manifest, &model_names);
 
