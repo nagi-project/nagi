@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-use crate::dbt::profile::DbtProfilesFile;
+use crate::kind::connection::dbt::DbtProfilesFile;
 
 static TOKIO_RT: LazyLock<tokio::runtime::Runtime> =
     LazyLock::new(|| tokio::runtime::Runtime::new().expect("failed to create tokio runtime"));
@@ -91,7 +91,8 @@ pub fn compile_assets(
 #[pyfunction]
 pub fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
     let resources_path = std::path::Path::new(resources_dir);
-    let origins = crate::dbt::origin::list_origin_dirs(resources_path).map_err(to_py_err)?;
+    let origins =
+        crate::kind::origin::dbt::expand::list_origin_dirs(resources_path).map_err(to_py_err)?;
     let dirs: Vec<&str> = origins.iter().map(|(_, dir)| dir.as_str()).collect();
     Ok(dirs.join(", "))
 }
@@ -280,7 +281,8 @@ pub fn init_workspace(base_dir: &str, nagi_dir: Option<&str>) -> PyResult<()> {
 
 #[pyfunction]
 pub fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> PyResult<()> {
-    crate::dbt::run_dbt_debug(std::path::Path::new(project_dir), profile, target).map_err(to_py_err)
+    crate::kind::origin::dbt::run_dbt_debug(std::path::Path::new(project_dir), profile, target)
+        .map_err(to_py_err)
 }
 
 // ── Serve ───────────────────────────────────────────────────────────────────
