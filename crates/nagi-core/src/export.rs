@@ -529,8 +529,9 @@ pub fn resolve_export_connection(
         })
         .collect();
 
-    let resolved = crate::compile::resolve_connection_by_name(connection_name, &connections)
-        .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
+    let resolved =
+        crate::kind::connection::resolve_connection_by_name(connection_name, &connections)
+            .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
     resolved.connect().map_err(ExportError::Connection)
 }

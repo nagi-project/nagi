@@ -453,7 +453,7 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
 
     if !params.force {
         if let (
-            Some(crate::compile::ResolvedConnection::Dbt {
+            Some(crate::kind::connection::ResolvedConnection::Dbt {
                 dbt_cloud_credentials_file: Some(cred_path),
                 ..
             }),
