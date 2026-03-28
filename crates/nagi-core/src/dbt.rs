@@ -6,6 +6,7 @@ use crate::compile::CompileError;
 
 pub mod cloud;
 pub mod manifest;
+pub mod origin;
 pub mod profile;
 
 #[derive(Debug, Error)]

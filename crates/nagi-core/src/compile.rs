@@ -4,11 +4,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::dbt::manifest::{self, DbtManifest};
 use crate::kind::asset::{
     self as asset, validate_no_duplicate_condition_names, AssetSpec, DesiredCondition,
 };
-use crate::kind::origin::OriginSpec;
 use crate::kind::sync::SyncSpec;
 use crate::kind::{self, KindError, Metadata, NagiKind};
 
@@ -162,20 +160,6 @@ impl ResolvedConnection {
     }
 }
 
-/// Applies dbt Cloud job-to-model mapping to resolved assets.
-/// For each asset, sets `dbt_cloud_job_ids` to the set of job IDs whose
-/// `execute_steps` reference that asset's name.
-pub fn apply_dbt_cloud_job_mapping(
-    output: &mut CompileOutput,
-    model_job_mapping: &HashMap<String, HashSet<i64>>,
-) {
-    for asset in &mut output.assets {
-        if let Some(job_ids) = model_job_mapping.get(&asset.metadata.name) {
-            asset.dbt_cloud_job_ids = Some(job_ids.clone());
-        }
-    }
-}
-
 /// Compiles all YAML resources from `resources_dir` and writes resolved output to `target_dir`.
 /// When `export_config` is provided, auto-generates export Assets for log tables.
 pub fn compile(
@@ -185,9 +169,7 @@ pub fn compile(
 ) -> Result<CompileOutput, CompileError> {
     let resources = load_resources(resources_dir)?;
 
-    let manifests = load_dbt_manifests(&resources)?;
-
-    let mut resources = expand_origins(resources, &manifests)?;
+    let mut resources = crate::origin::expand(resources)?;
 
     if let Some(cfg) = export_config {
         resources.extend(crate::export::generate_export_resources(cfg));
@@ -196,105 +178,6 @@ pub fn compile(
     let output = resolve(resources)?;
     write_output(&output, target_dir)?;
     Ok(output)
-}
-
-/// Expands Origin resources by generating Assets and Syncs from dbt manifests.
-pub fn expand_origins(
-    resources: Vec<NagiKind>,
-    manifests: &HashMap<String, String>,
-) -> Result<Vec<NagiKind>, CompileError> {
-    let origins: Vec<(String, OriginSpec)> = resources
-        .iter()
-        .filter_map(|r| match r {
-            NagiKind::Origin { metadata, spec, .. } => Some((metadata.name.clone(), spec.clone())),
-            _ => None,
-        })
-        .collect();
-
-    if origins.is_empty() {
-        return Ok(resources);
-    }
-
-    let mut expanded = resources;
-    for (name, spec) in &origins {
-        let manifest_str = manifests.get(name).ok_or_else(|| {
-            CompileError::ManifestParse(format!("no manifest found for Origin '{name}'"))
-        })?;
-        let manifest: DbtManifest = serde_json::from_str(manifest_str)
-            .map_err(|e| CompileError::ManifestParse(e.to_string()))?;
-        let generated = manifest::manifest_to_resources(&manifest, spec);
-        expanded.extend(generated);
-    }
-
-    Ok(expanded)
-}
-
-/// Per-Origin dbt configuration extracted from resources.
-struct DbtOriginConfig {
-    origin_name: String,
-    project_dir: String,
-    profile: String,
-    target: Option<String>,
-}
-
-/// Extracts dbt configuration for each Origin by resolving its Connection.
-fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOriginConfig> {
-    let connection_profiles: HashMap<&str, (&str, Option<&str>)> = resources
-        .iter()
-        .filter_map(|r| match r {
-            NagiKind::Connection {
-                metadata,
-                spec:
-                    ConnectionSpec::Dbt {
-                        ref profile,
-                        ref target,
-                        ..
-                    },
-                ..
-            } => Some((
-                metadata.name.as_str(),
-                (profile.as_str(), target.as_deref()),
-            )),
-            _ => None,
-        })
-        .collect();
-
-    resources
-        .iter()
-        .filter_map(|r| match r {
-            NagiKind::Origin {
-                metadata,
-                spec:
-                    OriginSpec::DBT {
-                        connection,
-                        project_dir,
-                        ..
-                    },
-                ..
-            } => {
-                let (profile, target) = connection_profiles
-                    .get(connection.as_str())
-                    .map(|(p, t)| (p.to_string(), t.map(|s| s.to_string())))
-                    .unwrap_or_default();
-                Some(DbtOriginConfig {
-                    origin_name: metadata.name.clone(),
-                    project_dir: project_dir.clone(),
-                    profile,
-                    target,
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-/// Returns the list of dbt Origin names and their project directories.
-pub fn list_dbt_origin_dirs(resources_dir: &Path) -> Result<Vec<(String, String)>, CompileError> {
-    let resources = load_resources(resources_dir)?;
-    Ok(collect_dbt_origin_configs(&resources)
-        .into_iter()
-        .map(|c| (c.origin_name, c.project_dir))
-        .collect())
 }
 
 /// Resolves asset names from compiled output.
@@ -368,23 +251,6 @@ pub fn load_compiled_assets(
         result.push((name, content));
     }
     Ok(result)
-}
-
-/// Loads dbt manifests for all DBT Origins.
-///
-/// Returns a map of origin name → manifest JSON.
-fn load_dbt_manifests(resources: &[NagiKind]) -> Result<HashMap<String, String>, CompileError> {
-    let configs = collect_dbt_origin_configs(resources);
-    let mut manifests = HashMap::new();
-    for config in &configs {
-        let manifest_json = crate::dbt::load_manifest(
-            Path::new(&config.project_dir),
-            &config.profile,
-            config.target.as_deref(),
-        )?;
-        manifests.insert(config.origin_name.clone(), manifest_json);
-    }
-    Ok(manifests)
 }
 
 pub fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
@@ -561,40 +427,6 @@ fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, Stri
     result
 }
 
-/// Detects if a single sync step uses a command that updates multiple Assets.
-/// Returns a reason string if problematic, `None` otherwise.
-fn detect_multi_asset_step(args: &[String]) -> Option<String> {
-    if args.iter().any(|a| a == "dbt") && args.iter().any(|a| a == "build") {
-        return Some(
-            "uses `dbt build` which updates multiple models in a single execution".to_string(),
-        );
-    }
-    if let Some(tag) = args.iter().find(|a| a.starts_with("tag:")) {
-        return Some(format!(
-            "uses tag-based selector '{tag}' which may update multiple models in a single execution",
-        ));
-    }
-    None
-}
-
-/// Checks Sync definitions for commands that update multiple Assets in a single execution.
-/// Returns a list of `(sync_name, reason)` pairs for each problematic Sync.
-fn check_multi_asset_syncs(syncs: &HashMap<String, SyncSpec>) -> Vec<(String, String)> {
-    let mut warnings: Vec<(String, String)> = syncs
-        .iter()
-        .filter_map(|(name, spec)| {
-            let steps = [Some(&spec.run), spec.pre.as_ref(), spec.post.as_ref()];
-            steps
-                .into_iter()
-                .flatten()
-                .find_map(|step| detect_multi_asset_step(&step.args))
-                .map(|reason| (name.clone(), reason))
-        })
-        .collect();
-    warnings.sort_by(|a, b| a.0.cmp(&b.0));
-    warnings
-}
-
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let CategorizedResources {
@@ -604,13 +436,20 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         assets,
     } = categorize(resources)?;
 
-    for (sync_name, reason) in check_multi_asset_syncs(&syncs) {
-        tracing::warn!(
-            sync = sync_name,
-            "Sync '{}' {}: this conflicts with Nagi's per-Asset reconciliation loop",
-            sync_name,
-            reason,
-        );
+    for (name, spec) in &syncs {
+        let steps = [Some(&spec.run), spec.pre.as_ref(), spec.post.as_ref()];
+        if let Some(reason) = steps
+            .into_iter()
+            .flatten()
+            .find_map(|step| crate::origin::detect_multi_asset_command(&step.args))
+        {
+            tracing::warn!(
+                sync = name.as_str(),
+                "Sync '{}' {}: this conflicts with Nagi's per-Asset reconciliation loop",
+                name,
+                reason,
+            );
+        }
     }
 
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
@@ -1831,7 +1670,7 @@ spec:
     fn expand_origins_generates_resources_from_manifest() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded = expand_origins(resources, &manifests).unwrap();
+        let expanded = crate::dbt::origin::expand_with_manifests(resources, &manifests).unwrap();
 
         let assets: Vec<_> = expanded.iter().filter(|r| r.kind() == "Asset").collect();
         // 1 dbt source Asset + 2 model Assets
@@ -1846,14 +1685,16 @@ spec:
     fn expand_origins_noop_without_origin() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, ASSET_RAW_SALES]));
         let count = resources.len();
-        let expanded = expand_origins(resources, &HashMap::new()).unwrap();
+        let expanded =
+            crate::dbt::origin::expand_with_manifests(resources, &HashMap::new()).unwrap();
         assert_eq!(expanded.len(), count);
     }
 
     #[test]
     fn expand_origins_error_when_no_manifest() {
         let resources = parse(ORIGIN_YAML);
-        let err = expand_origins(resources, &HashMap::new()).unwrap_err();
+        let err =
+            crate::dbt::origin::expand_with_manifests(resources, &HashMap::new()).unwrap_err();
         assert!(matches!(err, CompileError::ManifestParse(_)));
     }
 
@@ -1861,7 +1702,7 @@ spec:
     fn resolve_with_origin_expansion() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded = expand_origins(resources, &manifests).unwrap();
+        let expanded = crate::dbt::origin::expand_with_manifests(resources, &manifests).unwrap();
         let output = resolve(expanded).unwrap();
 
         // 1 dbt source Asset + 2 model Assets
@@ -1906,203 +1747,12 @@ spec:
 
         let resources = load_resources(&resources_dir).unwrap();
         let manifests = manifests_for("my-dbt");
-        let resources = expand_origins(resources, &manifests).unwrap();
+        let resources = crate::dbt::origin::expand_with_manifests(resources, &manifests).unwrap();
         let output = resolve(resources).unwrap();
         write_output(&output, &target_dir).unwrap();
 
         assert!(target_dir.join("graph.json").exists());
         assert!(target_dir.join("assets/customers.yaml").exists());
         assert!(target_dir.join("assets/stg_customers.yaml").exists());
-    }
-
-    #[test]
-    fn collect_configs_returns_target_from_connection() {
-        let yaml = "\
-apiVersion: nagi.io/v1alpha1
-kind: Connection
-metadata:
-  name: my-bq
-spec:
-  type: dbt
-  profile: my_project
-  target: prod
----
-apiVersion: nagi.io/v1alpha1
-kind: Origin
-metadata:
-  name: dbt-origin
-spec:
-  type: DBT
-  connection: my-bq
-  projectDir: ../dbt-project";
-        let resources = parse_kinds(yaml).unwrap();
-        let configs = collect_dbt_origin_configs(&resources);
-        assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].origin_name, "dbt-origin");
-        assert_eq!(configs[0].project_dir, "../dbt-project");
-        assert_eq!(configs[0].profile, "my_project");
-        assert_eq!(configs[0].target.as_deref(), Some("prod"));
-    }
-
-    #[test]
-    fn collect_configs_returns_none_target_when_connection_has_no_target() {
-        let yaml = "\
-apiVersion: nagi.io/v1alpha1
-kind: Connection
-metadata:
-  name: my-bq
-spec:
-  type: dbt
-  profile: my_project
----
-apiVersion: nagi.io/v1alpha1
-kind: Origin
-metadata:
-  name: dbt-origin
-spec:
-  type: DBT
-  connection: my-bq
-  projectDir: ../dbt-project";
-        let resources = parse_kinds(yaml).unwrap();
-        let configs = collect_dbt_origin_configs(&resources);
-        assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].profile, "my_project");
-        assert_eq!(configs[0].target, None);
-    }
-
-    #[test]
-    fn collect_configs_returns_empty_when_no_origin() {
-        let yaml = "\
-apiVersion: nagi.io/v1alpha1
-kind: Connection
-metadata:
-  name: my-bq
-spec:
-  type: dbt
-  profile: my_project
-  target: dev";
-        let resources = parse_kinds(yaml).unwrap();
-        let configs = collect_dbt_origin_configs(&resources);
-        assert!(configs.is_empty());
-    }
-
-    #[test]
-    fn collect_configs_handles_multiple_origins() {
-        let yaml = "\
-apiVersion: nagi.io/v1alpha1
-kind: Connection
-metadata:
-  name: bq-prod
-spec:
-  type: dbt
-  profile: prod_profile
-  target: prod
----
-apiVersion: nagi.io/v1alpha1
-kind: Connection
-metadata:
-  name: bq-dev
-spec:
-  type: dbt
-  profile: dev_profile
----
-apiVersion: nagi.io/v1alpha1
-kind: Origin
-metadata:
-  name: dbt-main
-spec:
-  type: DBT
-  connection: bq-prod
-  projectDir: ../dbt-main
----
-apiVersion: nagi.io/v1alpha1
-kind: Origin
-metadata:
-  name: dbt-sub
-spec:
-  type: DBT
-  connection: bq-dev
-  projectDir: ../dbt-sub";
-        let resources = parse_kinds(yaml).unwrap();
-        let configs = collect_dbt_origin_configs(&resources);
-        assert_eq!(configs.len(), 2);
-
-        let main = configs
-            .iter()
-            .find(|c| c.origin_name == "dbt-main")
-            .unwrap();
-        assert_eq!(main.project_dir, "../dbt-main");
-        assert_eq!(main.profile, "prod_profile");
-        assert_eq!(main.target.as_deref(), Some("prod"));
-
-        let sub = configs.iter().find(|c| c.origin_name == "dbt-sub").unwrap();
-        assert_eq!(sub.project_dir, "../dbt-sub");
-        assert_eq!(sub.profile, "dev_profile");
-        assert_eq!(sub.target, None);
-    }
-
-    // ── detect_multi_asset_step tests ───────────────────────────────
-
-    fn args(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(|s| s.to_string()).collect()
-    }
-
-    macro_rules! detect_multi_asset_step_test {
-        ($($name:ident: $args:expr => $expected:expr;)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let a = args($args);
-                    let result = detect_multi_asset_step(&a);
-                    assert_eq!(result.is_some(), $expected);
-                }
-            )*
-        };
-    }
-
-    detect_multi_asset_step_test! {
-        detect_dbt_build: &["dbt", "build", "--select", "model_a"] => true;
-        detect_dbt_build_no_select: &["dbt", "build"] => true;
-        detect_tag_selector: &["dbt", "run", "--select", "tag:finance"] => true;
-        detect_tag_selector_combo: &["dbt", "run", "-s", "tag:finance,tag:daily"] => true;
-        ignore_model_select: &["dbt", "run", "--select", "my_model"] => false;
-        ignore_non_dbt_command: &["python", "run.py"] => false;
-        ignore_empty_args: &[] => false;
-    }
-
-    // ── check_multi_asset_syncs tests ─────────────────────────────────
-
-    fn make_sync(args: Vec<&str>) -> SyncSpec {
-        SyncSpec {
-            pre: None,
-            run: crate::kind::sync::SyncStep {
-                step_type: crate::kind::sync::StepType::Command,
-                args: args.into_iter().map(String::from).collect(),
-                env: HashMap::new(),
-            },
-            post: None,
-        }
-    }
-
-    #[test]
-    fn check_multi_asset_syncs_collects_warnings() {
-        let mut syncs = HashMap::new();
-        syncs.insert(
-            "build-sync".to_string(),
-            make_sync(vec!["dbt", "build", "--select", "model_a"]),
-        );
-        syncs.insert(
-            "ok-sync".to_string(),
-            make_sync(vec!["dbt", "run", "--select", "my_model"]),
-        );
-        let warnings = check_multi_asset_syncs(&syncs);
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].0, "build-sync");
-    }
-
-    #[test]
-    fn check_multi_asset_syncs_empty() {
-        let warnings = check_multi_asset_syncs(&HashMap::new());
-        assert!(warnings.is_empty());
     }
 }
