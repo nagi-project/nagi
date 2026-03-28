@@ -5,8 +5,8 @@ use thiserror::Error;
 use crate::compile::CompileError;
 
 pub mod cloud;
+pub mod expand;
 pub mod manifest;
-pub mod profile;
 
 #[derive(Debug, Error)]
 pub enum DbtError {
@@ -62,11 +62,11 @@ fn run_dbt_compile(
     }
     let output = cmd
         .output()
-        .map_err(|e| CompileError::DbtCompileFailed(format!("failed to execute dbt: {e}")))?;
+        .map_err(|e| CompileError::OriginFailed(format!("failed to execute dbt: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CompileError::DbtCompileFailed(format!(
+        return Err(CompileError::OriginFailed(format!(
             "dbt compile exited with {}: {}",
             output.status,
             stderr.trim()
@@ -124,7 +124,7 @@ mod tests {
             let err = run_dbt_compile(Path::new("."), "default", None);
             // Only assert if dbt is truly not on the system PATH.
             if let Err(e) = err {
-                assert!(matches!(e, CompileError::DbtCompileFailed(_)));
+                assert!(matches!(e, CompileError::OriginFailed(_)));
             }
         }
     }

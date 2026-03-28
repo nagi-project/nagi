@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::config::ExportConfig;
-use crate::db::Connection;
+use crate::kind::connection::Connection;
 use crate::kind::connection::ConnectionSpec;
 use crate::kind::{self, NagiKind};
 use crate::log::LogStore;
@@ -29,7 +29,7 @@ pub enum ExportError {
     UnknownTable(String),
 
     #[error("connection error: {0}")]
-    Connection(#[from] crate::db::ConnectionError),
+    Connection(#[from] crate::kind::connection::ConnectionError),
 }
 
 /// Tables that can be exported to a remote data warehouse.
@@ -515,7 +515,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
 pub fn resolve_export_connection(
     resources_dir: &Path,
     connection_name: &str,
-) -> Result<Box<dyn crate::db::Connection>, ExportError> {
+) -> Result<Box<dyn crate::kind::connection::Connection>, ExportError> {
     let resources = crate::compile::load_resources(resources_dir)
         .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
@@ -529,8 +529,9 @@ pub fn resolve_export_connection(
         })
         .collect();
 
-    let resolved = crate::compile::resolve_connection_by_name(connection_name, &connections)
-        .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
+    let resolved =
+        crate::kind::connection::resolve_connection_by_name(connection_name, &connections)
+            .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
     resolved.connect().map_err(ExportError::Connection)
 }

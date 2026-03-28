@@ -91,7 +91,7 @@ pub fn compile_assets(
 #[pyfunction]
 pub fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
     let resources_path = std::path::Path::new(resources_dir);
-    let origins = crate::compile::list_dbt_origin_dirs(resources_path).map_err(to_py_err)?;
+    let origins = crate::dbt::origin::list_origin_dirs(resources_path).map_err(to_py_err)?;
     let dirs: Vec<&str> = origins.iter().map(|(_, dir)| dir.as_str()).collect();
     Ok(dirs.join(", "))
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_yaml;
 
-use crate::dbt::profile::AdapterConfig;
+use crate::kind::connection::dbt::AdapterConfig;
 
 use super::{Connection, ConnectionError};
 
@@ -563,7 +563,7 @@ impl Connection for BigQueryConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dbt::profile::DbtProfilesFile;
+    use crate::kind::connection::dbt::DbtProfilesFile;
 
     const PROFILES_YAML: &str = r#"
 my_project:

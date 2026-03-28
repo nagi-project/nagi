@@ -9,8 +9,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::compile::{CompiledAsset, ResolvedOnDriftEntry};
-use crate::db::{Connection, ConnectionError};
 use crate::kind::asset::DesiredCondition;
+use crate::kind::connection::{Connection, ConnectionError};
 use crate::log::{LogError, LogStore};
 use crate::storage::local::LocalCache;
 use crate::storage::Cache;
@@ -271,9 +271,9 @@ mod tests {
 
     use super::*;
     use crate::compile::ResolvedOnDriftEntry;
-    use crate::db::ConnectionError;
     use crate::duration::Duration;
     use crate::kind::asset::DesiredCondition;
+    use crate::kind::connection::ConnectionError;
     use crate::kind::sync::{SyncSpec, SyncStep};
 
     // ── Helpers ───────────────────────────────────────────────────────────────

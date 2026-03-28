@@ -382,9 +382,12 @@ async fn check_dbt_cloud_preflight(
     cred_path: &str,
     job_ids: &std::collections::HashSet<i64>,
 ) -> Result<(), SyncError> {
-    let jobs = crate::dbt::cloud::check_running_jobs_for_asset(Path::new(cred_path), job_ids)
-        .await
-        .map_err(|e| SyncError::DbtCloud(e.to_string()))?;
+    let jobs = crate::kind::origin::dbt::cloud::check_running_jobs_for_asset(
+        Path::new(cred_path),
+        job_ids,
+    )
+    .await
+    .map_err(|e| SyncError::DbtCloud(e.to_string()))?;
 
     if !jobs.is_empty() {
         let details: Vec<String> = jobs
@@ -450,7 +453,7 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
 
     if !params.force {
         if let (
-            Some(crate::compile::ResolvedConnection::Dbt {
+            Some(crate::kind::connection::ResolvedConnection::Dbt {
                 dbt_cloud_credentials_file: Some(cred_path),
                 ..
             }),

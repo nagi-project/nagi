@@ -1,7 +1,186 @@
+pub mod bigquery;
+pub mod dbt;
+
+use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
+use std::collections::HashMap;
+
+use self::dbt::AdapterConfig;
 use super::KindError;
+use crate::compile::CompileError;
+
+#[derive(Debug, Error)]
+pub enum ConnectionError {
+    #[error("unsupported adapter type: {0}")]
+    UnsupportedAdapter(String),
+    #[error("missing required field '{field}' in profile output")]
+    MissingField { field: String },
+    #[error("invalid value for field '{field}' in profile output")]
+    InvalidField { field: String },
+    #[error("authentication failed: {0}")]
+    AuthFailed(String),
+    #[error("query failed: {0}")]
+    QueryFailed(String),
+    #[error("http error: {0}")]
+    Http(#[from] reqwest::Error),
+}
+
+/// Executes a SQL query and returns the first column of the first row as a JSON value.
+#[async_trait]
+pub trait Connection: Send + Sync {
+    async fn query_scalar(&self, sql: &str) -> Result<serde_json::Value, ConnectionError>;
+
+    /// Builds a dialect-specific SQL query to retrieve the last-updated timestamp of a table.
+    /// With `column`: `SELECT MAX(column) FROM table`
+    /// Without `column`: queries system metadata for the physical last-modified time.
+    fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String;
+
+    /// Returns the sqlparser dialect for this connection's adapter type.
+    fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect>;
+
+    /// Executes a DML/DDL statement (e.g. CREATE TABLE, MERGE).
+    async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError>;
+
+    /// Loads a JSONL file into a staging table via the data warehouse's bulk load mechanism.
+    /// `dataset` is the target dataset/schema, `table` is the staging table name.
+    async fn load_jsonl(
+        &self,
+        dataset: &str,
+        table: &str,
+        jsonl_path: &std::path::Path,
+    ) -> Result<(), ConnectionError>;
+}
+
+/// Creates a `Connection` implementation based on the adapter type in the profile output.
+pub fn create_connection(output: &AdapterConfig) -> Result<Box<dyn Connection>, ConnectionError> {
+    match output.adapter_type.as_str() {
+        "bigquery" => {
+            let config = bigquery::BigQueryConfig::from_output(output)?;
+            Ok(Box::new(bigquery::BigQueryConnection::new(config)))
+        }
+        other => Err(ConnectionError::UnsupportedAdapter(other.to_string())),
+    }
+}
+
+/// Connection info resolved from Asset → Connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ResolvedConnection {
+    /// Connection resolved via dbt profiles.yml.
+    #[serde(rename_all = "camelCase")]
+    Dbt {
+        /// Original Connection resource name.
+        name: String,
+        profile: String,
+        target: Option<String>,
+        /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
+        dbt_cloud_credentials_file: Option<String>,
+    },
+    /// Direct BigQuery connection without dbt profiles.yml.
+    #[serde(rename = "bigquery", rename_all = "camelCase")]
+    BigQuery {
+        name: String,
+        project: String,
+        dataset: String,
+        execution_project: Option<String>,
+        method: Option<String>,
+        keyfile: Option<String>,
+        timeout_seconds: Option<u32>,
+    },
+}
+
+impl ResolvedConnection {
+    pub fn name(&self) -> &str {
+        match self {
+            ResolvedConnection::Dbt { name, .. } | ResolvedConnection::BigQuery { name, .. } => {
+                name
+            }
+        }
+    }
+
+    /// Creates a `Box<dyn Connection>` from the resolved connection info.
+    pub fn connect(&self) -> Result<Box<dyn Connection>, ConnectionError> {
+        match self {
+            ResolvedConnection::Dbt {
+                profile, target, ..
+            } => {
+                let f = dbt::DbtProfilesFile::load_default()
+                    .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
+                let output = f
+                    .resolve(profile, target.as_deref())
+                    .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
+                create_connection(output)
+            }
+            ResolvedConnection::BigQuery {
+                project,
+                dataset,
+                execution_project,
+                method,
+                keyfile,
+                timeout_seconds,
+                ..
+            } => {
+                let conn = bigquery::BigQueryConnection::from_resolved(
+                    project,
+                    dataset,
+                    execution_project,
+                    method.as_deref(),
+                    keyfile,
+                    *timeout_seconds,
+                )?;
+                Ok(Box::new(conn))
+            }
+        }
+    }
+}
+
+/// Resolves a named `ConnectionSpec` into a `ResolvedConnection`.
+pub fn resolve_connection_by_name(
+    conn_name: &str,
+    connections: &HashMap<String, ConnectionSpec>,
+) -> Result<ResolvedConnection, CompileError> {
+    let conn_spec = connections
+        .get(conn_name)
+        .ok_or_else(|| CompileError::UnresolvedRef {
+            kind: "Connection".to_string(),
+            name: conn_name.to_string(),
+        })?;
+    match conn_spec {
+        ConnectionSpec::Dbt {
+            ref profile,
+            ref target,
+            ref dbt_cloud,
+        } => Ok(ResolvedConnection::Dbt {
+            name: conn_name.to_string(),
+            profile: profile.clone(),
+            target: target.clone(),
+            dbt_cloud_credentials_file: dbt_cloud.as_ref().map(|c| {
+                c.credentials_file
+                    .clone()
+                    .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
+            }),
+        }),
+        ConnectionSpec::BigQuery {
+            ref project,
+            ref dataset,
+            ref execution_project,
+            ref method,
+            ref keyfile,
+            ref timeout_seconds,
+        } => Ok(ResolvedConnection::BigQuery {
+            name: conn_name.to_string(),
+            project: project.clone(),
+            dataset: dataset.clone(),
+            execution_project: execution_project.clone(),
+            method: method.clone(),
+            keyfile: keyfile.clone(),
+            timeout_seconds: *timeout_seconds,
+        }),
+    }
+}
 
 pub const KIND: &str = "Connection";
 
@@ -321,5 +500,100 @@ dataset: raw
                 keyfile: None,
                 timeout_seconds: None,
             } => "executionProject must not be empty";
+    }
+
+    #[test]
+    fn create_connection_rejects_unsupported_adapter() {
+        let output = AdapterConfig {
+            adapter_type: "snowflake".to_string(),
+            fields: Default::default(),
+        };
+        let result = create_connection(&output);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(matches!(err, ConnectionError::UnsupportedAdapter(a) if a == "snowflake"));
+    }
+
+    #[test]
+    fn create_connection_accepts_bigquery() {
+        let output = AdapterConfig {
+            adapter_type: "bigquery".to_string(),
+            fields: [
+                (
+                    "project".to_string(),
+                    serde_yaml::Value::String("p".to_string()),
+                ),
+                (
+                    "dataset".to_string(),
+                    serde_yaml::Value::String("d".to_string()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        assert!(create_connection(&output).is_ok());
+    }
+
+    // ── resolve_connection tests ───────────────────────────────────────
+
+    #[test]
+    fn resolve_connection_by_name_dbt() {
+        let mut connections = HashMap::new();
+        connections.insert(
+            "my-bq".to_string(),
+            ConnectionSpec::Dbt {
+                profile: "proj".to_string(),
+                target: Some("dev".to_string()),
+                dbt_cloud: None,
+            },
+        );
+        let conn = resolve_connection_by_name("my-bq", &connections).unwrap();
+        assert!(matches!(conn, ResolvedConnection::Dbt { name, profile, .. }
+            if name == "my-bq" && profile == "proj"));
+    }
+
+    #[test]
+    fn resolve_connection_by_name_bigquery() {
+        let mut connections = HashMap::new();
+        connections.insert(
+            "my-bq-direct".to_string(),
+            ConnectionSpec::BigQuery {
+                project: "my-gcp-project".to_string(),
+                dataset: "raw".to_string(),
+                execution_project: Some("billing-proj".to_string()),
+                method: Some("oauth".to_string()),
+                keyfile: None,
+                timeout_seconds: Some(30),
+            },
+        );
+        let conn = resolve_connection_by_name("my-bq-direct", &connections).unwrap();
+        match conn {
+            ResolvedConnection::BigQuery {
+                name,
+                project,
+                dataset,
+                execution_project,
+                method,
+                keyfile,
+                timeout_seconds,
+            } => {
+                assert_eq!(name, "my-bq-direct");
+                assert_eq!(project, "my-gcp-project");
+                assert_eq!(dataset, "raw");
+                assert_eq!(execution_project, Some("billing-proj".to_string()));
+                assert_eq!(method, Some("oauth".to_string()));
+                assert!(keyfile.is_none());
+                assert_eq!(timeout_seconds, Some(30));
+            }
+            other => panic!("expected BigQuery, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_connection_by_name_missing() {
+        let connections = HashMap::new();
+        let err = resolve_connection_by_name("missing", &connections).unwrap_err();
+        assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
+            if kind == "Connection" && name == "missing"));
     }
 }
