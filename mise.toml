@@ -17,7 +17,7 @@ run = "uv sync --reinstall-package nagi-cli"
 description = "Run fmt, clippy, and test for Rust"
 run = """
 cargo fmt --check
-cargo clippy -- -D warnings
+cargo clippy --features python -- -D warnings
 cargo test
 """
 
