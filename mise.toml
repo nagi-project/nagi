@@ -55,6 +55,14 @@ cargo run -p nagi-schema-gen
 uv run python scripts/gen_schema_docs.py docs/schemas docs
 """
 
+[tasks."dbt:setup"]
+description = "Initialize the integration test dbt project"
+dir = "python/tests/dbt_project"
+run = """
+uv run dbt seed --profiles-dir profiles
+uv run dbt compile --profiles-dir profiles
+"""
+
 [tasks."docs:build"]
 description = "Build documentation site"
 depends = ["docs:gen-schema"]

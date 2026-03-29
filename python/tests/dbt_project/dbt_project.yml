@@ -1,0 +1,12 @@
+name: integration_test
+version: '1.0.0'
+
+profile: integration_test
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"

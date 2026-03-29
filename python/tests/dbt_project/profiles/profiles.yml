@@ -1,0 +1,6 @@
+integration_test:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: dev.duckdb
