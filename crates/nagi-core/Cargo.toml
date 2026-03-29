@@ -19,7 +19,10 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "sync", "signal"] }
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
-jsonwebtoken = { version = "10", optional = true }
+jsonwebtoken = { version = "10", features = ["rust_crypto"], optional = true }
+rsa = { version = "0.9", optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
 rusqlite = { version = "0.31", features = ["bundled"] }
 schemars = "0.8"
 object_store = { version = "0.11", features = ["gcp", "aws"] }
@@ -29,9 +32,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
 
 [features]
-default = ["bigquery"]
+default = ["bigquery", "snowflake"]
 python = ["pyo3"]
 bigquery = ["dep:reqwest", "dep:jsonwebtoken"]
+snowflake = ["dep:reqwest", "dep:jsonwebtoken", "dep:rsa", "dep:sha2", "dep:base64"]
 
 [dev-dependencies]
 tempfile = "3"

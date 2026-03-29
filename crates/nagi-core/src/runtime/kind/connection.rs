@@ -2,6 +2,8 @@
 pub mod bigquery;
 pub mod dbt;
 pub mod duckdb;
+#[cfg(feature = "snowflake")]
+pub mod snowflake;
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -26,7 +28,7 @@ pub enum ConnectionError {
     AuthFailed(String),
     #[error("query failed: {0}")]
     QueryFailed(String),
-    #[cfg(feature = "bigquery")]
+    #[cfg(any(feature = "bigquery", feature = "snowflake"))]
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
 }
@@ -74,6 +76,11 @@ pub fn create_connection(output: &AdapterConfig) -> Result<Box<dyn Connection>, 
             let path = require_str(&output.fields, "path")?;
             Ok(Box::new(duckdb::DuckDbConnection::new(&path)))
         }
+        #[cfg(feature = "snowflake")]
+        "snowflake" => {
+            let config = snowflake::SnowflakeConfig::from_output(output)?;
+            Ok(Box::new(snowflake::SnowflakeConnection::new(config)))
+        }
         other => Err(ConnectionError::UnsupportedAdapter(other.to_string())),
     }
 }
@@ -106,6 +113,18 @@ pub enum ResolvedConnection {
     /// Direct DuckDB connection.
     #[serde(rename = "duckdb", rename_all = "camelCase")]
     DuckDb { name: String, path: String },
+    /// Direct Snowflake connection via SQL REST API with Key-Pair JWT authentication.
+    #[serde(rename = "snowflake", rename_all = "camelCase")]
+    Snowflake {
+        name: String,
+        account: String,
+        user: String,
+        database: String,
+        schema: String,
+        warehouse: String,
+        role: Option<String>,
+        private_key_path: String,
+    },
 }
 
 impl ResolvedConnection {
@@ -113,7 +132,8 @@ impl ResolvedConnection {
         match self {
             ResolvedConnection::Dbt { name, .. }
             | ResolvedConnection::BigQuery { name, .. }
-            | ResolvedConnection::DuckDb { name, .. } => name,
+            | ResolvedConnection::DuckDb { name, .. }
+            | ResolvedConnection::Snowflake { name, .. } => name,
         }
     }
 
@@ -157,6 +177,32 @@ impl ResolvedConnection {
             ResolvedConnection::DuckDb { path, .. } => {
                 Ok(Box::new(duckdb::DuckDbConnection::new(path)))
             }
+            #[cfg(feature = "snowflake")]
+            ResolvedConnection::Snowflake {
+                account,
+                user,
+                database,
+                schema,
+                warehouse,
+                role,
+                private_key_path,
+                ..
+            } => {
+                let config = snowflake::SnowflakeConfig {
+                    account: account.clone(),
+                    user: user.clone(),
+                    database: database.clone(),
+                    schema: schema.clone(),
+                    warehouse: warehouse.clone(),
+                    role: role.clone(),
+                    private_key_path: private_key_path.clone(),
+                };
+                Ok(Box::new(snowflake::SnowflakeConnection::new(config)))
+            }
+            #[cfg(not(feature = "snowflake"))]
+            ResolvedConnection::Snowflake { .. } => Err(ConnectionError::UnsupportedAdapter(
+                "snowflake (feature disabled)".to_string(),
+            )),
         }
     }
 }
@@ -207,6 +253,24 @@ pub fn resolve_connection_by_name(
             name: conn_name.to_string(),
             path: path.clone(),
         }),
+        ConnectionSpec::Snowflake {
+            ref account,
+            ref user,
+            ref database,
+            ref schema,
+            ref warehouse,
+            ref role,
+            ref private_key_path,
+        } => Ok(ResolvedConnection::Snowflake {
+            name: conn_name.to_string(),
+            account: account.clone(),
+            user: user.clone(),
+            database: database.clone(),
+            schema: schema.clone(),
+            warehouse: warehouse.clone(),
+            role: role.clone(),
+            private_key_path: private_key_path.clone(),
+        }),
     }
 }
 
@@ -245,6 +309,18 @@ pub enum ConnectionSpec {
     /// Direct DuckDB connection.
     #[serde(rename = "duckdb")]
     DuckDb { path: String },
+    /// Direct Snowflake connection via SQL REST API with Key-Pair JWT authentication.
+    #[serde(rename = "snowflake", rename_all = "camelCase")]
+    Snowflake {
+        account: String,
+        user: String,
+        database: String,
+        schema: String,
+        warehouse: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        private_key_path: String,
+    },
 }
 
 /// dbt Cloud configuration for pre-sync running-job checks.
@@ -275,6 +351,24 @@ impl ConnectionSpec {
             }
             ConnectionSpec::DuckDb { path } => {
                 reject_empty("path", path)?;
+                Ok(())
+            }
+            ConnectionSpec::Snowflake {
+                account,
+                user,
+                database,
+                schema,
+                warehouse,
+                role,
+                private_key_path,
+            } => {
+                reject_empty("account", account)?;
+                reject_empty("user", user)?;
+                reject_empty("database", database)?;
+                reject_empty("schema", schema)?;
+                reject_empty("warehouse", warehouse)?;
+                reject_empty_optional("role", role.as_deref())?;
+                reject_empty("privateKeyPath", private_key_path)?;
                 Ok(())
             }
         }
@@ -554,13 +648,13 @@ dataset: raw
     #[test]
     fn create_connection_rejects_unsupported_adapter() {
         let output = AdapterConfig {
-            adapter_type: "snowflake".to_string(),
+            adapter_type: "mysql".to_string(),
             fields: Default::default(),
         };
         let result = create_connection(&output);
         assert!(result.is_err());
         let err = result.err().unwrap();
-        assert!(matches!(err, ConnectionError::UnsupportedAdapter(a) if a == "snowflake"));
+        assert!(matches!(err, ConnectionError::UnsupportedAdapter(a) if a == "mysql"));
     }
 
     #[test]
@@ -693,6 +787,189 @@ path: ./data/warehouse.duckdb
                 assert_eq!(path, "./data/warehouse.duckdb");
             }
             other => panic!("expected DuckDb, got {other:?}"),
+        }
+    }
+
+    // ── Snowflake parsing tests ──────────────────────────────────────────
+
+    #[test]
+    fn parse_snowflake_all_fields() {
+        let yaml = r#"
+type: snowflake
+account: myorg-myacct
+user: MY_USER
+database: MY_DB
+schema: MY_SCHEMA
+warehouse: MY_WH
+role: MY_ROLE
+privateKeyPath: /path/to/rsa_key.p8
+"#;
+        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            ConnectionSpec::Snowflake {
+                account,
+                user,
+                database,
+                schema,
+                warehouse,
+                role,
+                private_key_path,
+            } => {
+                assert_eq!(account, "myorg-myacct");
+                assert_eq!(user, "MY_USER");
+                assert_eq!(database, "MY_DB");
+                assert_eq!(schema, "MY_SCHEMA");
+                assert_eq!(warehouse, "MY_WH");
+                assert_eq!(role, &Some("MY_ROLE".to_string()));
+                assert_eq!(private_key_path, "/path/to/rsa_key.p8");
+            }
+            other => panic!("expected Snowflake, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_snowflake_required_fields_only() {
+        let yaml = r#"
+type: snowflake
+account: myorg-myacct
+user: MY_USER
+database: MY_DB
+schema: MY_SCHEMA
+warehouse: MY_WH
+privateKeyPath: /path/to/rsa_key.p8
+"#;
+        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            ConnectionSpec::Snowflake { role, .. } => {
+                assert!(role.is_none());
+            }
+            other => panic!("expected Snowflake, got {other:?}"),
+        }
+    }
+
+    validate_accept_test! {
+        validate_snowflake_valid:
+            ConnectionSpec::Snowflake {
+                account: "myorg-myacct".to_string(),
+                user: "MY_USER".to_string(),
+                database: "MY_DB".to_string(),
+                schema: "MY_SCHEMA".to_string(),
+                warehouse: "MY_WH".to_string(),
+                role: None,
+                private_key_path: "/path/to/rsa_key.p8".to_string(),
+            };
+    }
+
+    validate_reject_test! {
+        validate_snowflake_rejects_empty_account:
+            ConnectionSpec::Snowflake {
+                account: "".to_string(),
+                user: "u".to_string(),
+                database: "d".to_string(),
+                schema: "s".to_string(),
+                warehouse: "w".to_string(),
+                role: None,
+                private_key_path: "p".to_string(),
+            } => "account must not be empty";
+        validate_snowflake_rejects_empty_user:
+            ConnectionSpec::Snowflake {
+                account: "a".to_string(),
+                user: "".to_string(),
+                database: "d".to_string(),
+                schema: "s".to_string(),
+                warehouse: "w".to_string(),
+                role: None,
+                private_key_path: "p".to_string(),
+            } => "user must not be empty";
+        validate_snowflake_rejects_empty_database:
+            ConnectionSpec::Snowflake {
+                account: "a".to_string(),
+                user: "u".to_string(),
+                database: "".to_string(),
+                schema: "s".to_string(),
+                warehouse: "w".to_string(),
+                role: None,
+                private_key_path: "p".to_string(),
+            } => "database must not be empty";
+        validate_snowflake_rejects_empty_schema:
+            ConnectionSpec::Snowflake {
+                account: "a".to_string(),
+                user: "u".to_string(),
+                database: "d".to_string(),
+                schema: "".to_string(),
+                warehouse: "w".to_string(),
+                role: None,
+                private_key_path: "p".to_string(),
+            } => "schema must not be empty";
+        validate_snowflake_rejects_empty_warehouse:
+            ConnectionSpec::Snowflake {
+                account: "a".to_string(),
+                user: "u".to_string(),
+                database: "d".to_string(),
+                schema: "s".to_string(),
+                warehouse: "".to_string(),
+                role: None,
+                private_key_path: "p".to_string(),
+            } => "warehouse must not be empty";
+        validate_snowflake_rejects_empty_private_key_path:
+            ConnectionSpec::Snowflake {
+                account: "a".to_string(),
+                user: "u".to_string(),
+                database: "d".to_string(),
+                schema: "s".to_string(),
+                warehouse: "w".to_string(),
+                role: None,
+                private_key_path: "".to_string(),
+            } => "privateKeyPath must not be empty";
+        validate_snowflake_rejects_empty_role:
+            ConnectionSpec::Snowflake {
+                account: "a".to_string(),
+                user: "u".to_string(),
+                database: "d".to_string(),
+                schema: "s".to_string(),
+                warehouse: "w".to_string(),
+                role: Some("".to_string()),
+                private_key_path: "p".to_string(),
+            } => "role must not be empty";
+    }
+
+    #[test]
+    fn resolve_connection_by_name_snowflake() {
+        let mut connections = HashMap::new();
+        connections.insert(
+            "my-sf".to_string(),
+            ConnectionSpec::Snowflake {
+                account: "myorg-myacct".to_string(),
+                user: "MY_USER".to_string(),
+                database: "MY_DB".to_string(),
+                schema: "MY_SCHEMA".to_string(),
+                warehouse: "MY_WH".to_string(),
+                role: Some("MY_ROLE".to_string()),
+                private_key_path: "/path/to/key.p8".to_string(),
+            },
+        );
+        let conn = resolve_connection_by_name("my-sf", &connections).unwrap();
+        match conn {
+            ResolvedConnection::Snowflake {
+                name,
+                account,
+                user,
+                database,
+                schema,
+                warehouse,
+                role,
+                private_key_path,
+            } => {
+                assert_eq!(name, "my-sf");
+                assert_eq!(account, "myorg-myacct");
+                assert_eq!(user, "MY_USER");
+                assert_eq!(database, "MY_DB");
+                assert_eq!(schema, "MY_SCHEMA");
+                assert_eq!(warehouse, "MY_WH");
+                assert_eq!(role, Some("MY_ROLE".to_string()));
+                assert_eq!(private_key_path, "/path/to/key.p8");
+            }
+            other => panic!("expected Snowflake, got {other:?}"),
         }
     }
 

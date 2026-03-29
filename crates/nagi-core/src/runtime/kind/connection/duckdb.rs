@@ -78,7 +78,9 @@ impl Connection for DuckDbConnection {
             Some(col) => {
                 let col = escape_identifier(col);
                 let name = escape_identifier(asset_name);
-                Ok(format!("SELECT MAX(\"{col}\") FROM \"{name}\""))
+                Ok(format!(
+                    "SELECT strftime(MAX(\"{col}\") AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%SZ') FROM \"{name}\""
+                ))
             }
             None => Err(ConnectionError::QueryFailed(
                 "DuckDB does not support metadata-based freshness; specify a column".to_string(),
@@ -148,6 +150,8 @@ mod tests {
     freshness_sql_ok_test! {
         freshness_sql_with_column:
             "my_table", "updated_at" => contains r#"MAX("updated_at")"#;
+        freshness_sql_formats_rfc3339:
+            "my_table", "updated_at" => contains "strftime";
         freshness_sql_escapes_column:
             "t", r#"my"col"# => contains r#""my""col""#;
         freshness_sql_escapes_table:
