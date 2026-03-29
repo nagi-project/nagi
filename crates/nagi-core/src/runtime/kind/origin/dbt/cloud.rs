@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -28,6 +28,9 @@ pub enum DbtCloudError {
 
     #[error("unexpected API response: {0}")]
     Response(String),
+
+    #[error("{0}")]
+    RunningJobs(String),
 }
 
 /// Credentials parsed from `~/.dbt/dbt_cloud.yml`.
@@ -62,48 +65,6 @@ fn validate_account_host(host: &str) -> Result<(), DbtCloudError> {
     } else {
         Err(DbtCloudError::InvalidAccountHost(host.to_string()))
     }
-}
-
-/// Parses the dbt Cloud credentials YAML file.
-///
-/// Returns credentials (without the token — acquired just-in-time per CLAUDE.md
-/// security policy: never store credentials beyond the scope that needs them).
-#[cfg(test)]
-pub fn parse_credentials(path: &Path) -> Result<DbtCloudCredentials, DbtCloudError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| DbtCloudError::CredentialsRead(format!("{}: {e}", path.display())))?;
-    parse_credentials_str(&content)
-}
-
-#[cfg(test)]
-fn parse_credentials_str(content: &str) -> Result<DbtCloudCredentials, DbtCloudError> {
-    let raw: RawCredentials = serde_yaml::from_str(content)
-        .map_err(|e| DbtCloudError::CredentialsParse(e.to_string()))?;
-
-    let account_id = raw
-        .account_id
-        .filter(|s| !s.is_empty())
-        .ok_or(DbtCloudError::MissingField("account-id"))?;
-    // Defense against URL path injection: account-id must be numeric.
-    if !account_id.chars().all(|c| c.is_ascii_digit()) {
-        return Err(DbtCloudError::InvalidAccountId(account_id));
-    }
-    let account_host = raw
-        .account_host
-        .filter(|s| !s.is_empty())
-        .ok_or(DbtCloudError::MissingField("account-host"))?;
-    // Defense against URL injection: account-host must be a plain hostname.
-    validate_account_host(&account_host)?;
-    // token-value validated at use time, not stored.
-    let _ = raw
-        .token_value
-        .filter(|s| !s.is_empty())
-        .ok_or(DbtCloudError::MissingField("token-value"))?;
-
-    Ok(DbtCloudCredentials {
-        account_id,
-        account_host,
-    })
 }
 
 /// Reads token from credentials file just-in-time for an API call.
@@ -143,7 +104,6 @@ fn read_token(credentials_path: &Path) -> Result<(DbtCloudCredentials, String), 
 // ── Jobs API ──────────────────────────────────────────────────────────────
 
 /// A dbt Cloud job definition with its execute_steps.
-#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct JobData {
     id: i64,
@@ -151,7 +111,6 @@ struct JobData {
     execute_steps: Vec<String>,
 }
 
-#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct JobsResponse {
     data: Vec<JobData>,
@@ -166,8 +125,7 @@ struct JobsResponse {
 ///   "dbt run --select +daily_sales" → ["daily_sales"]
 ///   "dbt test --select tag:finance" → [] (tag selectors are not model names)
 ///   "dbt run" → [] (no --select means all models)
-#[cfg(test)]
-pub fn extract_model_names_from_command(command: &str) -> Vec<String> {
+fn extract_model_names_from_command(command: &str) -> Vec<String> {
     let parts: Vec<&str> = command.split_whitespace().collect();
     let mut models = Vec::new();
     let mut i = 0;
@@ -185,18 +143,49 @@ pub fn extract_model_names_from_command(command: &str) -> Vec<String> {
 }
 
 /// Builds a mapping of model name → set of job IDs from job definitions.
-#[cfg(test)]
-fn build_model_job_mapping(jobs: &[JobData]) -> std::collections::HashMap<String, HashSet<i64>> {
-    let mut mapping: std::collections::HashMap<String, HashSet<i64>> =
-        std::collections::HashMap::new();
-    for job in jobs {
-        for step in &job.execute_steps {
-            for model in extract_model_names_from_command(step) {
-                mapping.entry(model).or_default().insert(job.id);
-            }
-        }
+fn build_model_job_mapping(jobs: &[JobData]) -> HashMap<String, HashSet<i64>> {
+    jobs.iter()
+        .flat_map(|job| {
+            job.execute_steps
+                .iter()
+                .flat_map(|step| extract_model_names_from_command(step))
+                .map(move |model| (model, job.id))
+        })
+        .fold(HashMap::new(), |mut mapping, (model, job_id)| {
+            mapping.entry(model).or_default().insert(job_id);
+            mapping
+        })
+}
+
+/// Fetches all jobs from dbt Cloud and builds a model-name → job-ID mapping.
+pub async fn fetch_job_model_mapping(
+    credentials_path: &Path,
+) -> Result<HashMap<String, HashSet<i64>>, DbtCloudError> {
+    let (creds, token) = read_token(credentials_path)?;
+    let url = format!(
+        "https://{}/api/v2/accounts/{}/jobs/",
+        creds.account_host, creds.account_id
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Token {}", token))
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| DbtCloudError::Request(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(DbtCloudError::Response(format!(
+            "HTTP {} from {}",
+            resp.status(),
+            url
+        )));
     }
-    mapping
+    let body: JobsResponse = resp
+        .json()
+        .await
+        .map_err(|e| DbtCloudError::Response(e.to_string()))?;
+    Ok(build_model_job_mapping(&body.data))
 }
 
 // ── Runs API ──────────────────────────────────────────────────────────────
@@ -281,9 +270,80 @@ fn filter_runs_by_job_ids(runs: &[RunData], job_ids: &HashSet<i64>) -> Vec<Runni
         .collect()
 }
 
+// ── Preflight check ───────────────────────────────────────────────────
+
+/// Extracts the dbt Cloud credentials file path from a resolved connection.
+pub fn extract_credentials_path(
+    connection: &Option<crate::runtime::kind::connection::ResolvedConnection>,
+) -> Option<&str> {
+    match connection {
+        Some(crate::runtime::kind::connection::ResolvedConnection::Dbt {
+            dbt_cloud_credentials_file: Some(path),
+            ..
+        }) => Some(path.as_str()),
+        _ => None,
+    }
+}
+
+/// Checks for running dbt Cloud jobs that affect the given asset.
+/// Returns an error if any running jobs are found.
+pub async fn preflight_check(
+    asset_name: &str,
+    cred_path: &str,
+    job_ids: &HashSet<i64>,
+) -> Result<(), DbtCloudError> {
+    let jobs = check_running_jobs_for_asset(Path::new(cred_path), job_ids).await?;
+
+    if !jobs.is_empty() {
+        let details: Vec<String> = jobs
+            .iter()
+            .map(|j| format!("  job-{} ({})", j.job_id, j.status_humanized))
+            .collect();
+        return Err(DbtCloudError::RunningJobs(format!(
+            "dbt Cloud has running jobs that include asset '{}':\n{}\nUse --force to override.",
+            asset_name,
+            details.join("\n")
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_credentials(path: &Path) -> Result<DbtCloudCredentials, DbtCloudError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| DbtCloudError::CredentialsRead(format!("{}: {e}", path.display())))?;
+        parse_credentials_str(&content)
+    }
+
+    fn parse_credentials_str(content: &str) -> Result<DbtCloudCredentials, DbtCloudError> {
+        let raw: RawCredentials = serde_yaml::from_str(content)
+            .map_err(|e| DbtCloudError::CredentialsParse(e.to_string()))?;
+
+        let account_id = raw
+            .account_id
+            .filter(|s| !s.is_empty())
+            .ok_or(DbtCloudError::MissingField("account-id"))?;
+        if !account_id.chars().all(|c| c.is_ascii_digit()) {
+            return Err(DbtCloudError::InvalidAccountId(account_id));
+        }
+        let account_host = raw
+            .account_host
+            .filter(|s| !s.is_empty())
+            .ok_or(DbtCloudError::MissingField("account-host"))?;
+        validate_account_host(&account_host)?;
+        let _ = raw
+            .token_value
+            .filter(|s| !s.is_empty())
+            .ok_or(DbtCloudError::MissingField("token-value"))?;
+
+        Ok(DbtCloudCredentials {
+            account_id,
+            account_host,
+        })
+    }
 
     fn sample_credentials_yaml() -> &'static str {
         r#"

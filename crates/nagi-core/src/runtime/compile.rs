@@ -37,6 +37,12 @@ pub enum CompileError {
 
     #[error("invalid kind filter: '{0}'. Valid values: Asset, Connection, Conditions, Sync")]
     InvalidKind(String),
+
+    #[error("dbt Cloud API error: {0}")]
+    DbtCloud(String),
+
+    #[error("failed to create async runtime: {0}")]
+    Runtime(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -105,7 +111,21 @@ pub fn compile(
         resources.extend(crate::runtime::export::generate_export_resources(cfg));
     }
 
-    let output = resolve(resources)?;
+    let mut output = resolve(resources)?;
+
+    if let Some(cred_path) = dbt::find_dbt_cloud_credentials(&output) {
+        let rt =
+            tokio::runtime::Runtime::new().map_err(|e| CompileError::Runtime(e.to_string()))?;
+        let mapping = rt
+            .block_on(
+                crate::runtime::kind::origin::dbt::cloud::fetch_job_model_mapping(
+                    std::path::Path::new(&cred_path),
+                ),
+            )
+            .map_err(|e| CompileError::DbtCloud(e.to_string()))?;
+        dbt::apply_cloud_job_mapping(&mut output, &mapping);
+    }
+
     write_output(&output, target_dir)?;
     Ok(output)
 }
