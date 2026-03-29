@@ -1,0 +1,590 @@
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use rsa::pkcs8::DecodePrivateKey;
+use rsa::RsaPrivateKey;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::runtime::kind::connection::dbt::AdapterConfig;
+
+use super::{require_str, Connection, ConnectionError};
+
+// ── Snowflake config ─────────────────────────────────────────────────────────
+
+/// Resolved Snowflake connection configuration.
+/// Does not hold credentials — only the path to the private key file.
+#[derive(Debug)]
+pub(super) struct SnowflakeConfig {
+    pub(super) account: String,
+    pub(super) user: String,
+    pub(super) database: String,
+    pub(super) schema: String,
+    pub(super) warehouse: String,
+    pub(super) role: Option<String>,
+    pub(super) private_key_path: String,
+}
+
+impl SnowflakeConfig {
+    pub(super) fn from_output(output: &AdapterConfig) -> Result<Self, ConnectionError> {
+        if output.adapter_type != "snowflake" {
+            return Err(ConnectionError::UnsupportedAdapter(
+                output.adapter_type.clone(),
+            ));
+        }
+        let account = require_str(&output.fields, "account")?;
+        let user = require_str(&output.fields, "user")?;
+        let database = require_str(&output.fields, "database")?;
+        let schema = require_str(&output.fields, "schema")?;
+        let warehouse = require_str(&output.fields, "warehouse")?;
+        let role = output
+            .fields
+            .get("role")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let private_key_path = require_str(&output.fields, "private_key_path")?;
+        Ok(Self {
+            account,
+            user,
+            database,
+            schema,
+            warehouse,
+            role,
+            private_key_path,
+        })
+    }
+}
+
+// ── JWT generation ───────────────────────────────────────────────────────────
+
+/// JWT lifetime in seconds. Snowflake recommends short-lived tokens (max 60 minutes).
+const JWT_LIFETIME_SECS: u64 = 60;
+
+#[derive(Serialize)]
+struct SnowflakeJwtClaims {
+    iss: String,
+    sub: String,
+    iat: u64,
+    exp: u64,
+}
+
+/// Reads the private key, derives the public key fingerprint, and generates a JWT.
+/// The private key is dropped at the end of this function scope.
+fn generate_jwt(
+    account: &str,
+    user: &str,
+    private_key_path: &str,
+) -> Result<String, ConnectionError> {
+    // Account identifier: uppercase, dots replaced with hyphens.
+    let account_upper = account.to_uppercase().replace('.', "-");
+    let user_upper = user.to_uppercase();
+
+    // Read and parse PKCS#8 PEM private key.
+    let pem = std::fs::read_to_string(private_key_path)
+        .map_err(|e| ConnectionError::AuthFailed(format!("cannot read private key file: {e}")))?;
+    let private_key = RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| {
+        ConnectionError::AuthFailed(format!("cannot parse PKCS#8 private key: {e}"))
+    })?;
+
+    // Derive public key and compute SHA-256 fingerprint of DER-encoded public key.
+    let public_key = private_key.to_public_key();
+    let public_key_der = rsa::pkcs8::EncodePublicKey::to_public_key_der(&public_key)
+        .map_err(|e| ConnectionError::AuthFailed(format!("cannot encode public key: {e}")))?;
+    let fingerprint = {
+        let mut hasher = Sha256::new();
+        hasher.update(public_key_der.as_ref());
+        BASE64_STANDARD.encode(hasher.finalize())
+    };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let claims = SnowflakeJwtClaims {
+        iss: format!("{account_upper}.{user_upper}.SHA256:{fingerprint}"),
+        sub: format!("{account_upper}.{user_upper}"),
+        iat: now,
+        exp: now + JWT_LIFETIME_SECS,
+    };
+
+    let encoding_key = EncodingKey::from_rsa_pem(pem.as_bytes())
+        .map_err(|e| ConnectionError::AuthFailed(format!("invalid RSA key for JWT: {e}")))?;
+    // Private key bytes are dropped here when `pem` and `encoding_key` go out of scope.
+    encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .map_err(|e| ConnectionError::AuthFailed(format!("JWT encoding failed: {e}")))
+}
+
+// ── Snowflake REST client ────────────────────────────────────────────────────
+
+pub(super) struct SnowflakeConnection {
+    config: SnowflakeConfig,
+    client: reqwest::Client,
+}
+
+impl SnowflakeConnection {
+    pub(super) fn new(config: SnowflakeConfig) -> Self {
+        Self {
+            config,
+            client: reqwest::Client::new(),
+        }
+    }
+
+    /// Generates a fresh JWT and returns it. Private key is read and dropped per call.
+    fn jwt(&self) -> Result<String, ConnectionError> {
+        generate_jwt(
+            &self.config.account,
+            &self.config.user,
+            &self.config.private_key_path,
+        )
+    }
+
+    fn api_url(&self) -> String {
+        format!(
+            "https://{}.snowflakecomputing.com/api/v2/statements",
+            self.config.account
+        )
+    }
+
+    async fn execute_statement(&self, sql: &str) -> Result<StatementResponse, ConnectionError> {
+        let token = self.jwt()?;
+        let url = self.api_url();
+
+        let body = StatementRequest {
+            statement: sql,
+            timeout: 60,
+            database: &self.config.database,
+            schema: &self.config.schema,
+            warehouse: &self.config.warehouse,
+            role: self.config.role.as_deref(),
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&token)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ConnectionError::QueryFailed(format!(
+                "Snowflake API returned {status}: {body}"
+            )));
+        }
+
+        resp.json::<StatementResponse>().await.map_err(|e| {
+            ConnectionError::QueryFailed(format!("failed to parse Snowflake response: {e}"))
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatementRequest<'a> {
+    statement: &'a str,
+    timeout: u32,
+    database: &'a str,
+    schema: &'a str,
+    warehouse: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StatementResponse {
+    data: Option<Vec<Vec<serde_json::Value>>>,
+    message: Option<String>,
+    code: Option<String>,
+}
+
+/// Escapes double quotes for Snowflake double-quoted identifiers.
+fn escape_identifier(s: &str) -> String {
+    s.replace('"', "\"\"")
+}
+
+/// Escapes single quotes for Snowflake string literals.
+fn escape_literal(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+#[async_trait]
+impl Connection for SnowflakeConnection {
+    async fn query_scalar(&self, sql: &str) -> Result<serde_json::Value, ConnectionError> {
+        let resp = self.execute_statement(sql).await?;
+        resp.data
+            .and_then(|rows| rows.into_iter().next())
+            .and_then(|row| row.into_iter().next())
+            .ok_or_else(|| ConnectionError::QueryFailed("query returned no rows".to_string()))
+    }
+
+    fn freshness_sql(
+        &self,
+        asset_name: &str,
+        column: Option<&str>,
+    ) -> Result<String, ConnectionError> {
+        match column {
+            Some(col) => {
+                let col = escape_identifier(col);
+                let name = escape_identifier(asset_name);
+                // CONVERT_TIMEZONE to UTC before TO_CHAR so the 'Z' suffix is accurate.
+                Ok(format!(
+                    "SELECT TO_CHAR(CONVERT_TIMEZONE('UTC', MAX(\"{col}\")), \
+                     'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') FROM \"{name}\""
+                ))
+            }
+            None => {
+                let (schema, table) = match asset_name.split_once('.') {
+                    Some((s, t)) => (s.to_string(), t.to_string()),
+                    None => (self.config.schema.clone(), asset_name.to_string()),
+                };
+                let schema_lit = escape_literal(&schema);
+                let table_lit = escape_literal(&table);
+                let database = escape_identifier(&self.config.database);
+                Ok(format!(
+                    "SELECT TO_CHAR(CONVERT_TIMEZONE('UTC', LAST_ALTERED), \
+                     'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') \
+                     FROM \"{database}\".INFORMATION_SCHEMA.TABLES \
+                     WHERE TABLE_SCHEMA = '{schema_lit}' \
+                     AND TABLE_NAME = '{table_lit}'"
+                ))
+            }
+        }
+    }
+
+    fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
+        Box::new(sqlparser::dialect::SnowflakeDialect)
+    }
+
+    async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError> {
+        let resp = self.execute_statement(sql).await?;
+        resp.code
+            .as_deref()
+            .filter(|code| *code != "090001")
+            .map_or(Ok(()), |code| {
+                let msg = resp.message.as_deref().unwrap_or_default();
+                Err(ConnectionError::QueryFailed(format!(
+                    "Snowflake error {code}: {msg}"
+                )))
+            })
+    }
+
+    async fn load_jsonl(
+        &self,
+        _dataset: &str,
+        _table: &str,
+        _jsonl_path: &Path,
+    ) -> Result<(), ConnectionError> {
+        Err(ConnectionError::QueryFailed(
+            "Snowflake load_jsonl is not yet supported".to_string(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::kind::connection::dbt::DbtProfilesFile;
+
+    const PROFILES_YAML: &str = r#"
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: myorg-myacct
+      user: MY_USER
+      database: MY_DB
+      schema: MY_SCHEMA
+      warehouse: MY_WH
+      role: MY_ROLE
+      private_key_path: /path/to/rsa_key.p8
+    no_role:
+      type: snowflake
+      account: myorg-myacct
+      user: MY_USER
+      database: MY_DB
+      schema: MY_SCHEMA
+      warehouse: MY_WH
+      private_key_path: /path/to/rsa_key.p8
+"#;
+
+    fn profiles() -> DbtProfilesFile {
+        DbtProfilesFile::parse_str(PROFILES_YAML).unwrap()
+    }
+
+    #[test]
+    fn parse_all_fields() {
+        let f = profiles();
+        let out = f.resolve("my_project", Some("dev")).unwrap();
+        let cfg = SnowflakeConfig::from_output(out).unwrap();
+        assert_eq!(cfg.account, "myorg-myacct");
+        assert_eq!(cfg.user, "MY_USER");
+        assert_eq!(cfg.database, "MY_DB");
+        assert_eq!(cfg.schema, "MY_SCHEMA");
+        assert_eq!(cfg.warehouse, "MY_WH");
+        assert_eq!(cfg.role, Some("MY_ROLE".to_string()));
+        assert_eq!(cfg.private_key_path, "/path/to/rsa_key.p8");
+    }
+
+    #[test]
+    fn role_is_none_when_omitted() {
+        let f = profiles();
+        let out = f.resolve("my_project", Some("no_role")).unwrap();
+        let cfg = SnowflakeConfig::from_output(out).unwrap();
+        assert!(cfg.role.is_none());
+    }
+
+    #[test]
+    fn rejects_unsupported_adapter() {
+        let output = AdapterConfig {
+            adapter_type: "bigquery".to_string(),
+            fields: Default::default(),
+        };
+        let err = SnowflakeConfig::from_output(&output).unwrap_err();
+        assert!(matches!(err, ConnectionError::UnsupportedAdapter(_)));
+    }
+
+    #[test]
+    fn rejects_missing_account() {
+        let output = AdapterConfig {
+            adapter_type: "snowflake".to_string(),
+            fields: [
+                (
+                    "user".to_string(),
+                    serde_yaml::Value::String("u".to_string()),
+                ),
+                (
+                    "database".to_string(),
+                    serde_yaml::Value::String("d".to_string()),
+                ),
+                (
+                    "schema".to_string(),
+                    serde_yaml::Value::String("s".to_string()),
+                ),
+                (
+                    "warehouse".to_string(),
+                    serde_yaml::Value::String("w".to_string()),
+                ),
+                (
+                    "private_key_path".to_string(),
+                    serde_yaml::Value::String("p".to_string()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let err = SnowflakeConfig::from_output(&output).unwrap_err();
+        assert!(matches!(err, ConnectionError::MissingField { field } if field == "account"));
+    }
+
+    // ── freshness_sql tests ─────────────────────────────────────────────
+
+    fn dummy_conn() -> SnowflakeConnection {
+        SnowflakeConnection::new(SnowflakeConfig {
+            account: "myorg-myacct".to_string(),
+            user: "MY_USER".to_string(),
+            database: "MY_DB".to_string(),
+            schema: "MY_SCHEMA".to_string(),
+            warehouse: "MY_WH".to_string(),
+            role: None,
+            private_key_path: "/dummy".to_string(),
+        })
+    }
+
+    #[test]
+    fn freshness_sql_with_column() {
+        let conn = dummy_conn();
+        let sql = conn.freshness_sql("my_table", Some("updated_at")).unwrap();
+        assert!(sql.contains(r#"MAX("updated_at")"#));
+        assert!(sql.contains(r#"FROM "my_table""#));
+        assert!(sql.contains("TO_CHAR"));
+        assert!(sql.contains("CONVERT_TIMEZONE"));
+    }
+
+    #[test]
+    fn freshness_sql_without_column_uses_information_schema() {
+        let conn = dummy_conn();
+        let sql = conn.freshness_sql("my_table", None).unwrap();
+        assert!(sql.contains("INFORMATION_SCHEMA.TABLES"));
+        assert!(sql.contains("MY_SCHEMA"));
+        assert!(sql.contains("my_table"));
+        assert!(sql.contains("TO_CHAR"));
+        assert!(sql.contains("CONVERT_TIMEZONE"));
+    }
+
+    #[test]
+    fn freshness_sql_without_column_qualified_name() {
+        let conn = dummy_conn();
+        let sql = conn.freshness_sql("OTHER_SCHEMA.my_table", None).unwrap();
+        assert!(sql.contains("OTHER_SCHEMA"));
+        assert!(sql.contains("my_table"));
+        assert!(!sql.contains("MY_SCHEMA"));
+    }
+
+    macro_rules! freshness_sql_escape_test {
+        ($($name:ident: $asset:expr, $col:expr => contains $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let conn = dummy_conn();
+                    let sql = conn.freshness_sql($asset, $col).unwrap();
+                    assert!(sql.contains($expected), "expected '{}' in '{sql}'", $expected);
+                }
+            )*
+        };
+    }
+
+    freshness_sql_escape_test! {
+        freshness_sql_escapes_column:
+            "t", Some(r#"my"col"#) => contains r#""my""col""#;
+        freshness_sql_escapes_table:
+            r#"my"table"#, Some("c") => contains r#""my""table""#;
+        freshness_sql_escapes_single_quotes_in_table_name:
+            "SCHEMA.tab'le", None => contains "tab''le";
+    }
+
+    // ── create_connection tests ──────────────────────────────────────────
+
+    #[test]
+    fn create_connection_accepts_snowflake() {
+        let output = AdapterConfig {
+            adapter_type: "snowflake".to_string(),
+            fields: [
+                (
+                    "account".to_string(),
+                    serde_yaml::Value::String("a".to_string()),
+                ),
+                (
+                    "user".to_string(),
+                    serde_yaml::Value::String("u".to_string()),
+                ),
+                (
+                    "database".to_string(),
+                    serde_yaml::Value::String("d".to_string()),
+                ),
+                (
+                    "schema".to_string(),
+                    serde_yaml::Value::String("s".to_string()),
+                ),
+                (
+                    "warehouse".to_string(),
+                    serde_yaml::Value::String("w".to_string()),
+                ),
+                (
+                    "private_key_path".to_string(),
+                    serde_yaml::Value::String("p".to_string()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        assert!(super::super::create_connection(&output).is_ok());
+    }
+
+    // ── JWT generation tests ────────────────────────────────────────────
+
+    #[test]
+    fn generate_jwt_with_test_key() {
+        // Generate a temporary RSA key for testing.
+        use rsa::pkcs8::EncodePrivateKey;
+        let mut rng = rsa::rand_core::OsRng;
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let pem = private_key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("test_key.p8");
+        std::fs::write(&key_path, pem.as_bytes()).unwrap();
+
+        let jwt = generate_jwt("myorg-myacct", "MY_USER", key_path.to_str().unwrap()).unwrap();
+        assert!(!jwt.is_empty());
+
+        // Decode the header to verify RS256.
+        let header = jsonwebtoken::decode_header(&jwt).unwrap();
+        assert_eq!(header.alg, Algorithm::RS256);
+    }
+
+    #[test]
+    fn generate_jwt_uppercases_account_and_user() {
+        use rsa::pkcs8::EncodePrivateKey;
+        let mut rng = rsa::rand_core::OsRng;
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let pem = private_key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("test_key.p8");
+        std::fs::write(&key_path, pem.as_bytes()).unwrap();
+
+        let jwt = generate_jwt("myorg-myacct", "my_user", key_path.to_str().unwrap()).unwrap();
+
+        // Decode without verification to check claims.
+        let mut validation = jsonwebtoken::Validation::new(Algorithm::RS256);
+        validation.insecure_disable_signature_validation();
+        validation.required_spec_claims.clear();
+        let public_key = private_key.to_public_key();
+        let pub_der = rsa::pkcs8::EncodePublicKey::to_public_key_der(&public_key).unwrap();
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_der(pub_der.as_ref());
+        let token_data =
+            jsonwebtoken::decode::<serde_json::Value>(&jwt, &decoding_key, &validation).unwrap();
+        let claims = token_data.claims;
+        let iss = claims["iss"].as_str().unwrap();
+        let sub = claims["sub"].as_str().unwrap();
+        assert!(iss.starts_with("MYORG-MYACCT.MY_USER.SHA256:"));
+        assert_eq!(sub, "MYORG-MYACCT.MY_USER");
+    }
+
+    #[test]
+    fn generate_jwt_replaces_dots_with_hyphens_in_account() {
+        use rsa::pkcs8::EncodePrivateKey;
+        let mut rng = rsa::rand_core::OsRng;
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let pem = private_key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("test_key.p8");
+        std::fs::write(&key_path, pem.as_bytes()).unwrap();
+
+        let jwt = generate_jwt("xy12345.us-east-1", "user", key_path.to_str().unwrap()).unwrap();
+
+        let mut validation = jsonwebtoken::Validation::new(Algorithm::RS256);
+        validation.insecure_disable_signature_validation();
+        validation.required_spec_claims.clear();
+        let public_key = private_key.to_public_key();
+        let pub_der = rsa::pkcs8::EncodePublicKey::to_public_key_der(&public_key).unwrap();
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_der(pub_der.as_ref());
+        let token_data =
+            jsonwebtoken::decode::<serde_json::Value>(&jwt, &decoding_key, &validation).unwrap();
+        let sub = token_data.claims["sub"].as_str().unwrap();
+        assert_eq!(sub, "XY12345-US-EAST-1.USER");
+    }
+
+    #[test]
+    fn generate_jwt_fails_on_missing_key_file() {
+        let err = generate_jwt("a", "u", "/nonexistent/key.p8").unwrap_err();
+        assert!(matches!(err, ConnectionError::AuthFailed(msg) if msg.contains("cannot read")));
+    }
+
+    #[test]
+    fn generate_jwt_fails_on_invalid_pem() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("bad_key.p8");
+        std::fs::write(&key_path, "not a valid pem").unwrap();
+        let err = generate_jwt("a", "u", key_path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, ConnectionError::AuthFailed(msg) if msg.contains("cannot parse")));
+    }
+}
