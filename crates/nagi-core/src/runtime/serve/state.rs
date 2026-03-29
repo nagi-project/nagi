@@ -540,7 +540,7 @@ mod tests {
         }
     }
 
-    fn asset_entry_with_sync_ref(name: &str, sync_ref: &str) -> AssetEntry {
+    fn asset_entry_with_sync_ref(name: &str) -> AssetEntry {
         AssetEntry {
             name: name.to_string(),
             yaml: String::new(),
@@ -800,8 +800,8 @@ mod tests {
     fn next_syncable_allows_different_assets_with_same_sync_ref() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[
-            asset_entry_with_sync_ref("a", "dbt-run"),
-            asset_entry_with_sync_ref("b", "dbt-run"),
+            asset_entry_with_sync_ref("a"),
+            asset_entry_with_sync_ref("b"),
         ]);
         state.request_sync("a");
         state.request_sync("b");
