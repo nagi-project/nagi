@@ -109,6 +109,11 @@ parse_duration_test! {
 - Development must follow TDD (test-driven development): write tests first, then implement behavior and make tests pass.
 - Always run `mise run check` before committing. Do not commit if fmt, clippy, or test fails.
 
+## Planning and Scope
+
+- Never change an approved plan without user approval. If an obstacle is found during implementation, stop and present the options to the user before proceeding.
+- Never speculate or guess about code behavior. Always read the code or run it to verify before answering.
+
 ## Communication Rules
 
 - Never include reactions or commentary like "Got it", "Nice", "Great", "Perfect", "Excellent", or any similar praise
