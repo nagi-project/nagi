@@ -95,6 +95,7 @@ parse_duration_test! {
 ### Git Workflow
 
 - Never modify code directly on main. Always create a worktree (`isolation: "worktree"` in Agent tool) or a feature branch before making changes.
+- Worktrees must be created under `.claude/worktrees/` (e.g. `.claude/worktrees/feat-duckdb-support`).
 - Branch/worktree names must describe the work (e.g. `feat/python-3.10-support`, `fix/compile-error-handling`). Do not use auto-generated names like `worktree-agent-abc123`.
 - After creating a worktree, copy gitignored files that are needed for the task (e.g. `spec/`). Worktrees do not include gitignored files.
 
