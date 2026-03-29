@@ -64,6 +64,9 @@ impl SnowflakeConfig {
 /// JWT lifetime in seconds. Snowflake recommends short-lived tokens (max 60 minutes).
 const JWT_LIFETIME_SECS: u64 = 60;
 
+/// JWT payload for Snowflake key-pair authentication.
+/// Required claims: iss, sub, iat, exp. No aud claim is needed.
+/// See: https://docs.snowflake.com/en/developer-guide/sql-api/authenticating
 #[derive(Serialize)]
 struct SnowflakeJwtClaims {
     iss: String,
@@ -530,13 +533,14 @@ my_project:
 
         let jwt = generate_jwt("myorg-myacct", "my_user", key_path.to_str().unwrap()).unwrap();
 
-        // Decode without verification to check claims.
+        // Decode with the corresponding public key to check claims.
         let mut validation = jsonwebtoken::Validation::new(Algorithm::RS256);
-        validation.insecure_disable_signature_validation();
-        validation.required_spec_claims.clear();
+        validation.set_audience::<&str>(&[]);
         let public_key = private_key.to_public_key();
-        let pub_der = rsa::pkcs8::EncodePublicKey::to_public_key_der(&public_key).unwrap();
-        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_der(pub_der.as_ref());
+        let pub_pem =
+            rsa::pkcs8::EncodePublicKey::to_public_key_pem(&public_key, rsa::pkcs8::LineEnding::LF)
+                .unwrap();
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_pem(pub_pem.as_bytes()).unwrap();
         let token_data =
             jsonwebtoken::decode::<serde_json::Value>(&jwt, &decoding_key, &validation).unwrap();
         let claims = token_data.claims;
@@ -562,11 +566,12 @@ my_project:
         let jwt = generate_jwt("xy12345.us-east-1", "user", key_path.to_str().unwrap()).unwrap();
 
         let mut validation = jsonwebtoken::Validation::new(Algorithm::RS256);
-        validation.insecure_disable_signature_validation();
-        validation.required_spec_claims.clear();
+        validation.set_audience::<&str>(&[]);
         let public_key = private_key.to_public_key();
-        let pub_der = rsa::pkcs8::EncodePublicKey::to_public_key_der(&public_key).unwrap();
-        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_der(pub_der.as_ref());
+        let pub_pem =
+            rsa::pkcs8::EncodePublicKey::to_public_key_pem(&public_key, rsa::pkcs8::LineEnding::LF)
+                .unwrap();
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_pem(pub_pem.as_bytes()).unwrap();
         let token_data =
             jsonwebtoken::decode::<serde_json::Value>(&jwt, &decoding_key, &validation).unwrap();
         let sub = token_data.claims["sub"].as_str().unwrap();
