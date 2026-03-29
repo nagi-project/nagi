@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,11 +5,10 @@ use async_trait::async_trait;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_yaml;
 
 use crate::runtime::kind::connection::dbt::AdapterConfig;
 
-use super::{Connection, ConnectionError};
+use super::{require_str, Connection, ConnectionError};
 
 // ── BigQuery config ──────────────────────────────────────────────────────────
 
@@ -86,19 +84,6 @@ impl BigQueryConfig {
             timeout_ms,
         })
     }
-}
-
-fn require_str(
-    fields: &HashMap<String, serde_yaml::Value>,
-    key: &str,
-) -> Result<String, ConnectionError> {
-    fields
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| ConnectionError::MissingField {
-            field: key.to_string(),
-        })
 }
 
 // ── Token acquisition ────────────────────────────────────────────────────────
@@ -371,7 +356,11 @@ impl Connection for BigQueryConnection {
             .ok_or_else(|| ConnectionError::QueryFailed("query returned no rows".to_string()))
     }
 
-    fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
+    fn freshness_sql(
+        &self,
+        asset_name: &str,
+        column: Option<&str>,
+    ) -> Result<String, ConnectionError> {
         /// Escapes backticks for BigQuery backtick-quoted identifiers.
         fn escape_backtick(s: &str) -> String {
             s.replace('`', "``")
@@ -381,7 +370,7 @@ impl Connection for BigQueryConnection {
             s.replace('\'', "''")
         }
 
-        match column {
+        Ok(match column {
             Some(col) => {
                 let col = escape_backtick(col);
                 let name = escape_backtick(asset_name);
@@ -400,7 +389,7 @@ impl Connection for BigQueryConnection {
                      WHERE table_name = '{table}'"
                 )
             }
-        }
+        })
     }
 
     fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
@@ -730,14 +719,14 @@ my_project:
     #[test]
     fn freshness_sql_with_column() {
         let conn = dummy_conn();
-        let sql = conn.freshness_sql("my_table", Some("updated_at"));
+        let sql = conn.freshness_sql("my_table", Some("updated_at")).unwrap();
         assert_eq!(sql, "SELECT MAX(`updated_at`) FROM `my_table`");
     }
 
     #[test]
     fn freshness_sql_without_column_uses_information_schema() {
         let conn = dummy_conn();
-        let sql = conn.freshness_sql("my_dataset.my_table", None);
+        let sql = conn.freshness_sql("my_dataset.my_table", None).unwrap();
         assert!(sql.contains("INFORMATION_SCHEMA.PARTITIONS"));
         assert!(sql.contains("my_dataset"));
         assert!(sql.contains("my_table"));
@@ -749,7 +738,7 @@ my_project:
                 #[test]
                 fn $name() {
                     let conn = dummy_conn();
-                    let sql = conn.freshness_sql($asset, $col);
+                    let sql = conn.freshness_sql($asset, $col).unwrap();
                     assert!(sql.contains($expected), "expected {}: {sql}", $expected);
                     assert!(!sql.contains($forbidden), "unexpected {}: {sql}", $forbidden);
                 }

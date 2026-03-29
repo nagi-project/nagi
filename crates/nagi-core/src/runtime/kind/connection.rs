@@ -1,5 +1,7 @@
+#[cfg(feature = "bigquery")]
 pub mod bigquery;
 pub mod dbt;
+pub mod duckdb;
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -24,6 +26,7 @@ pub enum ConnectionError {
     AuthFailed(String),
     #[error("query failed: {0}")]
     QueryFailed(String),
+    #[cfg(feature = "bigquery")]
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
 }
@@ -36,7 +39,12 @@ pub trait Connection: Send + Sync {
     /// Builds a dialect-specific SQL query to retrieve the last-updated timestamp of a table.
     /// With `column`: `SELECT MAX(column) FROM table`
     /// Without `column`: queries system metadata for the physical last-modified time.
-    fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String;
+    /// Returns an error if the adapter does not support metadata-based freshness.
+    fn freshness_sql(
+        &self,
+        asset_name: &str,
+        column: Option<&str>,
+    ) -> Result<String, ConnectionError>;
 
     /// Returns the sqlparser dialect for this connection's adapter type.
     fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect>;
@@ -57,9 +65,14 @@ pub trait Connection: Send + Sync {
 /// Creates a `Connection` implementation based on the adapter type in the profile output.
 pub fn create_connection(output: &AdapterConfig) -> Result<Box<dyn Connection>, ConnectionError> {
     match output.adapter_type.as_str() {
+        #[cfg(feature = "bigquery")]
         "bigquery" => {
             let config = bigquery::BigQueryConfig::from_output(output)?;
             Ok(Box::new(bigquery::BigQueryConnection::new(config)))
+        }
+        "duckdb" => {
+            let path = require_str(&output.fields, "path")?;
+            Ok(Box::new(duckdb::DuckDbConnection::new(&path)))
         }
         other => Err(ConnectionError::UnsupportedAdapter(other.to_string())),
     }
@@ -90,14 +103,17 @@ pub enum ResolvedConnection {
         keyfile: Option<String>,
         timeout_seconds: Option<u32>,
     },
+    /// Direct DuckDB connection.
+    #[serde(rename = "duckdb", rename_all = "camelCase")]
+    DuckDb { name: String, path: String },
 }
 
 impl ResolvedConnection {
     pub fn name(&self) -> &str {
         match self {
-            ResolvedConnection::Dbt { name, .. } | ResolvedConnection::BigQuery { name, .. } => {
-                name
-            }
+            ResolvedConnection::Dbt { name, .. }
+            | ResolvedConnection::BigQuery { name, .. }
+            | ResolvedConnection::DuckDb { name, .. } => name,
         }
     }
 
@@ -114,6 +130,7 @@ impl ResolvedConnection {
                     .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
                 create_connection(output)
             }
+            #[cfg(feature = "bigquery")]
             ResolvedConnection::BigQuery {
                 project,
                 dataset,
@@ -132,6 +149,13 @@ impl ResolvedConnection {
                     *timeout_seconds,
                 )?;
                 Ok(Box::new(conn))
+            }
+            #[cfg(not(feature = "bigquery"))]
+            ResolvedConnection::BigQuery { .. } => Err(ConnectionError::UnsupportedAdapter(
+                "bigquery (feature disabled)".to_string(),
+            )),
+            ResolvedConnection::DuckDb { path, .. } => {
+                Ok(Box::new(duckdb::DuckDbConnection::new(path)))
             }
         }
     }
@@ -179,6 +203,10 @@ pub fn resolve_connection_by_name(
             keyfile: keyfile.clone(),
             timeout_seconds: *timeout_seconds,
         }),
+        ConnectionSpec::DuckDb { ref path } => Ok(ResolvedConnection::DuckDb {
+            name: conn_name.to_string(),
+            path: path.clone(),
+        }),
     }
 }
 
@@ -214,6 +242,9 @@ pub enum ConnectionSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<u32>,
     },
+    /// Direct DuckDB connection.
+    #[serde(rename = "duckdb")]
+    DuckDb { path: String },
 }
 
 /// dbt Cloud configuration for pre-sync running-job checks.
@@ -242,8 +273,26 @@ impl ConnectionSpec {
                 reject_empty_optional("executionProject", execution_project.as_deref())?;
                 Ok(())
             }
+            ConnectionSpec::DuckDb { path } => {
+                reject_empty("path", path)?;
+                Ok(())
+            }
         }
     }
+}
+
+/// Extracts a required string field from an AdapterConfig fields map.
+pub(super) fn require_str(
+    fields: &HashMap<String, serde_yaml::Value>,
+    key: &str,
+) -> Result<String, ConnectionError> {
+    fields
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| ConnectionError::MissingField {
+            field: key.to_string(),
+        })
 }
 
 fn spec_error(message: String) -> KindError {
@@ -595,5 +644,69 @@ dataset: raw
         let err = resolve_connection_by_name("missing", &connections).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
             if kind == "Connection" && name == "missing"));
+    }
+
+    // ── DuckDb parsing tests ────────────────────────────────────────────
+
+    #[test]
+    fn parse_duckdb_spec() {
+        let yaml = r#"
+type: duckdb
+path: ./data/warehouse.duckdb
+"#;
+        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            ConnectionSpec::DuckDb { path } => {
+                assert_eq!(path, "./data/warehouse.duckdb");
+            }
+            other => panic!("expected DuckDb, got {other:?}"),
+        }
+    }
+
+    validate_accept_test! {
+        validate_duckdb_valid:
+            ConnectionSpec::DuckDb {
+                path: "./data/warehouse.duckdb".to_string(),
+            };
+    }
+
+    validate_reject_test! {
+        validate_duckdb_rejects_empty_path:
+            ConnectionSpec::DuckDb {
+                path: "".to_string(),
+            } => "path must not be empty";
+    }
+
+    #[test]
+    fn resolve_connection_by_name_duckdb() {
+        let mut connections = HashMap::new();
+        connections.insert(
+            "my-duck".to_string(),
+            ConnectionSpec::DuckDb {
+                path: "./data/warehouse.duckdb".to_string(),
+            },
+        );
+        let conn = resolve_connection_by_name("my-duck", &connections).unwrap();
+        match conn {
+            ResolvedConnection::DuckDb { name, path } => {
+                assert_eq!(name, "my-duck");
+                assert_eq!(path, "./data/warehouse.duckdb");
+            }
+            other => panic!("expected DuckDb, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_connection_accepts_duckdb() {
+        let output = AdapterConfig {
+            adapter_type: "duckdb".to_string(),
+            fields: [(
+                "path".to_string(),
+                serde_yaml::Value::String(":memory:".to_string()),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        assert!(create_connection(&output).is_ok());
     }
 }
