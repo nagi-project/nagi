@@ -13,14 +13,14 @@ from pathlib import Path
 # Map schema file names to (relative doc path from docs_root, page title, table_only)
 # table_only=True suppresses ## Attributes heading (for embedding in existing sections)
 SCHEMA_MAP = {
-    "AssetSpec": ("configurations/resources/asset.md", "kind: Asset", False),
-    "OnDriftEntry": ("configurations/resources/asset.md", "OnDriftEntry", True),
-    "ConnectionSpec": ("configurations/resources/connection.md", "kind: Connection", False),
-    "SyncSpec": ("configurations/resources/sync.md", "kind: Sync", False),
-    "SyncStep": ("configurations/resources/sync.md", "SyncStep", True),
-    "ConditionsSpec": ("configurations/resources/conditions.md", "kind: Conditions", False),
-    "OriginSpec": ("configurations/resources/origin.md", "kind: Origin", False),
-    "NagiConfig": ("configurations/project.md", "nagi.yaml", False),
+    "AssetSpec": ("reference/resources/asset.md", "kind: Asset", False),
+    "OnDriftEntry": ("reference/resources/asset.md", "OnDriftEntry", True),
+    "ConnectionSpec": ("reference/resources/connection.md", "kind: Connection", False),
+    "SyncSpec": ("reference/resources/sync.md", "kind: Sync", False),
+    "SyncStep": ("reference/resources/sync.md", "SyncStep", True),
+    "ConditionsSpec": ("reference/resources/conditions.md", "kind: Conditions", False),
+    "OriginSpec": ("reference/resources/origin.md", "kind: Origin", False),
+    "NagiConfig": ("reference/project.md", "nagi.yaml", False),
     "AssetEvalResult": ("architecture/storage.md", "Cache", True),
     "LockInfo": ("architecture/storage.md", "Locks", True),
     "SuspendedInfo": ("architecture/storage.md", "Suspended", True),
@@ -150,6 +150,15 @@ def render_properties_table(
     return lines
 
 
+# Display names for type discriminator values.
+# Used in oneOf variant headings to show the canonical product name.
+TYPE_DISPLAY_NAMES: dict[str, str] = {
+    "bigquery": "BigQuery",
+    "duckdb": "DuckDB",
+    "snowflake": "Snowflake",
+}
+
+
 def render_oneof_variants(
     variants: list[dict], definitions: dict
 ) -> list[str]:
@@ -164,7 +173,8 @@ def render_oneof_variants(
             type_name = type_field["enum"][0]
 
         if type_name:
-            lines.append(f"### type: {type_name}")
+            display = TYPE_DISPLAY_NAMES.get(type_name, type_name)
+            lines.append(f"### type: {display}")
             lines.append("")
         if desc:
             lines.append(desc)

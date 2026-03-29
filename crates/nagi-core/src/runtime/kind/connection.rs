@@ -292,33 +292,49 @@ pub enum ConnectionSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dbt_cloud: Option<DbtCloudSpec>,
     },
-    /// Direct BigQuery connection without dbt profiles.yml.
+    /// BigQuery REST API connection.
     #[serde(rename = "bigquery", rename_all = "camelCase")]
     BigQuery {
+        /// GCP project ID that contains the dataset.
         project: String,
+        /// BigQuery dataset name.
         dataset: String,
+        /// GCP project ID used for query execution billing. Defaults to `project` if omitted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         execution_project: Option<String>,
+        /// Authentication method. `oauth` (Application Default Credentials) or `service-account`. Defaults to `oauth`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         method: Option<String>,
+        /// Path to the service account JSON key file. Required when `method` is `service-account`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keyfile: Option<String>,
+        /// Query timeout in seconds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<u32>,
     },
-    /// Direct DuckDB connection.
+    /// DuckDB connection via the `duckdb` CLI.
     #[serde(rename = "duckdb")]
-    DuckDb { path: String },
-    /// Direct Snowflake connection via SQL REST API with Key-Pair JWT authentication.
+    DuckDb {
+        /// Path to the DuckDB database file.
+        path: String,
+    },
+    /// Snowflake SQL REST API connection with Key-Pair JWT authentication.
     #[serde(rename = "snowflake", rename_all = "camelCase")]
     Snowflake {
+        /// Snowflake account identifier (e.g. `myorg-myaccount`).
         account: String,
+        /// Snowflake login user name.
         user: String,
+        /// Database name.
         database: String,
+        /// Schema name.
         schema: String,
+        /// Warehouse name.
         warehouse: String,
+        /// Role to use for the session. Uses the user's default role if omitted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
+        /// Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.
         private_key_path: String,
     },
 }
