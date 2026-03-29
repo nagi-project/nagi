@@ -125,7 +125,7 @@ async fn evaluate_condition(
             max_age, column, ..
         } => {
             let c = require_conn!();
-            let sql = c.freshness_sql(asset_name, column.as_deref());
+            let sql = c.freshness_sql(asset_name, column.as_deref())?;
             let value = c.query_scalar(&sql).await?;
             let status = freshness::evaluate_freshness(value, max_age.as_std())?;
             ("Freshness".to_string(), status)
@@ -281,8 +281,12 @@ mod tests {
             Ok(self.response.clone())
         }
 
-        fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
-            stub_freshness_sql(asset_name, column)
+        fn freshness_sql(
+            &self,
+            asset_name: &str,
+            column: Option<&str>,
+        ) -> Result<String, ConnectionError> {
+            Ok(stub_freshness_sql(asset_name, column))
         }
 
         fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {
@@ -460,8 +464,12 @@ mod tests {
                 }
             }
 
-            fn freshness_sql(&self, asset_name: &str, column: Option<&str>) -> String {
-                stub_freshness_sql(asset_name, column)
+            fn freshness_sql(
+                &self,
+                asset_name: &str,
+                column: Option<&str>,
+            ) -> Result<String, ConnectionError> {
+                Ok(stub_freshness_sql(asset_name, column))
             }
 
             fn sql_dialect(&self) -> Box<dyn sqlparser::dialect::Dialect> {

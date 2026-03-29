@@ -18,8 +18,8 @@ dirs = "5"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "sync", "signal"] }
 chrono = "0.4"
-reqwest = { version = "0.12", features = ["json", "multipart"] }
-jsonwebtoken = "10"
+reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
+jsonwebtoken = { version = "10", optional = true }
 rusqlite = { version = "0.31", features = ["bundled"] }
 schemars = "0.8"
 object_store = { version = "0.11", features = ["gcp", "aws"] }
@@ -29,8 +29,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
 
 [features]
-default = []
+default = ["bigquery"]
 python = ["pyo3"]
+bigquery = ["dep:reqwest", "dep:jsonwebtoken"]
 
 [dev-dependencies]
 tempfile = "3"
