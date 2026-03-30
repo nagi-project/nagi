@@ -2,10 +2,12 @@ site_name: Nagi Documentation
 site_url: https://nagi-project.github.io/nagi/
 repo_url: https://github.com/nagi-project/nagi
 repo_name: nagi-project/nagi
-edit_uri: edit/main/docs/
+edit_uri: edit/main/docs/en/
+docs_dir: docs/en
 
 theme:
   name: material
+  language: en
   palette:
     - scheme: default
       primary: indigo
@@ -22,6 +24,15 @@ theme:
     - navigation.expand
     - navigation.indexes
     - content.code.copy
+
+extra:
+  alternate:
+    - name: English
+      link: /nagi/
+      lang: en
+    - name: 日本語
+      link: /nagi/ja/
+      lang: ja
 
 extra_css:
   - stylesheets/extra.css

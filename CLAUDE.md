@@ -90,6 +90,7 @@ parse_duration_test! {
 
 ### Documentation
 
+- Documentation is maintained in multiple languages under `docs/`. When modifying documentation, apply the change to all languages.
 - All headings in documentation files (`docs/`) must be in English.
 - Do not use bold (`**...**`) as inline headings in paragraphs or list items. Use proper markdown headings (`##`, `###`, etc.) for section titles. In lists, write terms in plain text without bold.
 - Use 2-space indentation for nested lists in Markdown files.
