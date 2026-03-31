@@ -53,6 +53,15 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ hashFiles('**/Cargo.lock', 'crates/**/*.rs') }}
+          restore-keys: rust-
+
       - uses: ./.github/actions/setup-duckdb
 
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
