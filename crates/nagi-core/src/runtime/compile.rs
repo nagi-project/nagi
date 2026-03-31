@@ -307,6 +307,30 @@ fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, Stri
     result
 }
 
+fn warn_multi_asset_sync(name: &str, spec: &SyncSpec) {
+    let steps = [Some(&spec.run), spec.pre.as_ref(), spec.post.as_ref()];
+    if let Some(reason) = steps
+        .into_iter()
+        .flatten()
+        .find_map(|step| dbt::detect_multi_asset_step(&step.args))
+    {
+        tracing::warn!(
+            sync = name,
+            "Sync '{}' {}: this conflicts with Nagi's per-Asset reconciliation loop",
+            name,
+            reason,
+        );
+    }
+}
+
+fn find_assets_without_on_drift(assets: &[(Metadata, AssetSpec)]) -> Vec<&str> {
+    assets
+        .iter()
+        .filter(|(_, spec)| spec.on_drift.is_empty())
+        .map(|(m, _)| m.name.as_str())
+        .collect()
+}
+
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let CategorizedResources {
@@ -316,35 +340,35 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         assets,
     } = categorize(resources)?;
 
-    for (name, spec) in &syncs {
-        let steps = [Some(&spec.run), spec.pre.as_ref(), spec.post.as_ref()];
-        if let Some(reason) = steps
-            .into_iter()
-            .flatten()
-            .find_map(|step| dbt::detect_multi_asset_step(&step.args))
-        {
+    syncs
+        .iter()
+        .for_each(|(name, spec)| warn_multi_asset_sync(name, spec));
+
+    find_assets_without_on_drift(&assets)
+        .iter()
+        .for_each(|name| {
             tracing::warn!(
-                sync = name.as_str(),
-                "Sync '{}' {}: this conflicts with Nagi's per-Asset reconciliation loop",
+                asset = *name,
+                "Asset '{}' has no onDrift entries: it will always be considered Ready",
                 name,
-                reason,
             );
-        }
-    }
+        });
 
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
-    let mut resolved_assets = Vec::new();
-    for (metadata, spec) in assets {
-        resolved_assets.push(resolve_asset(
-            metadata,
-            spec,
-            &asset_names,
-            &connections,
-            &conditions_groups,
-            &syncs,
-        )?);
-    }
+    let resolved_assets: Vec<_> = assets
+        .into_iter()
+        .map(|(metadata, spec)| {
+            resolve_asset(
+                metadata,
+                spec,
+                &asset_names,
+                &connections,
+                &conditions_groups,
+                &syncs,
+            )
+        })
+        .collect::<Result<_, _>>()?;
 
     let graph = build_graph(&resolved_assets)?;
     detect_cycles(&graph)?;
@@ -602,6 +626,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::asset::OnDriftEntry;
     use crate::runtime::kind::parse_kinds;
     use tempfile::TempDir;
 
@@ -666,6 +691,56 @@ spec:
 
     fn parse(yaml: &str) -> Vec<NagiKind> {
         parse_kinds(yaml).unwrap()
+    }
+
+    // ── find_assets_without_on_drift tests ─────────────────────────────
+
+    fn make_asset_entry(name: &str, on_drift: Vec<OnDriftEntry>) -> (Metadata, AssetSpec) {
+        (
+            Metadata {
+                name: name.to_string(),
+            },
+            AssetSpec {
+                tags: vec![],
+                connection: None,
+                upstreams: vec![],
+                on_drift,
+                auto_sync: true,
+                evaluate_cache_ttl: None,
+            },
+        )
+    }
+
+    fn on_drift_entry() -> OnDriftEntry {
+        OnDriftEntry {
+            conditions: "cond".to_string(),
+            sync: "sync".to_string(),
+            with: HashMap::new(),
+            merge_position: Default::default(),
+        }
+    }
+
+    #[test]
+    fn find_assets_without_on_drift_returns_empty_when_all_have_on_drift() {
+        let assets = vec![make_asset_entry("a", vec![on_drift_entry()])];
+        assert!(find_assets_without_on_drift(&assets).is_empty());
+    }
+
+    #[test]
+    fn find_assets_without_on_drift_returns_names_when_missing() {
+        let assets = vec![
+            make_asset_entry("has-drift", vec![on_drift_entry()]),
+            make_asset_entry("no-drift-1", vec![]),
+            make_asset_entry("no-drift-2", vec![]),
+        ];
+        let mut result = find_assets_without_on_drift(&assets);
+        result.sort();
+        assert_eq!(result, vec!["no-drift-1", "no-drift-2"]);
+    }
+
+    #[test]
+    fn find_assets_without_on_drift_empty_input() {
+        assert!(find_assets_without_on_drift(&[]).is_empty());
     }
 
     // ── resolve_on_drift tests ──────────────────────────────────────────
