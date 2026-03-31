@@ -43,8 +43,9 @@ pub fn load_manifest(
     project_dir: &Path,
     profile: &str,
     target: Option<&str>,
+    profiles_dir: Option<&str>,
 ) -> Result<String, CompileError> {
-    run_dbt_compile(project_dir, profile, target)?;
+    run_dbt_compile(project_dir, profile, target, profiles_dir)?;
     read_manifest(&project_dir.join("target/manifest.json"))
 }
 
@@ -52,6 +53,7 @@ fn run_dbt_compile(
     project_dir: &Path,
     profile: &str,
     target: Option<&str>,
+    profiles_dir: Option<&str>,
 ) -> Result<(), CompileError> {
     let mut cmd = std::process::Command::new("dbt");
     cmd.arg("compile");
@@ -59,6 +61,9 @@ fn run_dbt_compile(
     cmd.args(["--profile", profile]);
     if let Some(t) = target {
         cmd.args(["--target", t]);
+    }
+    if let Some(d) = profiles_dir {
+        cmd.args(["--profiles-dir", d]);
     }
     let output = cmd
         .output()
@@ -121,7 +126,7 @@ mod tests {
         // If dbt IS installed but with empty PATH, it may also fail.
         // Either way, run_dbt_compile should produce DbtCompileFailed.
         if result.is_err() {
-            let err = run_dbt_compile(Path::new("."), "default", None);
+            let err = run_dbt_compile(Path::new("."), "default", None, None);
             // Only assert if dbt is truly not on the system PATH.
             if let Err(e) = err {
                 assert!(matches!(e, CompileError::OriginFailed(_)));

@@ -152,6 +152,7 @@ mod tests {
             name: "my-bq".to_string(),
             profile: "my_project".to_string(),
             target: None,
+            profiles_dir: None,
             dbt_cloud_credentials_file: Some("/home/user/.dbt/dbt_cloud.yml".to_string()),
         });
 
@@ -169,6 +170,7 @@ mod tests {
             name: "my-bq".to_string(),
             profile: "my_project".to_string(),
             target: None,
+            profiles_dir: None,
             dbt_cloud_credentials_file: None,
         });
 
@@ -217,6 +219,7 @@ mod tests {
             name: "my-dbt".to_string(),
             profile: "my_project".to_string(),
             target: None,
+            profiles_dir: None,
             dbt_cloud_credentials_file: Some("/home/user/.dbt/dbt_cloud.yml".to_string()),
         });
 

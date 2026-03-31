@@ -35,6 +35,13 @@
           "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
           "type": "string"
         },
+        "profilesDir": {
+          "description": "Directory containing profiles.yml. If omitted, uses `~/.dbt/`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "target": {
           "description": "If omitted, the default target in profiles.yml is used.",
           "type": [

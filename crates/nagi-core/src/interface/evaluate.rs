@@ -59,23 +59,56 @@ pub async fn evaluate_all(
     dry_run: bool,
 ) -> Result<String, EvaluateError> {
     let assets = crate::interface::compile::load_compiled_assets(target_dir, selectors)?;
-    let mut results: Vec<serde_json::Value> = Vec::with_capacity(assets.len());
 
-    for (_name, yaml) in &assets {
-        if dry_run {
-            let dr = dry_run_from_compiled(yaml)?;
-            results.push(
-                serde_json::from_str(&dr).map_err(|e| EvaluateError::Serialize(e.to_string()))?,
-            );
-        } else {
-            let r = evaluate_from_compiled(yaml, cache_dir, None, None).await?;
-            results.push(
-                serde_json::from_str(&r).map_err(|e| EvaluateError::Serialize(e.to_string()))?,
-            );
-        }
+    let values = if dry_run {
+        dry_run_assets(&assets)?
+    } else {
+        evaluate_assets(&assets, cache_dir).await?
+    };
+
+    serde_json::to_string(&values).map_err(|e| EvaluateError::Serialize(e.to_string()))
+}
+
+fn dry_run_assets(assets: &[(String, String)]) -> Result<Vec<serde_json::Value>, EvaluateError> {
+    assets
+        .iter()
+        .map(|(_name, yaml)| {
+            let json = dry_run_from_compiled(yaml)?;
+            serde_json::from_str(&json).map_err(|e| EvaluateError::Serialize(e.to_string()))
+        })
+        .collect()
+}
+
+async fn evaluate_assets(
+    assets: &[(String, String)],
+    cache_dir: Option<&Path>,
+) -> Result<Vec<serde_json::Value>, EvaluateError> {
+    let handles: Vec<_> = assets
+        .iter()
+        .map(|(name, yaml)| {
+            let name = name.clone();
+            let yaml = yaml.clone();
+            let cache = cache_dir.map(PathBuf::from);
+            tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Handle::current();
+                let json =
+                    rt.block_on(evaluate_from_compiled(&yaml, cache.as_deref(), None, None))?;
+                let value: serde_json::Value = serde_json::from_str(&json)
+                    .map_err(|e| EvaluateError::Serialize(e.to_string()))?;
+                Ok::<(String, serde_json::Value), EvaluateError>((name, value))
+            })
+        })
+        .collect();
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        let pair = handle
+            .await
+            .map_err(|e| EvaluateError::Serialize(format!("task join error: {e}")))??;
+        results.push(pair);
     }
-
-    serde_json::to_string(&results).map_err(|e| EvaluateError::Serialize(e.to_string()))
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(results.into_iter().map(|(_, v)| v).collect())
 }
 
 /// Dry-run from compiled YAML.

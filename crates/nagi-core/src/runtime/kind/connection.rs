@@ -54,6 +54,13 @@ pub trait Connection: Send + Sync {
     /// Executes a DML/DDL statement (e.g. CREATE TABLE, MERGE).
     async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError>;
 
+    /// Maximum number of concurrent operations this connection supports.
+    /// Returns `Some(n)` for connections with inherent concurrency limits (e.g. DuckDB file lock).
+    /// Returns `None` for connections with no inherent limit.
+    fn max_concurrency(&self) -> Option<usize> {
+        None
+    }
+
     /// Loads a JSONL file into a staging table via the data warehouse's bulk load mechanism.
     /// `dataset` is the target dataset/schema, `table` is the staging table name.
     async fn load_jsonl(
@@ -96,6 +103,8 @@ pub enum ResolvedConnection {
         name: String,
         profile: String,
         target: Option<String>,
+        /// Directory containing profiles.yml. If None, uses `~/.dbt/`.
+        profiles_dir: Option<String>,
         /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
         dbt_cloud_credentials_file: Option<String>,
     },
@@ -141,10 +150,19 @@ impl ResolvedConnection {
     pub fn connect(&self) -> Result<Box<dyn Connection>, ConnectionError> {
         match self {
             ResolvedConnection::Dbt {
-                profile, target, ..
+                profile,
+                target,
+                profiles_dir,
+                ..
             } => {
-                let f = dbt::DbtProfilesFile::load_default()
-                    .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
+                let f = match profiles_dir {
+                    Some(dir) => {
+                        let path = std::path::Path::new(dir).join("profiles.yml");
+                        dbt::DbtProfilesFile::load(&path)
+                    }
+                    None => dbt::DbtProfilesFile::load_default(),
+                }
+                .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
                 let output = f
                     .resolve(profile, target.as_deref())
                     .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
@@ -222,11 +240,13 @@ pub fn resolve_connection_by_name(
         ConnectionSpec::Dbt {
             ref profile,
             ref target,
+            ref profiles_dir,
             ref dbt_cloud,
         } => Ok(ResolvedConnection::Dbt {
             name: conn_name.to_string(),
             profile: profile.clone(),
             target: target.clone(),
+            profiles_dir: profiles_dir.clone(),
             dbt_cloud_credentials_file: dbt_cloud.as_ref().map(|c| {
                 c.credentials_file
                     .clone()
@@ -288,6 +308,9 @@ pub enum ConnectionSpec {
         /// If omitted, the default target in profiles.yml is used.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<String>,
+        /// Directory containing profiles.yml. If omitted, uses `~/.dbt/`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profiles_dir: Option<String>,
         /// Optional dbt Cloud configuration for running-job checks before sync.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dbt_cloud: Option<DbtCloudSpec>,
@@ -442,10 +465,12 @@ target: dev
             ConnectionSpec::Dbt {
                 profile,
                 target,
+                profiles_dir,
                 dbt_cloud,
             } => {
                 assert_eq!(profile, "my_project");
                 assert_eq!(target, &Some("dev".to_string()));
+                assert!(profiles_dir.is_none());
                 assert!(dbt_cloud.is_none());
             }
             other => panic!("expected Dbt, got {other:?}"),
@@ -484,6 +509,22 @@ dbtCloud:
                     cloud.credentials_file,
                     Some("~/.dbt/dbt_cloud.yml".to_string())
                 );
+            }
+            other => panic!("expected Dbt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_connection_spec_with_profiles_dir() {
+        let yaml = r#"
+type: dbt
+profile: my_project
+profilesDir: /custom/profiles
+"#;
+        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            ConnectionSpec::Dbt { profiles_dir, .. } => {
+                assert_eq!(profiles_dir, &Some("/custom/profiles".to_string()));
             }
             other => panic!("expected Dbt, got {other:?}"),
         }
@@ -586,6 +627,7 @@ dataset: raw
             ConnectionSpec::Dbt {
                 profile: "my_project".to_string(),
                 target: Some("dev".to_string()),
+                profiles_dir: None,
                 dbt_cloud: None,
             };
         validate_bigquery_oauth:
@@ -630,6 +672,7 @@ dataset: raw
             ConnectionSpec::Dbt {
                 profile: "".to_string(),
                 target: None,
+                profiles_dir: None,
                 dbt_cloud: None,
             } => "profile must not be empty";
         validate_bigquery_rejects_empty_project:
@@ -703,6 +746,7 @@ dataset: raw
             ConnectionSpec::Dbt {
                 profile: "proj".to_string(),
                 target: Some("dev".to_string()),
+                profiles_dir: None,
                 dbt_cloud: None,
             },
         );

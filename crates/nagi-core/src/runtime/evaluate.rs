@@ -813,4 +813,37 @@ mod tests {
             Err(EvaluateError::UnexpectedResult(_))
         ));
     }
+
+    #[tokio::test]
+    async fn command_not_found_returns_error() {
+        let on_drift = on_drift_with(vec![DesiredCondition::Command {
+            name: "bad-cmd".to_string(),
+            run: vec!["__nagi_no_such_command__".to_string()],
+            interval: None,
+            env: HashMap::new(),
+            evaluate_cache_ttl: None,
+        }]);
+        let result = evaluate_asset("a", &on_drift, None, None).await;
+        assert!(
+            matches!(result, Err(EvaluateError::CommandFailed(_))),
+            "expected CommandFailed, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn command_exit_nonzero_is_drifted_not_error() {
+        let on_drift = on_drift_with(vec![DesiredCondition::Command {
+            name: "fail-cmd".to_string(),
+            run: vec!["false".to_string()],
+            interval: None,
+            env: HashMap::new(),
+            evaluate_cache_ttl: None,
+        }]);
+        let result = evaluate_asset("a", &on_drift, None, None).await.unwrap();
+        assert!(!result.ready);
+        assert!(matches!(
+            result.conditions[0].status,
+            ConditionStatus::Drifted { .. }
+        ));
+    }
 }

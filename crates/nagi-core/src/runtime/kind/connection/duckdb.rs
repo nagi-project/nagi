@@ -92,6 +92,10 @@ impl Connection for DuckDbConnection {
         Box::new(sqlparser::dialect::DuckDbDialect {})
     }
 
+    fn max_concurrency(&self) -> Option<usize> {
+        Some(1)
+    }
+
     async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError> {
         self.run_cli(sql, false).await?;
         Ok(())

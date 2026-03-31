@@ -55,13 +55,25 @@ pub struct DbtSource {
 }
 
 /// Converts a parsed dbt manifest into Nagi resources.
-pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec<NagiKind> {
+pub fn manifest_to_resources(
+    manifest: &DbtManifest,
+    origin: &OriginSpec,
+    profiles_dir: Option<&str>,
+) -> Vec<NagiKind> {
     let OriginSpec::Dbt {
         connection,
         default_sync,
         auto_sync,
+        project_dir,
         ..
     } = origin;
+
+    // Build extra args for dbt commands (--project-dir, --profiles-dir).
+    let mut dbt_extra_args: Vec<String> = vec!["--project-dir".to_string(), project_dir.clone()];
+    if let Some(d) = profiles_dir {
+        dbt_extra_args.push("--profiles-dir".to_string());
+        dbt_extra_args.push(d.to_string());
+    }
 
     let (dbt_source_map, dbt_source_names, dbt_source_tags) = collect_dbt_source_names(manifest);
     let (model_names, model_nodes) = collect_models(manifest);
@@ -69,13 +81,17 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
     let model_tests = collect_tests(manifest, &model_names);
 
     let auto_sync_val = auto_sync.unwrap_or(true);
+    let source_ctx = DbtBuildContext {
+        connection,
+        auto_sync: auto_sync_val,
+        dbt_extra_args: &dbt_extra_args,
+    };
     let (mut resources, needs_skip_sync) = build_dbt_source_assets(
         &dbt_source_names,
         &dbt_source_map,
         &dbt_source_tests,
         &dbt_source_tags,
-        connection,
-        auto_sync_val,
+        &source_ctx,
     );
     if needs_skip_sync {
         resources.push(make_skip_sync());
@@ -85,7 +101,7 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
     let effective_sync = match default_sync {
         Some(ds) => ds.clone(),
         None => {
-            resources.push(make_dbt_run_sync());
+            resources.push(make_dbt_run_sync_with_args(&dbt_extra_args));
             DefaultSync {
                 sync: DBT_RUN_SYNC_NAME.to_string(),
                 with: HashMap::new(),
@@ -93,14 +109,18 @@ pub fn manifest_to_resources(manifest: &DbtManifest, origin: &OriginSpec) -> Vec
         }
     };
 
-    let model_assets = build_model_assets(
+    let model_ctx = DbtBuildContext {
+        connection,
+        auto_sync: auto_sync_val,
+        dbt_extra_args: &dbt_extra_args,
+    };
+    let model_assets = build_dbt_model_assets(
         &model_nodes,
         &model_tests,
         &dbt_source_map,
         &model_names,
-        connection,
+        &model_ctx,
         &effective_sync,
-        auto_sync_val,
     );
     resources.extend(model_assets);
     resources
@@ -112,7 +132,14 @@ const DBT_RUN_SYNC_NAME: &str = "nagi-dbt-run";
 // ── Auto-generated Sync resources ─────────────────────────────────────
 
 /// Generates the `nagi-dbt-run` Sync resource: `dbt run --select {{ asset.name }}`.
-fn make_dbt_run_sync() -> NagiKind {
+fn make_dbt_run_sync_with_args(dbt_extra_args: &[String]) -> NagiKind {
+    let mut args = vec![
+        "dbt".to_string(),
+        "run".to_string(),
+        "--select".to_string(),
+        "{{ asset.name }}".to_string(),
+    ];
+    args.extend_from_slice(dbt_extra_args);
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
         metadata: Metadata {
@@ -122,12 +149,7 @@ fn make_dbt_run_sync() -> NagiKind {
             pre: None,
             run: SyncStep {
                 step_type: StepType::Command,
-                args: vec![
-                    "dbt".to_string(),
-                    "run".to_string(),
-                    "--select".to_string(),
-                    "{{ asset.name }}".to_string(),
-                ],
+                args,
                 env: HashMap::new(),
             },
             post: None,
@@ -163,8 +185,7 @@ fn build_dbt_source_assets(
     dbt_source_map: &HashMap<String, String>,
     dbt_source_tests: &HashMap<String, Vec<&DbtNode>>,
     dbt_source_tags: &HashMap<String, Vec<String>>,
-    connection: &str,
-    auto_sync: bool,
+    ctx: &DbtBuildContext<'_>,
 ) -> (Vec<NagiKind>, bool) {
     let mut resources: Vec<NagiKind> = Vec::new();
     let mut skip_sync_needed = false;
@@ -191,8 +212,12 @@ fn build_dbt_source_assets(
             sync: SKIP_SYNC_NAME.to_string(),
             with: HashMap::new(),
         };
-        let (on_drift, conditions_resource) =
-            build_on_drift(tests_for_this.filter(|t| !t.is_empty()), name, &skip_sync);
+        let (on_drift, conditions_resource) = build_on_drift(
+            tests_for_this.filter(|t| !t.is_empty()),
+            name,
+            &skip_sync,
+            ctx.dbt_extra_args,
+        );
 
         if let Some(cond) = conditions_resource {
             resources.push(cond);
@@ -203,10 +228,10 @@ fn build_dbt_source_assets(
             metadata: Metadata { name: name.clone() },
             spec: AssetSpec {
                 tags: dbt_source_tags.get(name).cloned().unwrap_or_default(),
-                connection: Some(connection.to_string()),
+                connection: Some(ctx.connection.to_string()),
                 upstreams: vec![],
                 on_drift,
-                auto_sync,
+                auto_sync: ctx.auto_sync,
                 evaluate_cache_ttl: None,
             },
         });
@@ -215,23 +240,33 @@ fn build_dbt_source_assets(
     (resources, skip_sync_needed)
 }
 
+/// Common parameters for building dbt-generated assets.
+struct DbtBuildContext<'a> {
+    connection: &'a str,
+    auto_sync: bool,
+    dbt_extra_args: &'a [String],
+}
+
 /// Builds Assets and Conditions for dbt models.
-fn build_model_assets(
+fn build_dbt_model_assets(
     model_nodes: &[&DbtNode],
     model_tests: &HashMap<String, Vec<&DbtNode>>,
     dbt_source_map: &HashMap<String, String>,
     model_names: &HashMap<String, String>,
-    connection: &str,
+    ctx: &DbtBuildContext<'_>,
     default_sync: &DefaultSync,
-    auto_sync: bool,
 ) -> Vec<NagiKind> {
     let mut resources: Vec<NagiKind> = Vec::new();
 
     for model in model_nodes {
         let upstreams = resolve_upstreams(&model.depends_on.nodes, dbt_source_map, model_names);
 
-        let (on_drift, conditions_resource) =
-            build_on_drift(model_tests.get(&model.unique_id), &model.name, default_sync);
+        let (on_drift, conditions_resource) = build_on_drift(
+            model_tests.get(&model.unique_id),
+            &model.name,
+            default_sync,
+            ctx.dbt_extra_args,
+        );
 
         if let Some(cond) = conditions_resource {
             resources.push(cond);
@@ -244,10 +279,10 @@ fn build_model_assets(
             },
             spec: AssetSpec {
                 tags: model.tags.clone(),
-                connection: Some(connection.to_string()),
+                connection: Some(ctx.connection.to_string()),
                 upstreams,
                 on_drift,
-                auto_sync,
+                auto_sync: ctx.auto_sync,
                 evaluate_cache_ttl: None,
             },
         });
@@ -338,9 +373,10 @@ fn build_on_drift(
     tests: Option<&Vec<&DbtNode>>,
     model_name: &str,
     default_sync: &DefaultSync,
+    dbt_extra_args: &[String],
 ) -> (Vec<OnDriftEntry>, Option<NagiKind>) {
     let conditions = tests
-        .map(|t| tests_to_conditions(t))
+        .map(|t| tests_to_conditions(t, dbt_extra_args))
         .filter(|c| !c.is_empty());
 
     let Some(conditions) = conditions else {
@@ -369,18 +405,20 @@ fn build_on_drift(
 /// Converts dbt tests into Nagi DesiredCondition entries.
 /// All tests are executed via `dbt test --select` to ensure behavior matches
 /// dbt's own test implementation exactly.
-fn tests_to_conditions(tests: &[&DbtNode]) -> Vec<DesiredCondition> {
+fn tests_to_conditions(tests: &[&DbtNode], dbt_extra_args: &[String]) -> Vec<DesiredCondition> {
     let mut entries = Vec::new();
     for test in tests {
         if test.test_metadata.is_some() {
+            let mut run = vec![
+                "dbt".to_string(),
+                "test".to_string(),
+                "--select".to_string(),
+                test.name.clone(),
+            ];
+            run.extend_from_slice(dbt_extra_args);
             entries.push(DesiredCondition::Command {
                 name: format!("dbt-test-{}", test.name),
-                run: vec![
-                    "dbt".to_string(),
-                    "test".to_string(),
-                    "--select".to_string(),
-                    test.name.clone(),
-                ],
+                run,
                 interval: None,
                 env: HashMap::new(),
                 evaluate_cache_ttl: None,
@@ -565,7 +603,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_generates_assets_for_sources_and_models() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let assets: Vec<_> = resources.iter().filter(|r| r.kind() == "Asset").collect();
         // 2 dbt source Assets + 4 model Assets
@@ -583,7 +621,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_maps_tags() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let orders = resources
             .iter()
@@ -600,7 +638,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_maps_dbt_source_tags() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let raw_orders = resources
             .iter()
@@ -626,7 +664,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_resolves_upstreams() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         // stg_customers depends on raw.customers
         let stg_customers = resources
@@ -655,7 +693,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_applies_default_sync_via_on_drift() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let customers = resources
             .iter()
@@ -673,7 +711,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_applies_dbt_source_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         // raw.orders has a not_null test → should have on_drift with nagi-skip-sync
         let raw_orders = resources
@@ -709,7 +747,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_generates_conditions_for_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let group = resources
             .iter()
@@ -719,14 +757,16 @@ mod tests {
             let has_not_null = spec.0.iter().any(|c| {
                 matches!(c, DesiredCondition::Command { name, run, .. }
                     if name == "dbt-test-not_null_customers_customer_id"
-                    && run == &["dbt", "test", "--select", "not_null_customers_customer_id"])
+                    && run.len() >= 4
+                    && run[..4] == ["dbt", "test", "--select", "not_null_customers_customer_id"])
             });
             assert!(has_not_null, "should have a not_null Command condition");
 
             let has_unique = spec.0.iter().any(|c| {
                 matches!(c, DesiredCondition::Command { name, run, .. }
                     if name == "dbt-test-unique_customers_customer_id"
-                    && run == &["dbt", "test", "--select", "unique_customers_customer_id"])
+                    && run.len() >= 4
+                    && run[..4] == ["dbt", "test", "--select", "unique_customers_customer_id"])
             });
             assert!(has_unique, "should have a unique Command condition");
         } else {
@@ -737,7 +777,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_maps_generic_test_as_command() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let group = resources
             .iter()
@@ -766,7 +806,7 @@ mod tests {
             default_sync: None,
             auto_sync: None,
         };
-        let resources = manifest_to_resources(&manifest, &origin);
+        let resources = manifest_to_resources(&manifest, &origin, None);
 
         // Auto-generated nagi-dbt-run Sync should be present
         let dbt_run_sync = resources
@@ -777,9 +817,10 @@ mod tests {
             "nagi-dbt-run Sync should be auto-generated"
         );
         if let Some(NagiKind::Sync { spec, .. }) = dbt_run_sync {
+            assert!(spec.run.args.len() >= 4);
             assert_eq!(
-                spec.run.args,
-                vec!["dbt", "run", "--select", "{{ asset.name }}"]
+                &spec.run.args[..4],
+                &["dbt", "run", "--select", "{{ asset.name }}"]
             );
         }
 
@@ -799,7 +840,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_default_sync_suppresses_auto_generation() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let dbt_run_sync = resources
             .iter()
@@ -813,7 +854,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_ignores_seeds() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         let has_seed = resources
             .iter()
@@ -824,7 +865,7 @@ mod tests {
     #[test]
     fn manifest_to_resources_sets_connection_on_all_assets() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin());
+        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
 
         for r in &resources {
             if let NagiKind::Asset { spec, .. } = r {
@@ -899,7 +940,7 @@ mod tests {
             sync: "nagi-dbt-run".to_string(),
             with: HashMap::new(),
         };
-        let (on_drift, conditions) = build_on_drift(None, "my_model", &ds);
+        let (on_drift, conditions) = build_on_drift(None, "my_model", &ds, &[]);
         assert!(on_drift.is_empty());
         assert!(conditions.is_none());
     }
@@ -923,7 +964,7 @@ mod tests {
             sync: "default-sync".to_string(),
             with: HashMap::new(),
         };
-        let (on_drift, conditions) = build_on_drift(Some(&tests), "my_model", &ds);
+        let (on_drift, conditions) = build_on_drift(Some(&tests), "my_model", &ds, &[]);
         assert_eq!(on_drift.len(), 1);
         assert_eq!(on_drift[0].sync, "default-sync");
         assert_eq!(on_drift[0].conditions, "dbt-tests-my_model");
@@ -939,13 +980,17 @@ mod tests {
             collect_dbt_source_names(&manifest);
         let dbt_source_tests = collect_tests(&manifest, &dbt_source_map);
 
+        let ctx = DbtBuildContext {
+            connection: "my-bq",
+            auto_sync: true,
+            dbt_extra_args: &[],
+        };
         let (resources, needs_skip_sync) = build_dbt_source_assets(
             &dbt_source_names,
             &dbt_source_map,
             &dbt_source_tests,
             &dbt_source_tags,
-            "my-bq",
-            true,
+            &ctx,
         );
 
         assert!(needs_skip_sync);
@@ -971,13 +1016,17 @@ mod tests {
         let dbt_source_tests = HashMap::new();
         let dbt_source_tags = HashMap::new();
 
+        let ctx = DbtBuildContext {
+            connection: "my-bq",
+            auto_sync: true,
+            dbt_extra_args: &[],
+        };
         let (resources, needs_skip_sync) = build_dbt_source_assets(
             &names,
             &dbt_source_map,
             &dbt_source_tests,
             &dbt_source_tags,
-            "my-bq",
-            true,
+            &ctx,
         );
 
         assert!(!needs_skip_sync);
@@ -988,10 +1037,10 @@ mod tests {
         }
     }
 
-    // ── build_model_assets tests ───────────────────────────────────────
+    // ── build_dbt_model_assets tests ───────────────────────────────────────
 
     #[test]
-    fn build_model_assets_includes_upstreams_and_on_drift() {
+    fn build_dbt_model_assets_includes_upstreams_and_on_drift() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
@@ -1000,14 +1049,18 @@ mod tests {
             sync: "dbt-run".to_string(),
             with: HashMap::new(),
         };
-        let resources = build_model_assets(
+        let ctx = DbtBuildContext {
+            connection: "my-bq",
+            auto_sync: true,
+            dbt_extra_args: &[],
+        };
+        let resources = build_dbt_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
             &model_names,
-            "my-bq",
+            &ctx,
             &ds,
-            true,
         );
 
         let assets: Vec<_> = resources.iter().filter(|r| r.kind() == "Asset").collect();
@@ -1028,7 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn build_model_assets_with_custom_sync_with() {
+    fn build_dbt_model_assets_with_custom_sync_with() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
@@ -1038,14 +1091,18 @@ mod tests {
             with: HashMap::from([("selector".to_string(), "+{{ asset.name }}".to_string())]),
         };
 
-        let resources = build_model_assets(
+        let ctx = DbtBuildContext {
+            connection: "my-bq",
+            auto_sync: true,
+            dbt_extra_args: &[],
+        };
+        let resources = build_dbt_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
             &model_names,
-            "my-bq",
+            &ctx,
             &ds,
-            true,
         );
 
         let customers = resources
@@ -1064,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn build_model_assets_does_not_include_syncs() {
+    fn build_dbt_model_assets_does_not_include_syncs() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
         let (model_names, model_nodes) = collect_models(&manifest);
@@ -1074,14 +1131,18 @@ mod tests {
             sync: "dbt-run".to_string(),
             with: HashMap::new(),
         };
-        let resources = build_model_assets(
+        let ctx = DbtBuildContext {
+            connection: "my-bq",
+            auto_sync: true,
+            dbt_extra_args: &[],
+        };
+        let resources = build_dbt_model_assets(
             &model_nodes,
             &model_tests,
             &dbt_source_map,
             &model_names,
-            "my-bq",
+            &ctx,
             &ds,
-            true,
         );
 
         let syncs: Vec<_> = resources.iter().filter(|r| r.kind() == "Sync").collect();
@@ -1103,7 +1164,7 @@ mod tests {
             }),
             auto_sync: Some(false),
         };
-        let resources = manifest_to_resources(&manifest, &origin);
+        let resources = manifest_to_resources(&manifest, &origin, None);
 
         for r in &resources {
             if let NagiKind::Asset { spec, .. } = r {
