@@ -13,11 +13,12 @@ pub(crate) struct DbtOriginConfig {
     pub(crate) project_dir: String,
     pub(crate) profile: String,
     pub(crate) target: Option<String>,
+    pub(crate) profiles_dir: Option<String>,
 }
 
 /// Extracts dbt configuration for each Origin by resolving its Connection.
 pub(crate) fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOriginConfig> {
-    let connection_profiles: HashMap<&str, (&str, Option<&str>)> = resources
+    let connection_info: HashMap<&str, (&str, Option<&str>, Option<&str>)> = resources
         .iter()
         .filter_map(|r| match r {
             NagiKind::Connection {
@@ -26,12 +27,13 @@ pub(crate) fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOrigi
                     ConnectionSpec::Dbt {
                         ref profile,
                         ref target,
+                        ref profiles_dir,
                         ..
                     },
                 ..
             } => Some((
                 metadata.name.as_str(),
-                (profile.as_str(), target.as_deref()),
+                (profile.as_str(), target.as_deref(), profiles_dir.as_deref()),
             )),
             _ => None,
         })
@@ -50,15 +52,22 @@ pub(crate) fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOrigi
                     },
                 ..
             } => {
-                let (profile, target) = connection_profiles
+                let (profile, target, profiles_dir) = connection_info
                     .get(connection.as_str())
-                    .map(|(p, t)| (p.to_string(), t.map(|s| s.to_string())))
+                    .map(|(p, t, d)| {
+                        (
+                            p.to_string(),
+                            t.map(|s| s.to_string()),
+                            d.map(|s| s.to_string()),
+                        )
+                    })
                     .unwrap_or_default();
                 Some(DbtOriginConfig {
                     origin_name: metadata.name.clone(),
                     project_dir: project_dir.clone(),
                     profile,
                     target,
+                    profiles_dir,
                 })
             }
             _ => None,
@@ -84,17 +93,24 @@ pub fn expand(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
             Path::new(&config.project_dir),
             &config.profile,
             config.target.as_deref(),
+            config.profiles_dir.as_deref(),
         )?;
         manifests.insert(config.origin_name.clone(), manifest_json);
     }
 
-    expand_with_manifests(resources, &manifests)
+    let profiles_dirs: HashMap<String, Option<String>> = configs
+        .into_iter()
+        .map(|c| (c.origin_name, c.profiles_dir))
+        .collect();
+
+    expand_with_manifests(resources, &manifests, Some(&profiles_dirs))
 }
 
 /// Expands Origin resources using pre-loaded manifest JSON strings.
 pub(crate) fn expand_with_manifests(
     resources: Vec<NagiKind>,
     manifests: &HashMap<String, String>,
+    profiles_dirs: Option<&HashMap<String, Option<String>>>,
 ) -> Result<Vec<NagiKind>, CompileError> {
     let origins: Vec<(String, OriginSpec)> = resources
         .iter()
@@ -115,7 +131,10 @@ pub(crate) fn expand_with_manifests(
         })?;
         let manifest: DbtManifest = serde_json::from_str(manifest_str)
             .map_err(|e| CompileError::ManifestParse(e.to_string()))?;
-        let generated = manifest::manifest_to_resources(&manifest, spec);
+        let profiles_dir = profiles_dirs
+            .and_then(|m| m.get(name))
+            .and_then(|d| d.as_deref());
+        let generated = manifest::manifest_to_resources(&manifest, spec, profiles_dir);
         expanded.extend(generated);
     }
 

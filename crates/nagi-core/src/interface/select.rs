@@ -49,16 +49,16 @@ fn select_single(graph: &DependencyGraph, selector: &str) -> Result<HashSet<Stri
         });
     }
 
-    let (upstream, downstream, pattern) = parse_selector(selector)?;
+    let (upstream_depth, downstream_depth, pattern) = parse_selector(selector)?;
     let seed_names = resolve_pattern(graph, pattern)?;
 
     // Build adjacency lists only for needed directions.
-    let upstream_adj = if upstream {
+    let upstream_adj = if upstream_depth.is_some() {
         Some(build_adjacency(graph, Direction::Upstream))
     } else {
         None
     };
-    let downstream_adj = if downstream {
+    let downstream_adj = if downstream_depth.is_some() {
         Some(build_adjacency(graph, Direction::Downstream))
     } else {
         None
@@ -68,10 +68,10 @@ fn select_single(graph: &DependencyGraph, selector: &str) -> Result<HashSet<Stri
     for name in &seed_names {
         result.insert(name.clone());
         if let Some(adj) = &upstream_adj {
-            traverse(adj, name, &mut result);
+            traverse(adj, name, &mut result, upstream_depth);
         }
         if let Some(adj) = &downstream_adj {
-            traverse(adj, name, &mut result);
+            traverse(adj, name, &mut result, downstream_depth);
         }
     }
 
@@ -88,29 +88,38 @@ fn select_single(graph: &DependencyGraph, selector: &str) -> Result<HashSet<Stri
 /// - `2+name`      — N levels upstream (N-plus)
 /// - `name+1`      — N levels downstream
 /// - `2+name+3`    — N levels both directions
-fn parse_selector(selector: &str) -> Result<(bool, bool, &str), SelectError> {
+// Traversal depth: None = no traversal, Some(None) = unlimited, Some(Some(n)) = n levels.
+type Depth = Option<Option<usize>>;
+
+fn parse_selector(selector: &str) -> Result<(Depth, Depth, &str), SelectError> {
     // Strip upstream prefix: `+name` or `2+name`
-    let (upstream, rest) = if let Some(pos) = selector.find('+') {
+    let (upstream_depth, rest) = if let Some(pos) = selector.find('+') {
         let prefix = &selector[..pos];
-        if prefix.is_empty() || prefix.chars().all(|c| c.is_ascii_digit()) {
-            (true, &selector[pos + 1..])
+        if prefix.is_empty() {
+            (Some(None), &selector[pos + 1..]) // unlimited
+        } else if prefix.chars().all(|c| c.is_ascii_digit()) {
+            let n: usize = prefix.parse().unwrap_or(0);
+            (Some(Some(n)), &selector[pos + 1..])
         } else {
-            (false, selector)
+            (None, selector)
         }
     } else {
-        (false, selector)
+        (None, selector)
     };
 
     // Strip downstream suffix: `name+` or `name+1`
-    let (downstream, pattern) = if let Some(pos) = rest.rfind('+') {
+    let (downstream_depth, pattern) = if let Some(pos) = rest.rfind('+') {
         let suffix = &rest[pos + 1..];
-        if suffix.is_empty() || suffix.chars().all(|c| c.is_ascii_digit()) {
-            (true, &rest[..pos])
+        if suffix.is_empty() {
+            (Some(None), &rest[..pos]) // unlimited
+        } else if suffix.chars().all(|c| c.is_ascii_digit()) {
+            let n: usize = suffix.parse().unwrap_or(0);
+            (Some(Some(n)), &rest[..pos])
         } else {
-            (false, rest)
+            (None, rest)
         }
     } else {
-        (false, rest)
+        (None, rest)
     };
 
     if pattern.is_empty() {
@@ -119,7 +128,7 @@ fn parse_selector(selector: &str) -> Result<(bool, bool, &str), SelectError> {
         });
     }
 
-    Ok((upstream, downstream, pattern))
+    Ok((upstream_depth, downstream_depth, pattern))
 }
 
 /// Extracts a model name from a selector expression, stripping `+` markers.
@@ -183,15 +192,29 @@ fn build_adjacency(graph: &DependencyGraph, direction: Direction) -> HashMap<Str
     adj
 }
 
-fn traverse(adj: &HashMap<String, Vec<String>>, start: &str, visited: &mut HashSet<String>) {
-    let mut queue = VecDeque::new();
-    queue.push_back(start.to_string());
+fn traverse(
+    adj: &HashMap<String, Vec<String>>,
+    start: &str,
+    visited: &mut HashSet<String>,
+    max_depth: Option<Option<usize>>,
+) {
+    let limit = match max_depth {
+        Some(Some(n)) => n,
+        Some(None) => usize::MAX, // unlimited
+        None => return,           // no traversal
+    };
 
-    while let Some(current) = queue.pop_front() {
+    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    queue.push_back((start.to_string(), 0));
+
+    while let Some((current, depth)) = queue.pop_front() {
+        if depth >= limit {
+            continue;
+        }
         if let Some(neighbors) = adj.get(&current) {
             for neighbor in neighbors {
                 if visited.insert(neighbor.clone()) {
-                    queue.push_back(neighbor.clone());
+                    queue.push_back((neighbor.clone(), depth + 1));
                 }
             }
         }
@@ -277,6 +300,10 @@ mod tests {
         upstream_on_leaf_node: ["+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
         downstream_on_root_node: ["monthly-report+"] => vec!["monthly-report"];
         multiple_selectors_dedup: ["daily-sales", "+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        depth_1_upstream: ["1+monthly-report"] => vec!["daily-sales", "monthly-report"];
+        depth_1_downstream: ["raw-sales+1"] => vec!["daily-sales", "raw-sales"];
+        depth_2_upstream: ["2+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        depth_0_upstream: ["0+monthly-report"] => vec!["monthly-report"];
     }
 
     macro_rules! select_not_found {
@@ -356,16 +383,16 @@ mod tests {
     }
 
     parse_selector_test! {
-        parse_plain_name: "daily-sales" => (false, false, "daily-sales");
-        parse_upstream: "+daily-sales" => (true, false, "daily-sales");
-        parse_downstream: "daily-sales+" => (false, true, "daily-sales");
-        parse_both: "+daily-sales+" => (true, true, "daily-sales");
-        parse_tag: "tag:finance" => (false, false, "tag:finance");
-        parse_upstream_tag: "+tag:finance" => (true, false, "tag:finance");
-        parse_n_plus_upstream: "2+daily-sales" => (true, false, "daily-sales");
-        parse_n_plus_downstream: "daily-sales+1" => (false, true, "daily-sales");
-        parse_n_plus_both: "2+daily-sales+3" => (true, true, "daily-sales");
-        parse_1_plus: "1+daily-sales" => (true, false, "daily-sales");
+        parse_plain_name: "daily-sales" => (None, None, "daily-sales");
+        parse_upstream: "+daily-sales" => (Some(None), None, "daily-sales");
+        parse_downstream: "daily-sales+" => (None, Some(None), "daily-sales");
+        parse_both: "+daily-sales+" => (Some(None), Some(None), "daily-sales");
+        parse_tag: "tag:finance" => (None, None, "tag:finance");
+        parse_upstream_tag: "+tag:finance" => (Some(None), None, "tag:finance");
+        parse_n_plus_upstream: "2+daily-sales" => (Some(Some(2)), None, "daily-sales");
+        parse_n_plus_downstream: "daily-sales+1" => (None, Some(Some(1)), "daily-sales");
+        parse_n_plus_both: "2+daily-sales+3" => (Some(Some(2)), Some(Some(3)), "daily-sales");
+        parse_1_plus: "1+daily-sales" => (Some(Some(1)), None, "daily-sales");
     }
 
     #[test]

@@ -173,18 +173,33 @@ fn spawn_evaluates(
     yaml_map: &HashMap<&str, &str>,
     cache_dir: &Option<PathBuf>,
     max_evaluate: Option<usize>,
+    conn_semaphores: &ConnectionSemaphores,
 ) {
     while let Some(name) = state.next_spawnable(max_evaluate) {
         if let Some(&yaml) = yaml_map.get(name.as_str()) {
             let skip_cache = state.is_awaiting_post_sync_evaluate(&name);
-            evaluate_tasks.spawn(reconciler::spawn_evaluate(
-                name,
-                yaml.to_string(),
-                cache_dir.clone(),
-                skip_cache,
-            ));
+            let sem = conn_semaphores.get(&name).cloned();
+            let cache = cache_dir.clone();
+            let yaml_owned = yaml.to_string();
+            evaluate_tasks.spawn(async move {
+                let _permit = match &sem {
+                    Some(s) => Some(s.acquire().await.expect("semaphore closed")),
+                    None => None,
+                };
+                reconciler::spawn_evaluate(name, yaml_owned, cache, skip_cache).await
+            });
         }
     }
+}
+
+/// Context for spawning sync tasks.
+struct SyncSpawnContext<'a> {
+    yaml_map: &'a HashMap<&'a str, &'a str>,
+    sync_lock: &'a Arc<dyn SyncLock>,
+    lock_config: reconciler::LockConfig,
+    notifier: &'a Option<Arc<dyn Notifier>>,
+    max_sync: Option<usize>,
+    conn_semaphores: &'a ConnectionSemaphores,
 }
 
 /// Drains the sync queue and spawns sync tasks, respecting the concurrency limit.
@@ -194,22 +209,23 @@ fn spawn_syncs(
         String,
         Result<crate::runtime::sync::SyncExecutionResult, SyncError>,
     )>,
-    yaml_map: &HashMap<&str, &str>,
-    sync_lock: &Arc<dyn SyncLock>,
-    lock_config: reconciler::LockConfig,
-    notifier: &Option<Arc<dyn Notifier>>,
-    max_sync: Option<usize>,
+    ctx: &SyncSpawnContext<'_>,
 ) {
-    while let Some(name) = state.next_syncable(max_sync) {
-        if let Some(&yaml) = yaml_map.get(name.as_str()) {
+    while let Some(name) = state.next_syncable(ctx.max_sync) {
+        if let Some(&yaml) = ctx.yaml_map.get(name.as_str()) {
             tracing::info!(asset = %name, "starting sync");
-            sync_tasks.spawn(reconciler::spawn_sync(
-                name,
-                yaml.to_string(),
-                sync_lock.clone(),
-                lock_config,
-                notifier.clone(),
-            ));
+            let sem = ctx.conn_semaphores.get(&name).cloned();
+            let sync_lock = ctx.sync_lock.clone();
+            let notifier = ctx.notifier.clone();
+            let lock_config = ctx.lock_config;
+            let yaml_owned = yaml.to_string();
+            sync_tasks.spawn(async move {
+                let _permit = match &sem {
+                    Some(s) => Some(s.acquire().await.expect("semaphore closed")),
+                    None => None,
+                };
+                reconciler::spawn_sync(name, yaml_owned, sync_lock, lock_config, notifier).await
+            });
         }
     }
 }
@@ -312,6 +328,9 @@ pub(super) async fn run_controller(
         .map(|a| (a.name.as_str(), a.yaml.as_str()))
         .collect();
 
+    // Build per-connection semaphores for concurrency control.
+    let conn_semaphores = build_connection_semaphores(&yaml_map);
+
     loop {
         spawn_evaluates(
             &mut state,
@@ -319,16 +338,17 @@ pub(super) async fn run_controller(
             &yaml_map,
             &cache_dir,
             concurrency.max_evaluate,
+            &conn_semaphores,
         );
-        spawn_syncs(
-            &mut state,
-            &mut sync_tasks,
-            &yaml_map,
-            &sync_lock,
+        let sync_ctx = SyncSpawnContext {
+            yaml_map: &yaml_map,
+            sync_lock: &sync_lock,
             lock_config,
-            &notifier,
-            concurrency.max_sync,
-        );
+            notifier: &notifier,
+            max_sync: concurrency.max_sync,
+            conn_semaphores: &conn_semaphores,
+        };
+        spawn_syncs(&mut state, &mut sync_tasks, &sync_ctx);
 
         let sleep_until = state.scheduler.next_due().map(|(_, instant)| instant);
 
@@ -374,6 +394,55 @@ pub(super) struct ControllerInput {
     pub(super) assets: Vec<AssetEntry>,
     pub(super) edges: Vec<GraphEdge>,
     pub(super) cache_dir: Option<PathBuf>,
+}
+
+/// Asset name → connection semaphore mapping.
+/// Assets sharing the same connection share the same semaphore.
+type ConnectionSemaphores = HashMap<String, Arc<tokio::sync::Semaphore>>;
+
+/// Parses compiled asset YAMLs and builds per-connection semaphores.
+/// Connections with `max_concurrency` limits get a bounded semaphore.
+/// Assets without a connection or with unlimited connections get no entry.
+fn build_connection_semaphores(yaml_map: &HashMap<&str, &str>) -> ConnectionSemaphores {
+    use crate::runtime::kind::connection::ResolvedConnection;
+
+    let mut conn_limits: HashMap<String, usize> = HashMap::new();
+    let mut asset_to_conn: HashMap<String, String> = HashMap::new();
+
+    for (&asset_name, &yaml) in yaml_map {
+        if let Ok(compiled) = serde_yaml::from_str::<CompiledAsset>(yaml) {
+            if let Some(ref conn) = compiled.connection {
+                let conn_name = conn.name().to_string();
+                // Determine concurrency limit from the connection type.
+                // For dbt connections, resolve the adapter to check if
+                // the underlying database has concurrency constraints.
+                let limit = match conn {
+                    ResolvedConnection::DuckDb { .. } => Some(1),
+                    ResolvedConnection::Dbt { .. } => {
+                        conn.connect().ok().and_then(|c| c.max_concurrency())
+                    }
+                    _ => None,
+                };
+                if let Some(n) = limit {
+                    conn_limits.entry(conn_name.clone()).or_insert(n);
+                }
+                asset_to_conn.insert(asset_name.to_string(), conn_name);
+            }
+        }
+    }
+
+    let semaphores: HashMap<String, Arc<tokio::sync::Semaphore>> = conn_limits
+        .into_iter()
+        .map(|(name, limit)| (name, Arc::new(tokio::sync::Semaphore::new(limit))))
+        .collect();
+
+    let mut result = HashMap::new();
+    for (asset_name, conn_name) in asset_to_conn {
+        if let Some(sem) = semaphores.get(&conn_name) {
+            result.insert(asset_name, Arc::clone(sem));
+        }
+    }
+    result
 }
 
 /// Builds per-component [`ControllerInput`]s from the graph and compiled assets.

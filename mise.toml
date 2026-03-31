@@ -29,7 +29,7 @@ run = """
 uv run ruff check python/
 uv run ruff format --check python/
 uv run ty check python/
-uv run pytest python/tests/ -v
+uv run pytest python/tests/ -v -m "not integration and not scenario" -n auto
 """
 
 [tasks.check-docs]
@@ -47,6 +47,16 @@ run = "cargo llvm-cov --no-default-features"
 [tasks.audit]
 description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
 run = "cargo audit"
+
+[tasks."test:integration"]
+description = "Run integration tests (requires dbt:setup)"
+depends = ["build", "dbt:setup"]
+run = "uv run pytest python/tests/integration/ -v -m integration"
+
+[tasks."test:scenario"]
+description = "Run serve scenario tests"
+depends = ["build"]
+run = "uv run pytest python/tests/scenario/ -v -m scenario"
 
 [tasks."docs:gen-schema"]
 description = "Generate JSON Schema and update resource docs"

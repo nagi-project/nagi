@@ -1518,9 +1518,10 @@ spec:
     fn expand_origins_generates_resources_from_manifest() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded =
-            crate::runtime::kind::origin::dbt::expand::expand_with_manifests(resources, &manifests)
-                .unwrap();
+        let expanded = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+            resources, &manifests, None,
+        )
+        .unwrap();
 
         let assets: Vec<_> = expanded.iter().filter(|r| r.kind() == "Asset").collect();
         // 1 dbt source Asset + 2 model Assets
@@ -1538,6 +1539,7 @@ spec:
         let expanded = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
             resources,
             &HashMap::new(),
+            None,
         )
         .unwrap();
         assert_eq!(expanded.len(), count);
@@ -1549,6 +1551,7 @@ spec:
         let err = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
             resources,
             &HashMap::new(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, CompileError::ManifestParse(_)));
@@ -1558,9 +1561,10 @@ spec:
     fn resolve_with_origin_expansion() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded =
-            crate::runtime::kind::origin::dbt::expand::expand_with_manifests(resources, &manifests)
-                .unwrap();
+        let expanded = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+            resources, &manifests, None,
+        )
+        .unwrap();
         let output = resolve(expanded).unwrap();
 
         // 1 dbt source Asset + 2 model Assets
@@ -1605,9 +1609,10 @@ spec:
 
         let resources = load_resources(&resources_dir).unwrap();
         let manifests = manifests_for("my-dbt");
-        let resources =
-            crate::runtime::kind::origin::dbt::expand::expand_with_manifests(resources, &manifests)
-                .unwrap();
+        let resources = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+            resources, &manifests, None,
+        )
+        .unwrap();
         let output = resolve(resources).unwrap();
         write_output(&output, &target_dir).unwrap();
 

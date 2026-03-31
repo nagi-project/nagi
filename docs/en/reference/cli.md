@@ -183,5 +183,7 @@ By default, only read-only tools (`nagi_status`, `nagi_evaluate`) are exposed.
 | `+name` | The specified Asset and all upstream Assets |
 | `name+` | The specified Asset and all downstream Assets |
 | `+name+` | The specified Asset and all upstream and downstream Assets |
+| `N+name` | The specified Asset and N levels of upstream Assets |
+| `name+N` | The specified Asset and N levels of downstream Assets |
 | `tag:finance` | Select by tag |
 | `+tag:finance` | Select by tag, including upstream Assets |

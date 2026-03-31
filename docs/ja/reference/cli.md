@@ -183,5 +183,7 @@ nagi mcp [OPTIONS]
 | `+name` | 指定した Asset とすべての上流 |
 | `name+` | 指定した Asset とすべての下流 |
 | `+name+` | 指定した Asset と上流・下流すべて |
+| `N+name` | 指定した Asset と上流 N 段 |
+| `name+N` | 指定した Asset と下流 N 段 |
 | `tag:finance` | タグで選択 |
 | `+tag:finance` | タグで選択し、上流を含む |

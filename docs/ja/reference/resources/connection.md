@@ -23,6 +23,7 @@ Connection resolved via dbt profiles.yml.
 | --- | --- | --- | --- | --- |
 | `profile` | string | Yes | - | Profile name as defined in `~/.dbt/profiles.yml`. |
 | `dbtCloud` | DbtCloudSpec | — | - | Optional dbt Cloud configuration for running-job checks before sync. |
+| `profilesDir` | string | — | - | Directory containing profiles.yml. If omitted, uses `~/.dbt/`. |
 | `target` | string | — | - | If omitted, the default target in profiles.yml is used. |
 
 ### type: BigQuery

@@ -22,6 +22,7 @@ dev = [
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.0",
     "pytest>=8.0",
+    "pytest-xdist>=3.0",
     "ruff>=0.11",
     "ty>=0.0.1a7",
 ]
@@ -34,10 +35,16 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "ANN"]
 
 [[tool.ty.overrides]]
-include = ["python/nagi_cli/commands/*.py", "python/nagi_cli/mcp.py", "python/tests/*.py", "python/tests/commands/*.py"]
+include = ["python/nagi_cli/commands/*.py", "python/nagi_cli/mcp.py", "python/tests/*.py", "python/tests/commands/*.py", "python/tests/integration/*.py", "python/tests/scenario/*.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that require real DB connections and CLI execution",
+    "scenario: end-to-end serve scenario tests verifying reconciliation loop behavior",
+]
 
 [tool.maturin]
 manifest-path = "crates/nagi-core/Cargo.toml"
