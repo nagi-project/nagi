@@ -323,12 +323,48 @@ fn warn_multi_asset_sync(name: &str, spec: &SyncSpec) {
     }
 }
 
-fn find_assets_without_on_drift(assets: &[(Metadata, AssetSpec)]) -> Vec<&str> {
-    assets
-        .iter()
-        .filter(|(_, spec)| spec.on_drift.is_empty())
-        .map(|(m, _)| m.name.as_str())
-        .collect()
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ReadinessWarning {
+    NoOnDrift,
+    NoEvalTriggers,
+}
+
+fn check_readiness_warning(asset: &ResolvedAsset) -> Option<ReadinessWarning> {
+    if asset.spec.on_drift.is_empty() {
+        return Some(ReadinessWarning::NoOnDrift);
+    }
+    if asset.spec.upstreams.is_empty()
+        && !asset
+            .resolved_on_drift
+            .iter()
+            .flat_map(|e| &e.conditions)
+            .any(|c| c.interval().is_some())
+    {
+        return Some(ReadinessWarning::NoEvalTriggers);
+    }
+    None
+}
+
+fn warn_asset_readiness(assets: &[ResolvedAsset]) {
+    for a in assets {
+        match check_readiness_warning(a) {
+            Some(ReadinessWarning::NoOnDrift) => {
+                tracing::warn!(
+                    asset = %a.metadata.name,
+                    "Asset '{}' has no onDrift entries: it will always be considered Ready",
+                    a.metadata.name,
+                );
+            }
+            Some(ReadinessWarning::NoEvalTriggers) => {
+                tracing::warn!(
+                    asset = %a.metadata.name,
+                    "Asset '{}' has no evaluation triggers (no interval, no upstreams): after initial evaluation in serve, its state will not change",
+                    a.metadata.name,
+                );
+            }
+            None => {}
+        }
+    }
 }
 
 /// Resolves all references and builds the dependency graph.
@@ -343,16 +379,6 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
     syncs
         .iter()
         .for_each(|(name, spec)| warn_multi_asset_sync(name, spec));
-
-    find_assets_without_on_drift(&assets)
-        .iter()
-        .for_each(|name| {
-            tracing::warn!(
-                asset = *name,
-                "Asset '{}' has no onDrift entries: it will always be considered Ready",
-                name,
-            );
-        });
 
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
@@ -369,6 +395,8 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             )
         })
         .collect::<Result<_, _>>()?;
+
+    warn_asset_readiness(&resolved_assets);
 
     let graph = build_graph(&resolved_assets)?;
     detect_cycles(&graph)?;
@@ -693,23 +721,7 @@ spec:
         parse_kinds(yaml).unwrap()
     }
 
-    // ── find_assets_without_on_drift tests ─────────────────────────────
-
-    fn make_asset_entry(name: &str, on_drift: Vec<OnDriftEntry>) -> (Metadata, AssetSpec) {
-        (
-            Metadata {
-                name: name.to_string(),
-            },
-            AssetSpec {
-                tags: vec![],
-                connection: None,
-                upstreams: vec![],
-                on_drift,
-                auto_sync: true,
-                evaluate_cache_ttl: None,
-            },
-        )
-    }
+    // ── check_readiness_warning tests ──────────────────────────────────
 
     fn on_drift_entry() -> OnDriftEntry {
         OnDriftEntry {
@@ -720,27 +732,105 @@ spec:
         }
     }
 
-    #[test]
-    fn find_assets_without_on_drift_returns_empty_when_all_have_on_drift() {
-        let assets = vec![make_asset_entry("a", vec![on_drift_entry()])];
-        assert!(find_assets_without_on_drift(&assets).is_empty());
+    fn make_resolved_asset(
+        name: &str,
+        upstreams: Vec<String>,
+        on_drift: Vec<OnDriftEntry>,
+        resolved_on_drift: Vec<ResolvedOnDriftEntry>,
+    ) -> ResolvedAsset {
+        ResolvedAsset {
+            metadata: Metadata {
+                name: name.to_string(),
+            },
+            spec: AssetSpec {
+                tags: vec![],
+                connection: None,
+                upstreams,
+                on_drift,
+                auto_sync: true,
+                evaluate_cache_ttl: None,
+            },
+            resolved_on_drift,
+            connection: None,
+            dbt_cloud_job_ids: None,
+        }
     }
 
-    #[test]
-    fn find_assets_without_on_drift_returns_names_when_missing() {
-        let assets = vec![
-            make_asset_entry("has-drift", vec![on_drift_entry()]),
-            make_asset_entry("no-drift-1", vec![]),
-            make_asset_entry("no-drift-2", vec![]),
-        ];
-        let mut result = find_assets_without_on_drift(&assets);
-        result.sort();
-        assert_eq!(result, vec!["no-drift-1", "no-drift-2"]);
+    fn sample_sync_spec() -> SyncSpec {
+        SyncSpec {
+            pre: None,
+            run: crate::runtime::kind::sync::SyncStep {
+                step_type: crate::runtime::kind::sync::StepType::Command,
+                args: vec!["true".to_string()],
+                env: HashMap::new(),
+            },
+            post: None,
+        }
     }
 
-    #[test]
-    fn find_assets_without_on_drift_empty_input() {
-        assert!(find_assets_without_on_drift(&[]).is_empty());
+    fn resolved_entry_with_conditions(conditions: Vec<DesiredCondition>) -> ResolvedOnDriftEntry {
+        ResolvedOnDriftEntry {
+            conditions,
+            conditions_ref: "cond".to_string(),
+            sync: sample_sync_spec(),
+            sync_ref_name: "sync".to_string(),
+        }
+    }
+
+    macro_rules! check_readiness_warning_test {
+        ($($name:ident: $asset:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let asset = $asset;
+                    assert_eq!(check_readiness_warning(&asset), $expected);
+                }
+            )*
+        };
+    }
+
+    check_readiness_warning_test! {
+        empty_on_drift_warns_no_on_drift: make_resolved_asset(
+            "a", vec![], vec![], vec![],
+        ) => Some(ReadinessWarning::NoOnDrift);
+
+        no_interval_no_upstreams_warns_no_eval_triggers: make_resolved_asset(
+            "a",
+            vec![],
+            vec![on_drift_entry()],
+            vec![resolved_entry_with_conditions(vec![DesiredCondition::Sql {
+                name: "sql-check".to_string(),
+                query: "SELECT 1".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            }])],
+        ) => Some(ReadinessWarning::NoEvalTriggers);
+
+        has_interval_no_warning: make_resolved_asset(
+            "a",
+            vec![],
+            vec![on_drift_entry()],
+            vec![resolved_entry_with_conditions(vec![DesiredCondition::Freshness {
+                name: "freshness".to_string(),
+                max_age: crate::runtime::duration::Duration::from_secs(86400),
+                column: None,
+                interval: crate::runtime::duration::Duration::from_secs(3600),
+                check_at: None,
+                evaluate_cache_ttl: None,
+            }])],
+        ) => None;
+
+        has_upstreams_no_warning: make_resolved_asset(
+            "a",
+            vec!["upstream-asset".to_string()],
+            vec![on_drift_entry()],
+            vec![resolved_entry_with_conditions(vec![DesiredCondition::Sql {
+                name: "sql-check".to_string(),
+                query: "SELECT 1".to_string(),
+                interval: None,
+                evaluate_cache_ttl: None,
+            }])],
+        ) => None;
     }
 
     // ── resolve_on_drift tests ──────────────────────────────────────────
