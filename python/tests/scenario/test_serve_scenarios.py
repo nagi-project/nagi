@@ -24,6 +24,38 @@ from tests.scenario.helper import (
 
 pytestmark = pytest.mark.scenario
 
+QUICKSTART_DIR = Path(__file__).resolve().parents[3] / "examples" / "quickstart"
+
+
+class TestQuickstart:
+    """Verify the examples/quickstart project converges.
+
+    greeting (root) → farewell (downstream).
+    Each checks for a file; sync creates it.
+    """
+
+    def test_quickstart_converges(
+        self, run_serve: StartServe, serve_project: Path
+    ) -> None:
+        resources = {}
+        resources_dir = QUICKSTART_DIR / "resources"
+        for path in resources_dir.iterdir():
+            if path.suffix == ".yaml":
+                resources[path.name] = path.read_text()
+
+        project = run_serve(resources)
+
+        wait_for_asset_ready(project, "farewell", timeout=30)
+
+        assert read_cache(project, "greeting")["ready"] is True
+        assert read_cache(project, "farewell")["ready"] is True
+
+        assert query_sync_count(project, "greeting") == 1
+        assert query_sync_count(project, "farewell") == 1
+
+        order = query_sync_assets_in_order(project)
+        assert order.index("greeting") < order.index("farewell")
+
 
 class TestScenario1LinearChain:
     """A → B → C, all Drifted initially.
