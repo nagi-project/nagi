@@ -49,6 +49,13 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install DuckDB CLI
+        run: |
+          curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.5.1/duckdb_cli-linux-amd64.zip -o duckdb.zip
+          unzip duckdb.zip
+          sudo mv duckdb /usr/local/bin/
+          rm duckdb.zip
+
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
 
       - name: Ruff check
