@@ -24,6 +24,15 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ hashFiles('**/Cargo.lock', 'crates/**/*.rs') }}
+          restore-keys: rust-
+
       - uses: ./.github/actions/setup-duckdb
 
       - name: Check formatting
