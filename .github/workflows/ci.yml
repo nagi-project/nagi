@@ -43,7 +43,7 @@ jobs:
         run: cargo clippy --features python --tests -- -D warnings
 
       - name: Audit Rust dependencies
-        run: cargo install cargo-audit && cargo audit
+        run: cargo install cargo-deny && cargo deny check advisories
 
       - name: Test
         run: cargo test

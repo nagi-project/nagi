@@ -1,6 +1,6 @@
 [tools]
 uv = "0.6"
-"cargo:cargo-audit" = "0.22"
+"cargo:cargo-deny" = "0.19"
 "cargo:cargo-llvm-cov" = "0.8"
 "cargo:mdbook" = "0.5"
 "cargo:mdbook-mermaid" = "0.17"
@@ -45,8 +45,8 @@ description = "Generate test coverage report (requires cargo-llvm-cov)"
 run = "cargo llvm-cov --no-default-features"
 
 [tasks.audit]
-description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
-run = "cargo audit"
+description = "Check dependencies for known vulnerabilities (requires cargo-deny)"
+run = "cargo deny check advisories"
 
 [tasks."test:integration"]
 description = "Run integration tests (requires dbt:setup)"
