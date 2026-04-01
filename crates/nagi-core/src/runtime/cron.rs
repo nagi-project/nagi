@@ -40,8 +40,7 @@ impl CronSchedule {
 impl<'de> Deserialize<'de> for CronSchedule {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        croner::Cron::new(&s)
-            .parse()
+        s.parse::<croner::Cron>()
             .map(|_| CronSchedule(s))
             .map_err(serde::de::Error::custom)
     }
