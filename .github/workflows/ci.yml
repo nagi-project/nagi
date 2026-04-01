@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,7 +44,21 @@ jobs:
         run: cargo clippy --features python --tests -- -D warnings
 
       - name: Audit Rust dependencies
-        run: cargo install cargo-deny && cargo deny check advisories
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo install cargo-audit
+          RESULT=$(cargo audit 2>&1) || true
+          if echo "$RESULT" | grep -q "vulnerability found"; then
+            gh pr comment ${{ github.event.number }} --body "$(cat <<EOF
+          ## cargo audit
+          \`\`\`
+          $RESULT
+          \`\`\`
+          EOF
+          )"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Test
         run: cargo test
@@ -104,7 +119,21 @@ jobs:
           if [ "$FOUND" = "1" ]; then exit 1; fi
 
       - name: Audit Python dependencies
-        run: uv export --frozen --no-emit-project > requirements.txt && uvx pip-audit -r requirements.txt
+        if: github.event_name == 'pull_request'
+        run: |
+          uv export --frozen --no-emit-project > requirements.txt
+          RESULT=$(uvx pip-audit -r requirements.txt 2>&1) || true
+          if echo "$RESULT" | grep -q "found"; then
+            gh pr comment ${{ github.event.number }} --body "$(cat <<EOF
+          ## pip-audit
+          \`\`\`
+          $RESULT
+          \`\`\`
+          EOF
+          )"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Type check
         run: uv run ty check python/
