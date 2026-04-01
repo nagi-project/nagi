@@ -13,6 +13,7 @@ import pytest
 from tests.scenario.conftest import StartServe
 from tests.scenario.helper import (
     NOOP_SYNC,
+    SLOW_SYNC,
     asset_yaml,
     conditions_yaml,
     query_evaluate_count,
@@ -20,6 +21,7 @@ from tests.scenario.helper import (
     query_sync_count,
     read_cache,
     wait_for_asset_ready,
+    wait_for_sync_count,
 )
 
 pytestmark = pytest.mark.scenario
@@ -207,17 +209,25 @@ class TestScenario4Fanout:
 class TestScenario5Diamond:
     """A → B → X, A → C → X.
 
-    A becomes Ready, B and C sync in parallel.
-    When B becomes Ready, X syncs. C's propagation during X's sync is ignored.
-    X should sync once (not twice).
+    A becomes Ready, B and C sync. C uses a slow sync to ensure B finishes
+    first: B ready → X syncs → X completes → C ready → X syncs again.
+    X syncs twice because each upstream Ready transition is a valid trigger.
+    The concurrent dedup case (X still syncing when the second upstream
+    propagates) is covered by the unit test
+    propagate_downstream_diamond_syncs_once_when_concurrent.
     """
 
-    def test_diamond_deduplicates_sync(self, run_serve: StartServe) -> None:
+    def test_diamond_syncs_twice_with_time_gap(self, run_serve: StartServe) -> None:
         project = run_serve(
             {
                 "a.yaml": asset_yaml("a", conditions="check-interval"),
                 "b.yaml": asset_yaml("b", upstreams=["a"], conditions="check"),
-                "c.yaml": asset_yaml("c", upstreams=["a"], conditions="check"),
+                "c.yaml": asset_yaml(
+                    "c",
+                    upstreams=["a"],
+                    conditions="check",
+                    sync="slow-reload",
+                ),
                 "x.yaml": asset_yaml("x", upstreams=["b", "c"], conditions="check"),
                 "conditions.yaml": (
                     conditions_yaml("check-interval", interval="5s")
@@ -225,17 +235,20 @@ class TestScenario5Diamond:
                     + conditions_yaml("check")
                 ),
                 "sync.yaml": NOOP_SYNC,
+                "slow-sync.yaml": SLOW_SYNC,
             }
         )
 
-        wait_for_asset_ready(project, "x", timeout=30)
+        wait_for_sync_count(project, "x", 2, timeout=30)
 
         assert read_cache(project, "x")["ready"] is True
         # B and C each sync once
         assert query_sync_count(project, "b") == 1
         assert query_sync_count(project, "c") == 1
-        # X should sync once (B and C ready near-simultaneously → deduplicated)
-        assert query_sync_count(project, "x") == 1
+        # X syncs twice: once from B's propagation, once from C's.
+        # Concurrent dedup is covered by unit test
+        # propagate_downstream_diamond_syncs_once_when_concurrent.
+        assert query_sync_count(project, "x") == 2
 
 
 class TestScenario6IntervalWithPropagation:

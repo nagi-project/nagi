@@ -237,3 +237,14 @@ NOOP_SYNC = (
     "    type: Command\n"
     '    args: ["echo", "sync"]\n'
 )
+
+SLOW_SYNC = (
+    "apiVersion: nagi.io/v1alpha1\n"
+    "kind: Sync\n"
+    "metadata:\n"
+    "  name: slow-reload\n"
+    "spec:\n"
+    "  run:\n"
+    "    type: Command\n"
+    '    args: ["sleep", "2"]\n'
+)
