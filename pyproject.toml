@@ -46,6 +46,9 @@ markers = [
     "scenario: end-to-end serve scenario tests verifying reconciliation loop behavior",
 ]
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [tool.maturin]
 manifest-path = "crates/nagi-core/Cargo.toml"
 features = ["python"]
