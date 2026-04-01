@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use object_store::path::Path as OsPath;
-use object_store::{ObjectStore, PutMode, PutOptions};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions};
 
 use crate::runtime::config::BackendConfig;
 use crate::runtime::evaluate::AssetEvalResult;
