@@ -104,7 +104,7 @@ jobs:
           if [ "$FOUND" = "1" ]; then exit 1; fi
 
       - name: Audit Python dependencies
-        run: uv export --frozen > requirements.txt && uvx pip-audit -r requirements.txt
+        run: uv export --frozen --no-emit-project > requirements.txt && uvx pip-audit -r requirements.txt
 
       - name: Type check
         run: uv run ty check python/
