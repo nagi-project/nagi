@@ -1,8 +1,7 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "AssetSpec": {
-      "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. `on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
+      "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.\n`on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
       "properties": {
         "autoSync": {
           "default": true,
@@ -20,20 +19,20 @@
         "evaluateCacheTtl": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Duration"
+              "$ref": "#/$defs/Duration"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Default evaluate cache TTL for all conditions in this Asset. Conditions can override this with their own `evaluateCacheTtl`."
+          "description": "Default evaluate cache TTL for all conditions in this Asset.\nConditions can override this with their own `evaluateCacheTtl`."
         },
         "onDrift": {
           "default": [],
-          "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready.",
+          "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift\ndetermines which sync to run. When omitted, the Asset is always Ready.",
           "items": {
-            "$ref": "#/definitions/OnDriftEntry"
+            "$ref": "#/$defs/OnDriftEntry"
           },
           "type": "array"
         },
@@ -59,7 +58,7 @@
     "ConditionsSpec": {
       "description": "Spec for `kind: Conditions`. A reusable set of conditions referenced from Asset `onDrift` entries.",
       "items": {
-        "$ref": "#/definitions/DesiredCondition"
+        "$ref": "#/$defs/DesiredCondition"
       },
       "type": "array"
     },
@@ -72,7 +71,7 @@
             "dbtCloud": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbtCloudSpec"
+                  "$ref": "#/$defs/DbtCloudSpec"
                 },
                 {
                   "type": "null"
@@ -99,15 +98,13 @@
               ]
             },
             "type": {
-              "enum": [
-                "dbt"
-              ],
+              "const": "dbt",
               "type": "string"
             }
           },
           "required": [
-            "profile",
-            "type"
+            "type",
+            "profile"
           ],
           "type": "object"
         },
@@ -146,23 +143,21 @@
             "timeoutSeconds": {
               "description": "Query timeout in seconds.",
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "bigquery"
-              ],
+              "const": "bigquery",
               "type": "string"
             }
           },
           "required": [
-            "dataset",
+            "type",
             "project",
-            "type"
+            "dataset"
           ],
           "type": "object"
         },
@@ -174,15 +169,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "duckdb"
-              ],
+              "const": "duckdb",
               "type": "string"
             }
           },
           "required": [
-            "path",
-            "type"
+            "type",
+            "path"
           ],
           "type": "object"
         },
@@ -213,9 +206,7 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "snowflake"
-              ],
+              "const": "snowflake",
               "type": "string"
             },
             "user": {
@@ -228,13 +219,13 @@
             }
           },
           "required": [
-            "account",
-            "database",
-            "privateKeyPath",
-            "schema",
             "type",
+            "account",
             "user",
-            "warehouse"
+            "database",
+            "schema",
+            "warehouse",
+            "privateKeyPath"
           ],
           "type": "object"
         }
@@ -280,7 +271,7 @@
       "type": "object"
     },
     "DesiredCondition": {
-      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied. Each condition carries a `name` that is unique within the Asset (after Conditions expansion) and used as a key in execution logs.",
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied.\nEach condition carries a `name` that is unique within the Asset (after Conditions expansion)\nand used as a key in execution logs.",
       "oneOf": [
         {
           "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
@@ -288,7 +279,7 @@
             "checkAt": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/CronSchedule"
+                  "$ref": "#/$defs/CronSchedule"
                 },
                 {
                   "type": "null"
@@ -306,7 +297,7 @@
             "evaluateCacheTtl": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Duration"
+                  "$ref": "#/$defs/Duration"
                 },
                 {
                   "type": "null"
@@ -316,19 +307,11 @@
               "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
             },
             "interval": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Duration"
-                }
-              ],
+              "$ref": "#/$defs/Duration",
               "description": "Polling interval for re-evaluating this condition."
             },
             "maxAge": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Duration"
-                }
-              ],
+              "$ref": "#/$defs/Duration",
               "description": "Maximum acceptable age of the data before the condition becomes Not Ready."
             },
             "name": {
@@ -336,17 +319,15 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "Freshness"
-              ],
+              "const": "Freshness",
               "type": "string"
             }
           },
           "required": [
-            "interval",
-            "maxAge",
+            "type",
             "name",
-            "type"
+            "maxAge",
+            "interval"
           ],
           "type": "object"
         },
@@ -356,7 +337,7 @@
             "evaluateCacheTtl": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Duration"
+                  "$ref": "#/$defs/Duration"
                 },
                 {
                   "type": "null"
@@ -368,7 +349,7 @@
             "interval": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Duration"
+                  "$ref": "#/$defs/Duration"
                 },
                 {
                   "type": "null"
@@ -386,21 +367,19 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "SQL"
-              ],
+              "const": "SQL",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "name",
-            "query",
-            "type"
+            "query"
           ],
           "type": "object"
         },
         {
-          "description": "Runs an external command. Ready when the process exits with code 0. `run` is argv: the first element is the program, the rest are arguments.",
+          "description": "Runs an external command. Ready when the process exits with code 0.\n`run` is argv: the first element is the program, the rest are arguments.",
           "properties": {
             "env": {
               "additionalProperties": {
@@ -413,7 +392,7 @@
             "evaluateCacheTtl": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Duration"
+                  "$ref": "#/$defs/Duration"
                 },
                 {
                   "type": "null"
@@ -425,7 +404,7 @@
             "interval": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Duration"
+                  "$ref": "#/$defs/Duration"
                 },
                 {
                   "type": "null"
@@ -446,16 +425,14 @@
               "type": "array"
             },
             "type": {
-              "enum": [
-                "Command"
-              ],
+              "const": "Command",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "name",
-            "run",
-            "type"
+            "run"
           ],
           "type": "object"
         }
@@ -467,7 +444,7 @@
       "type": "string"
     },
     "MergePosition": {
-      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries during Asset overlay merge.",
+      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries\nduring Asset overlay merge.",
       "enum": [
         "beforeOrigin",
         "afterOrigin"
@@ -487,18 +464,14 @@
       "type": "object"
     },
     "OnDriftEntry": {
-      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference. The conditions are evaluated as a group (all must pass for no drift).",
+      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.\nThe conditions are evaluated as a group (all must pass for no drift).",
       "properties": {
         "conditions": {
           "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
           "type": "string"
         },
         "mergePosition": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/MergePosition"
-            }
-          ],
+          "$ref": "#/$defs/MergePosition",
           "default": "beforeOrigin",
           "description": "Controls insertion position during overlay merge. Not included in compiled output."
         },
@@ -541,7 +514,7 @@
             "defaultSync": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DefaultSync"
+                  "$ref": "#/$defs/DefaultSync"
                 },
                 {
                   "type": "null"
@@ -555,16 +528,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "DBT"
-              ],
+              "const": "DBT",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "connection",
-            "projectDir",
-            "type"
+            "projectDir"
           ],
           "type": "object"
         }
@@ -578,12 +549,12 @@
       "type": "string"
     },
     "SyncSpec": {
-      "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps. Reusable across multiple Assets via `ref`.",
+      "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps.\nReusable across multiple Assets via `ref`.",
       "properties": {
         "post": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SyncStep"
+              "$ref": "#/$defs/SyncStep"
             },
             {
               "type": "null"
@@ -594,7 +565,7 @@
         "pre": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SyncStep"
+              "$ref": "#/$defs/SyncStep"
             },
             {
               "type": "null"
@@ -603,11 +574,7 @@
           "description": "Optional step executed before the main sync command."
         },
         "run": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SyncStep"
-            }
-          ],
+          "$ref": "#/$defs/SyncStep",
           "description": "The main convergence step."
         }
       },
@@ -634,22 +601,19 @@
           "type": "object"
         },
         "type": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/StepType"
-            }
-          ],
+          "$ref": "#/$defs/StepType",
           "description": "Execution type for this step (currently only `Command`)."
         }
       },
       "required": [
-        "args",
-        "type"
+        "type",
+        "args"
       ],
       "type": "object"
     }
   },
-  "description": "A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention. Includes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention.\nIncludes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.",
   "oneOf": [
     {
       "properties": {
@@ -657,21 +621,19 @@
           "type": "string"
         },
         "kind": {
-          "enum": [
-            "Connection"
-          ],
+          "const": "Connection",
           "type": "string"
         },
         "metadata": {
-          "$ref": "#/definitions/Metadata"
+          "$ref": "#/$defs/Metadata"
         },
         "spec": {
-          "$ref": "#/definitions/ConnectionSpec"
+          "$ref": "#/$defs/ConnectionSpec"
         }
       },
       "required": [
-        "apiVersion",
         "kind",
+        "apiVersion",
         "metadata",
         "spec"
       ],
@@ -683,21 +645,19 @@
           "type": "string"
         },
         "kind": {
-          "enum": [
-            "Asset"
-          ],
+          "const": "Asset",
           "type": "string"
         },
         "metadata": {
-          "$ref": "#/definitions/Metadata"
+          "$ref": "#/$defs/Metadata"
         },
         "spec": {
-          "$ref": "#/definitions/AssetSpec"
+          "$ref": "#/$defs/AssetSpec"
         }
       },
       "required": [
-        "apiVersion",
         "kind",
+        "apiVersion",
         "metadata",
         "spec"
       ],
@@ -709,21 +669,19 @@
           "type": "string"
         },
         "kind": {
-          "enum": [
-            "Conditions"
-          ],
+          "const": "Conditions",
           "type": "string"
         },
         "metadata": {
-          "$ref": "#/definitions/Metadata"
+          "$ref": "#/$defs/Metadata"
         },
         "spec": {
-          "$ref": "#/definitions/ConditionsSpec"
+          "$ref": "#/$defs/ConditionsSpec"
         }
       },
       "required": [
-        "apiVersion",
         "kind",
+        "apiVersion",
         "metadata",
         "spec"
       ],
@@ -735,21 +693,19 @@
           "type": "string"
         },
         "kind": {
-          "enum": [
-            "Sync"
-          ],
+          "const": "Sync",
           "type": "string"
         },
         "metadata": {
-          "$ref": "#/definitions/Metadata"
+          "$ref": "#/$defs/Metadata"
         },
         "spec": {
-          "$ref": "#/definitions/SyncSpec"
+          "$ref": "#/$defs/SyncSpec"
         }
       },
       "required": [
-        "apiVersion",
         "kind",
+        "apiVersion",
         "metadata",
         "spec"
       ],
@@ -761,21 +717,19 @@
           "type": "string"
         },
         "kind": {
-          "enum": [
-            "Origin"
-          ],
+          "const": "Origin",
           "type": "string"
         },
         "metadata": {
-          "$ref": "#/definitions/Metadata"
+          "$ref": "#/$defs/Metadata"
         },
         "spec": {
-          "$ref": "#/definitions/OriginSpec"
+          "$ref": "#/$defs/OriginSpec"
         }
       },
       "required": [
-        "apiVersion",
         "kind",
+        "apiVersion",
         "metadata",
         "spec"
       ],

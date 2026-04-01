@@ -143,7 +143,7 @@ def render_properties_table(
             type_str = schema_to_type(prop, definitions)
             req = is_required(name, req_list)
             default = get_default(prop) or "-"
-            desc = prop.get("description", "") or "-"
+            desc = (prop.get("description", "") or "-").replace("\n", " ")
             lines.append(f"| `{full_name}` | {type_str} | {req} | {default} | {desc} |")
 
     _add_props(properties, required, prefix)
@@ -169,7 +169,9 @@ def render_oneof_variants(
         desc = variant.get("description", "")
         type_field = props.get("type", {})
         type_name = ""
-        if "enum" in type_field:
+        if "const" in type_field:
+            type_name = type_field["const"]
+        elif "enum" in type_field:
             type_name = type_field["enum"][0]
 
         if type_name:
@@ -177,7 +179,7 @@ def render_oneof_variants(
             lines.append(f"### type: {display}")
             lines.append("")
         if desc:
-            lines.append(desc)
+            lines.append(desc.replace("\n", " "))
             lines.append("")
 
         # Filter out the 'type' discriminator field
@@ -192,27 +194,27 @@ def _find_referring_field(
     defn_name: str, properties: dict, definitions: dict
 ) -> str | None:
     """Find the field name in properties that references a given definition (directly or via items)."""
-    ref_suffix = f"#/definitions/{defn_name}"
+    ref_suffixes = (f"#/$defs/{defn_name}", f"#/definitions/{defn_name}")
     for field_name, prop in properties.items():
         # Direct $ref
-        if prop.get("$ref") == ref_suffix:
+        if prop.get("$ref") in ref_suffixes:
             return field_name
         # Array whose items reference the definition
         items = prop.get("items", {})
-        if items.get("$ref") == ref_suffix:
+        if items.get("$ref") in ref_suffixes:
             return field_name
         # anyOf containing the ref
         for variant in prop.get("anyOf", []):
-            if variant.get("$ref") == ref_suffix:
+            if variant.get("$ref") in ref_suffixes:
                 return field_name
-            if variant.get("items", {}).get("$ref") == ref_suffix:
+            if variant.get("items", {}).get("$ref") in ref_suffixes:
                 return field_name
     # Check if any intermediate definition references it (e.g., DesiredSetEntry -> DesiredCondition)
     for other_name, other_defn in definitions.items():
         if other_name == defn_name:
             continue
         for variant in other_defn.get("anyOf", []):
-            if variant.get("$ref") == ref_suffix:
+            if variant.get("$ref") in ref_suffixes:
                 # Found: other_name references defn_name. Now find who references other_name.
                 parent = _find_referring_field(other_name, properties, definitions)
                 if parent:
@@ -221,7 +223,7 @@ def _find_referring_field(
 
 
 def render_schema(schema: dict, table_only: bool = False) -> list[str]:
-    definitions = schema.get("definitions", {})
+    definitions = schema.get("$defs", schema.get("definitions", {}))
     lines = []
 
     # Top-level object
@@ -243,7 +245,7 @@ def render_schema(schema: dict, table_only: bool = False) -> list[str]:
                     lines.append("")
                     desc = defn.get("description", "")
                     if desc:
-                        lines.append(desc)
+                        lines.append(desc.replace("\n", " "))
                         lines.append("")
                     lines.extend(render_oneof_variants(defn["oneOf"], definitions))
 

@@ -67,8 +67,8 @@ Can transition to Not Ready as time passes beyond `maxAge`.
 
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `interval` | any | Yes | - | Polling interval for re-evaluating this condition. |
-| `maxAge` | any | Yes | - | Maximum acceptable age of the data before the condition becomes Not Ready. |
+| `interval` | Duration | Yes | - | Polling interval for re-evaluating this condition. |
+| `maxAge` | Duration | Yes | - | Maximum acceptable age of the data before the condition becomes Not Ready. |
 | `name` | string | Yes | - | Unique identifier for this condition within the Asset. |
 | `checkAt` | CronSchedule | — | - | Optional cron expression for additional evaluation at a specific time. |
 | `column` | string | — | - | If omitted, freshness is determined from table metadata instead of a column value. |

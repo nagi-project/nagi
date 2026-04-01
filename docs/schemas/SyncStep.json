@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "StepType": {
       "description": "Currently only `Command` (subprocess execution) is supported.",
       "enum": [
@@ -9,6 +8,7 @@
       "type": "string"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "args": {
       "description": "Command and arguments in argv format.",
@@ -26,17 +26,13 @@
       "type": "object"
     },
     "type": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/StepType"
-        }
-      ],
+      "$ref": "#/$defs/StepType",
       "description": "Execution type for this step (currently only `Command`)."
     }
   },
   "required": [
-    "args",
-    "type"
+    "type",
+    "args"
   ],
   "title": "SyncStep",
   "type": "object"

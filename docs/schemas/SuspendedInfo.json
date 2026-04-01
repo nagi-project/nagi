@@ -1,6 +1,6 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "description": "Metadata persisted when an asset is suspended from automatic sync.\n\nEach suspended asset gets a JSON file at `{suspended_dir}/{asset_name}.json`. The serve loop reads these flags to skip sync for suspended assets; `nagi serve resume` deletes them to re-enable sync.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Metadata persisted when an asset is suspended from automatic sync.\n\nEach suspended asset gets a JSON file at `{suspended_dir}/{asset_name}.json`.\nThe serve loop reads these flags to skip sync for suspended assets;\n`nagi serve resume` deletes them to re-enable sync.",
   "properties": {
     "asset_name": {
       "description": "Name of the suspended Asset resource.",

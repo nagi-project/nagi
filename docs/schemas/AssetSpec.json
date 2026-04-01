@@ -1,13 +1,12 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "Duration": {
       "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
       "format": "duration",
       "type": "string"
     },
     "MergePosition": {
-      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries during Asset overlay merge.",
+      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries\nduring Asset overlay merge.",
       "enum": [
         "beforeOrigin",
         "afterOrigin"
@@ -15,18 +14,14 @@
       "type": "string"
     },
     "OnDriftEntry": {
-      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference. The conditions are evaluated as a group (all must pass for no drift).",
+      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.\nThe conditions are evaluated as a group (all must pass for no drift).",
       "properties": {
         "conditions": {
           "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
           "type": "string"
         },
         "mergePosition": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/MergePosition"
-            }
-          ],
+          "$ref": "#/$defs/MergePosition",
           "default": "beforeOrigin",
           "description": "Controls insertion position during overlay merge. Not included in compiled output."
         },
@@ -50,7 +45,8 @@
       "type": "object"
     }
   },
-  "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations. `on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.\n`on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
   "properties": {
     "autoSync": {
       "default": true,
@@ -68,20 +64,20 @@
     "evaluateCacheTtl": {
       "anyOf": [
         {
-          "$ref": "#/definitions/Duration"
+          "$ref": "#/$defs/Duration"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Default evaluate cache TTL for all conditions in this Asset. Conditions can override this with their own `evaluateCacheTtl`."
+      "description": "Default evaluate cache TTL for all conditions in this Asset.\nConditions can override this with their own `evaluateCacheTtl`."
     },
     "onDrift": {
       "default": [],
-      "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready.",
+      "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift\ndetermines which sync to run. When omitted, the Asset is always Ready.",
       "items": {
-        "$ref": "#/definitions/OnDriftEntry"
+        "$ref": "#/$defs/OnDriftEntry"
       },
       "type": "array"
     },

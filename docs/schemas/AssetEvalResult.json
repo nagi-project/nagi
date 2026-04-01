@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "ConditionResult": {
       "properties": {
         "conditionName": {
@@ -12,11 +11,7 @@
           "type": "string"
         },
         "status": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ConditionStatus"
-            }
-          ],
+          "$ref": "#/$defs/ConditionStatus",
           "description": "Evaluation outcome for this condition."
         }
       },
@@ -32,9 +27,7 @@
         {
           "properties": {
             "state": {
-              "enum": [
-                "ready"
-              ],
+              "const": "ready",
               "type": "string"
             }
           },
@@ -50,21 +43,20 @@
               "type": "string"
             },
             "state": {
-              "enum": [
-                "drifted"
-              ],
+              "const": "drifted",
               "type": "string"
             }
           },
           "required": [
-            "reason",
-            "state"
+            "state",
+            "reason"
           ],
           "type": "object"
         }
       ]
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "assetName": {
       "description": "Name of the evaluated Asset resource.",
@@ -73,7 +65,7 @@
     "conditions": {
       "description": "Per-condition evaluation results.",
       "items": {
-        "$ref": "#/definitions/ConditionResult"
+        "$ref": "#/$defs/ConditionResult"
       },
       "type": "array"
     },
@@ -91,8 +83,8 @@
   },
   "required": [
     "assetName",
-    "conditions",
-    "ready"
+    "ready",
+    "conditions"
   ],
   "title": "AssetEvalResult",
   "type": "object"
