@@ -41,6 +41,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --features python --tests -- -D warnings
 
+      - name: Audit Rust dependencies
+        run: cargo install cargo-audit && cargo audit
+
       - name: Test
         run: cargo test
 
@@ -80,6 +83,27 @@ jobs:
 
       - name: Build
         run: uv sync
+
+      - name: Audit .pth files
+        run: |
+          ALLOWED="_virtualenv.pth|distutils-precedence.pth|nagi_cli.pth"
+          FOUND=0
+          find .venv -name "*.pth" | grep -vE "$ALLOWED" | while read -r f; do
+            if grep -q "^import" "$f"; then
+              BASENAME=$(basename "$f")
+              PKG=$(grep -rl "$BASENAME" .venv/lib/python*/site-packages/*.dist-info/RECORD 2>/dev/null \
+                | head -1 | xargs -I{} dirname {} | xargs -I{} basename {} | sed 's/\.dist-info$//' || echo "unknown")
+              echo "::error::Suspicious .pth file installed by $PKG: $f"
+              grep "^import" "$f" | while read -r line; do
+                echo "  $line"
+              done
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" = "1" ]; then exit 1; fi
+
+      - name: Audit Python dependencies
+        run: uv export --frozen > requirements.txt && uvx pip-audit -r requirements.txt
 
       - name: Type check
         run: uv run ty check python/
