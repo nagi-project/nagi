@@ -47,8 +47,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           cargo install cargo-audit
-          RESULT=$(cargo audit 2>&1) || true
-          if echo "$RESULT" | grep -q "vulnerability found"; then
+          RESULT=$(cargo audit 2>&1) && AUDIT_RC=0 || AUDIT_RC=$?
+          # Minimize previous cargo audit comments
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
+            --jq '.[] | select(.body | startswith("## cargo audit")) | .id' \
+            | xargs -I{} gh api -X PATCH "repos/${{ github.repository }}/issues/comments/{}" \
+              -f body="## cargo audit (outdated)" 2>/dev/null || true
+          if [ "$AUDIT_RC" -ne 0 ]; then
             gh pr comment ${{ github.event.number }} --body "$(cat <<EOF
           ## cargo audit
           \`\`\`
@@ -122,8 +127,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           uv export --frozen --no-emit-project > requirements.txt
-          RESULT=$(uvx pip-audit -r requirements.txt 2>&1) || true
-          if echo "$RESULT" | grep -q "found"; then
+          RESULT=$(uvx pip-audit -r requirements.txt 2>&1) && AUDIT_RC=0 || AUDIT_RC=$?
+          # Minimize previous pip-audit comments
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
+            --jq '.[] | select(.body | startswith("## pip-audit")) | .id' \
+            | xargs -I{} gh api -X PATCH "repos/${{ github.repository }}/issues/comments/{}" \
+              -f body="## pip-audit (outdated)" 2>/dev/null || true
+          if [ "$AUDIT_RC" -ne 0 ]; then
             gh pr comment ${{ github.event.number }} --body "$(cat <<EOF
           ## pip-audit
           \`\`\`
