@@ -29,7 +29,7 @@ object_store = { version = "0.13", features = ["gcp", "aws"] }
 sqlparser = "0.55"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.28", features = ["extension-module"], optional = true }
 
 [features]
 default = ["bigquery", "snowflake"]
