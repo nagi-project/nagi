@@ -24,7 +24,7 @@ rsa = { version = "0.9", optional = true }
 sha2 = { version = "0.11", optional = true }
 base64 = { version = "0.22", optional = true }
 rusqlite = { version = "0.39", features = ["bundled"] }
-schemars = "0.8"
+schemars = "1.2"
 object_store = { version = "0.13", features = ["gcp", "aws"] }
 sqlparser = "0.61"
 tracing = "0.1"
