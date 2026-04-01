@@ -129,7 +129,8 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           uv export --frozen --no-emit-project > requirements.txt
-          RESULT=$(uvx pip-audit -r requirements.txt 2>&1) && AUDIT_RC=0 || AUDIT_RC=$?
+          RESULT=$(uvx pip-audit -r requirements.txt 2>&1) || AUDIT_RC=$?
+          AUDIT_RC=${AUDIT_RC:-0}
           # Minimize previous pip-audit comments
           gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
             --jq '.[] | select(.body | startswith("## pip-audit")) | .node_id' \
