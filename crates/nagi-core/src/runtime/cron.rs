@@ -1,5 +1,5 @@
-use schemars::gen::SchemaGenerator;
-use schemars::schema::{InstanceType, Schema, SchemaObject};
+use std::borrow::Cow;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -9,24 +9,16 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct CronSchedule(String);
 
 impl JsonSchema for CronSchedule {
-    fn schema_name() -> String {
-        "CronSchedule".to_string()
+    fn schema_name() -> Cow<'static, str> {
+        "CronSchedule".into()
     }
 
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            format: Some("cron".to_string()),
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                description: Some(
-                    "A cron expression in standard 5-field format (e.g. \"0 3 * * *\")."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "format": "cron",
+            "description": "A cron expression in standard 5-field format (e.g. \"0 3 * * *\")."
+        })
     }
 }
 
