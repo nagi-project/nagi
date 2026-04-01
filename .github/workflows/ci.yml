@@ -47,7 +47,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           cargo install cargo-audit
-          RESULT=$(cargo audit 2>&1) && AUDIT_RC=0 || AUDIT_RC=$?
+          RESULT=$(cargo audit 2>&1 | sed 's/\x1b\[[0-9;]*m//g') && AUDIT_RC=0 || AUDIT_RC=$?
           # Minimize previous cargo audit comments
           gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
             --jq '.[] | select(.body | startswith("## cargo audit")) | .id' \
