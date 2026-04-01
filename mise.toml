@@ -1,5 +1,5 @@
 [tools]
-uv = "0.6"
+uv = "0.10"
 "cargo:cargo-audit" = "0.22"
 "cargo:cargo-llvm-cov" = "0.8"
 "cargo:mdbook" = "0.5"
