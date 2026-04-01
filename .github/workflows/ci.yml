@@ -47,7 +47,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           command -v cargo-audit >/dev/null || cargo install cargo-audit
-          RESULT=$(CARGO_TERM_COLOR=never cargo audit 2>&1) || AUDIT_RC=$?
+          RESULT=$(cargo audit --color never 2>&1) || AUDIT_RC=$?
           AUDIT_RC=${AUDIT_RC:-0}
           # Minimize previous cargo audit comments
           gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
