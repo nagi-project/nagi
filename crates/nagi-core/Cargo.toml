@@ -14,7 +14,7 @@ serde_json = "1"
 thiserror = "2"
 humantime = "2"
 croner = "2"
-dirs = "5"
+dirs = "6"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "sync", "signal"] }
 chrono = "0.4"
