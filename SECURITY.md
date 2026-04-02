@@ -2,8 +2,7 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+Nagi is currently in pre-release (0.x). Security fixes are applied to the latest release only.
 
 | Version  | Supported          |
 | -------- | ------------------ |
@@ -12,8 +11,9 @@ currently being supported with security updates.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Report security vulnerabilities through
+[GitHub Security Advisories](https://github.com/nagi-project/nagi/security/advisories/report).
+Do not use public issues, pull requests, or discussions.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Please include a description of the vulnerability, steps to reproduce, and
+potential impact.
