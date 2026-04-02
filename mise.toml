@@ -8,11 +8,11 @@ duckdb = "1.5.1"
 
 [tasks.build]
 description = "Build Python package with maturin (creates .venv, installs dependencies, builds nagi CLI)"
-run = "uv sync"
+run = "uv sync --all-extras"
 
 [tasks.rebuild]
 description = "Rebuild PyO3 native module from scratch"
-run = "uv sync --reinstall-package nagi-cli"
+run = "uv sync --all-extras --reinstall-package nagi-cli"
 
 [tasks.check-rust]
 description = "Run fmt, clippy, and test for Rust"
