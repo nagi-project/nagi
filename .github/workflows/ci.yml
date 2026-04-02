@@ -105,7 +105,7 @@ jobs:
         run: uvx ruff format --check python/
 
       - name: Build
-        run: uv sync
+        run: uv sync --all-extras
 
       - name: Audit .pth files
         run: |

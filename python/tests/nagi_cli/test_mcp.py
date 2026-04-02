@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 
 import pytest
+
+pytest.importorskip("mcp", reason="mcp extra not installed")
+
 from mcp.server.fastmcp import FastMCP
 from pytest_mock import MockerFixture
 

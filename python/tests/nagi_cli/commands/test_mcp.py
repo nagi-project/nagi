@@ -1,27 +1,32 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("mcp", reason="mcp extra not installed")
+
+from click.testing import CliRunner
 from pytest_mock import MockerFixture
+
+from nagi_cli.commands.mcp import mcp
 
 
 class TestMcpCommand:
     """Tests for `nagi mcp` CLI command."""
 
-    def test_mcp_default_readonly(self, mocker: MockerFixture) -> None:
+    @pytest.mark.parametrize(
+        ("args", "expected_allow_sync"),
+        [
+            pytest.param([], False, id="default-readonly"),
+            pytest.param(["--allow-sync"], True, id="allow-sync"),
+        ],
+    )
+    def test_allow_sync_option(
+        self,
+        mocker: MockerFixture,
+        args: list[str],
+        expected_allow_sync: bool,
+    ) -> None:
         mock_run = mocker.patch("nagi_cli.mcp.run_stdio")
-        from click.testing import CliRunner
-
-        from nagi_cli.commands.mcp import mcp
-
         runner = CliRunner()
-        runner.invoke(mcp, [])
-        mock_run.assert_called_once_with(allow_sync=False)
-
-    def test_mcp_allow_sync(self, mocker: MockerFixture) -> None:
-        mock_run = mocker.patch("nagi_cli.mcp.run_stdio")
-        from click.testing import CliRunner
-
-        from nagi_cli.commands.mcp import mcp
-
-        runner = CliRunner()
-        runner.invoke(mcp, ["--allow-sync"])
-        mock_run.assert_called_once_with(allow_sync=True)
+        runner.invoke(mcp, args)
+        mock_run.assert_called_once_with(allow_sync=expected_allow_sync)
