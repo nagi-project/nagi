@@ -202,5 +202,6 @@ class TestCompileFailure:
             ],
             cwd=project,
         )
-        assert output["nodes"] == 0  # type: ignore[index]
-        assert output["edges"] == 0  # type: ignore[index]
+        assert isinstance(output, dict)
+        assert output["nodes"] == 0
+        assert output["edges"] == 0

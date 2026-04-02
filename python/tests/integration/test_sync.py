@@ -46,8 +46,9 @@ class TestSyncDryRun:
             ],
             cwd=drifted_project,
         )
-        assert output["asset"] == "test-asset"  # type: ignore[index]
-        assert output["syncType"] == "sync"  # type: ignore[index]
+        assert isinstance(output, dict)
+        assert output["asset"] == "test-asset"
+        assert output["syncType"] == "sync"
 
 
 class TestSyncExecution:
