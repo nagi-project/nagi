@@ -25,7 +25,9 @@ spec:
 
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `run` | any | Yes | - | The main convergence step. |
+| `run.args` | list[string] | Yes | - | Command and arguments in argv format. |
+| `run.type` | StepType | Yes | - | Execution type for this step (currently only `Command`). |
+| `run.env` | map[string, string] | — | {} | Environment variables to set for the subprocess. |
 | `post` | SyncStep | — | - | Optional step executed after the main sync command. |
 | `pre` | SyncStep | — | - | Optional step executed before the main sync command. |
 
@@ -36,7 +38,7 @@ spec:
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `args` | list[string] | Yes | - | Command and arguments in argv format. |
-| `type` | any | Yes | - | Execution type for this step (currently only `Command`). |
+| `type` | StepType | Yes | - | Execution type for this step (currently only `Command`). |
 | `env` | map[string, string] | — | {} | Environment variables to set for the subprocess. |
 
 <!-- schema:auto-generated:end:SyncStep -->

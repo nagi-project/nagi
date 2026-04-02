@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "BackendConfig": {
       "properties": {
         "bucket": {
@@ -11,7 +10,7 @@
           ]
         },
         "prefix": {
-          "description": "Path prefix for remote storage (e.g. `my-project/nagi`). When set, all remote paths are prefixed with this value. Ignored for the local backend.",
+          "description": "Path prefix for remote storage (e.g. `my-project/nagi`). When set, all\nremote paths are prefixed with this value. Ignored for the local backend.",
           "type": [
             "string",
             "null"
@@ -49,19 +48,11 @@
           "type": "string"
         },
         "format": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExportFormat"
-            }
-          ],
+          "$ref": "#/$defs/ExportFormat",
           "description": "Intermediate file format for export."
         },
         "interval": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Duration"
-            }
-          ],
+          "$ref": "#/$defs/Duration",
           "default": "30m",
           "description": "Condition evaluation interval and export throttling threshold."
         }
@@ -80,12 +71,16 @@
       ],
       "type": "string"
     },
+    "NagiDir": {
+      "description": "Newtype wrapper around the Nagi state directory path.\nProvides accessors for all well-known subdirectories.\n\nDeserializes from a plain string path (e.g. `\"~/.nagi\"` in YAML).",
+      "type": "string"
+    },
     "NotifyConfig": {
       "properties": {
         "slack": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SlackConfig"
+              "$ref": "#/$defs/SlackConfig"
             },
             {
               "type": "null"
@@ -109,90 +104,83 @@
       "type": "object"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "backend": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/BackendConfig"
-        }
-      ],
+      "$ref": "#/$defs/BackendConfig",
       "description": "State storage backend configuration."
     },
     "export": {
       "anyOf": [
         {
-          "$ref": "#/definitions/ExportConfig"
+          "$ref": "#/$defs/ExportConfig"
         },
         {
           "type": "null"
         }
       ],
-      "description": "Log export configuration. When set, compile generates export Assets and logs are transferred to the remote data warehouse."
+      "description": "Log export configuration. When set, compile generates export Assets\nand logs are transferred to the remote data warehouse."
     },
     "lockRetryIntervalSeconds": {
       "default": 900,
       "description": "Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes).",
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "lockRetryMaxAttempts": {
       "default": 3,
       "description": "Maximum number of lock acquisition retry attempts before skipping. Defaults to 3.",
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "lockTtlSeconds": {
       "default": 3600,
-      "description": "Time-to-live in seconds for sync lock files. Locks expire after this duration, preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).",
+      "description": "Time-to-live in seconds for sync lock files. Locks expire after this duration,\npreventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).",
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "maxControllers": {
-      "description": "Maximum number of Controllers to run in parallel during `nagi serve`. When the number of connected components exceeds this limit, serve exits with an error. When omitted, one Controller is created per connected component.",
+      "description": "Maximum number of Controllers to run in parallel during `nagi serve`.\nWhen the number of connected components exceeds this limit, serve exits with an error.\nWhen omitted, one Controller is created per connected component.",
       "format": "uint",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": [
         "integer",
         "null"
       ]
     },
     "maxEvaluateConcurrency": {
-      "description": "Maximum number of concurrent evaluate tasks per Controller. When omitted, no limit is applied.",
+      "description": "Maximum number of concurrent evaluate tasks per Controller.\nWhen omitted, no limit is applied.",
       "format": "uint",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": [
         "integer",
         "null"
       ]
     },
     "maxSyncConcurrency": {
-      "description": "Maximum number of concurrent sync tasks per Controller. When omitted, no limit is applied.",
+      "description": "Maximum number of concurrent sync tasks per Controller.\nWhen omitted, no limit is applied.",
       "format": "uint",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": [
         "integer",
         "null"
       ]
     },
     "nagiDir": {
-      "description": "Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`.",
-      "type": "string"
+      "$ref": "#/$defs/NagiDir",
+      "description": "Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`."
     },
     "notify": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/NotifyConfig"
-        }
-      ],
+      "$ref": "#/$defs/NotifyConfig",
       "description": "Notification channel configuration."
     },
     "terminationGracePeriodSeconds": {
-      "description": "Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown. When omitted, waits indefinitely.",
+      "description": "Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown.\nWhen omitted, waits indefinitely.",
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": [
         "integer",
         "null"

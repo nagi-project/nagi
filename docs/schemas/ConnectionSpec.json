@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "DbtCloudSpec": {
       "description": "dbt Cloud configuration for pre-sync running-job checks.",
       "properties": {
@@ -15,6 +14,7 @@
       "type": "object"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Assets.",
   "oneOf": [
     {
@@ -23,7 +23,7 @@
         "dbtCloud": {
           "anyOf": [
             {
-              "$ref": "#/definitions/DbtCloudSpec"
+              "$ref": "#/$defs/DbtCloudSpec"
             },
             {
               "type": "null"
@@ -50,15 +50,13 @@
           ]
         },
         "type": {
-          "enum": [
-            "dbt"
-          ],
+          "const": "dbt",
           "type": "string"
         }
       },
       "required": [
-        "profile",
-        "type"
+        "type",
+        "profile"
       ],
       "type": "object"
     },
@@ -97,23 +95,21 @@
         "timeoutSeconds": {
           "description": "Query timeout in seconds.",
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
           ]
         },
         "type": {
-          "enum": [
-            "bigquery"
-          ],
+          "const": "bigquery",
           "type": "string"
         }
       },
       "required": [
-        "dataset",
+        "type",
         "project",
-        "type"
+        "dataset"
       ],
       "type": "object"
     },
@@ -125,15 +121,13 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "duckdb"
-          ],
+          "const": "duckdb",
           "type": "string"
         }
       },
       "required": [
-        "path",
-        "type"
+        "type",
+        "path"
       ],
       "type": "object"
     },
@@ -164,9 +158,7 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "snowflake"
-          ],
+          "const": "snowflake",
           "type": "string"
         },
         "user": {
@@ -179,13 +171,13 @@
         }
       },
       "required": [
-        "account",
-        "database",
-        "privateKeyPath",
-        "schema",
         "type",
+        "account",
         "user",
-        "warehouse"
+        "database",
+        "schema",
+        "warehouse",
+        "privateKeyPath"
       ],
       "type": "object"
     }

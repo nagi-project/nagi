@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "A single row in evaluate_logs.",
   "properties": {
     "assetName": {
@@ -40,15 +40,15 @@
     }
   },
   "required": [
-    "assetName",
-    "conditionName",
-    "conditionType",
-    "date",
-    "detail",
     "evaluationId",
+    "conditionName",
+    "assetName",
+    "conditionType",
+    "startedAt",
     "finishedAt",
     "result",
-    "startedAt"
+    "detail",
+    "date"
   ],
   "title": "EvaluateLogEntry",
   "type": "object"

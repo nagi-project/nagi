@@ -1,7 +1,7 @@
 use std::time::Duration as StdDuration;
 
-use schemars::gen::SchemaGenerator;
-use schemars::schema::{InstanceType, Schema, SchemaObject};
+use std::borrow::Cow;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -43,24 +43,16 @@ impl<'de> Deserialize<'de> for Duration {
 }
 
 impl JsonSchema for Duration {
-    fn schema_name() -> String {
-        "Duration".to_string()
+    fn schema_name() -> Cow<'static, str> {
+        "Duration".into()
     }
 
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            format: Some("duration".to_string()),
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                description: Some(
-                    "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\")."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "format": "duration",
+            "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\")."
+        })
     }
 }
 

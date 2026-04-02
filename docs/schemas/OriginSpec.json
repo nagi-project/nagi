@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "DefaultSync": {
       "description": "Override for the auto-generated Sync. Same interface as `onDrift` entries (sync name + with).",
       "properties": {
@@ -23,6 +22,7 @@
       "type": "object"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
   "oneOf": [
     {
@@ -42,7 +42,7 @@
         "defaultSync": {
           "anyOf": [
             {
-              "$ref": "#/definitions/DefaultSync"
+              "$ref": "#/$defs/DefaultSync"
             },
             {
               "type": "null"
@@ -56,16 +56,14 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "DBT"
-          ],
+          "const": "DBT",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "connection",
-        "projectDir",
-        "type"
+        "projectDir"
       ],
       "type": "object"
     }
