@@ -6,6 +6,12 @@
 pip install nagi-cli
 ```
 
+[MCP サーバー](../architecture/mcp.md)を使用する場合は、`mcp` extra を指定してインストールします。
+
+```bash
+pip install nagi-cli[mcp]
+```
+
 !!! tip
     セットアップなしですぐに試してみたい場合は [Quickstart](./quickstart.md) を参照してください。
 

@@ -6,6 +6,12 @@
 pip install nagi-cli
 ```
 
+To use the [MCP server](../architecture/mcp.md), install with the `mcp` extra:
+
+```bash
+pip install nagi-cli[mcp]
+```
+
 !!! tip
     If you want to try it out right away without setup, see [Quickstart](./quickstart.md).
 
