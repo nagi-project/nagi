@@ -3,4 +3,4 @@ select
     first_name,
     last_name,
     email
-from {{ source('raw', 'raw_customers') }}
+from {{ source('ecommerce', 'customers') }}

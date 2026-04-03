@@ -1,6 +1,6 @@
-integration_test:
+ecommerce:
   target: dev
   outputs:
     dev:
       type: duckdb
-      path: dev.duckdb
+      path: ../dev.duckdb

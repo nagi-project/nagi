@@ -14,19 +14,33 @@ spec:
   autoSync: false           # Optional. Propagates to all auto-generated Assets.
 ```
 
+## Asset Naming
+
+Origin-generated Asset names are prefixed with the Origin name: `{origin}.{model}`.
+
+For the example above (Origin name `my-dbt-project`):
+
+- dbt model `orders` → Asset `my-dbt-project.orders`
+- dbt source `raw.customers` → Asset `my-dbt-project.raw.customers`
+
+!!! tip
+    To reference an Origin-generated Asset in `upstreams`, use the `{Origin name}.{model name}` format.
+
 ## Auto-generated Sync
 
-`type: DBT` auto-generates a Sync resource named `nagi-dbt-run`:
+`type: DBT` auto-generates a Sync resource named `{origin}-dbt-run` (e.g. `my-dbt-project-dbt-run`):
 
 ```yaml
 kind: Sync
 metadata:
-  name: nagi-dbt-run
+  name: my-dbt-project-dbt-run
 spec:
   run:
     type: Command
-    args: ["dbt", "run", "--select", "{{ asset.name }}"]
+    args: ["dbt", "run", "--select", "{{ asset.modelName }}", "--project-dir", "../dbt-project", "--profile", "my_project", "--target", "dev"]
 ```
+
+The `--project-dir`, `--profile`, and `--target` values are resolved from the Origin's Connection at compile time. `{{ asset.modelName }}` is a [template variable](./index.md#template-variables) that is replaced at compile time with the dbt model name without the Origin prefix (e.g. `orders`).
 
 Assets for dbt models that have tests will have an `onDrift` entry referencing this Sync.
 
@@ -42,10 +56,10 @@ spec:
   defaultSync:
     sync: my-custom-sync
     with:
-      selector: "+{{ asset.name }}"
+      selector: "+{{ asset.modelName }}"
 ```
 
-When `defaultSync` is specified, the `nagi-dbt-run` Sync is not generated.
+When `defaultSync` is specified, the `{origin}-dbt-run` Sync is not generated.
 
 <!-- schema:auto-generated:start:OriginSpec -->
 
@@ -58,6 +72,6 @@ When `defaultSync` is specified, the `nagi-dbt-run` Sync is not generated.
 | `connection` | string | Yes | - | Connection resource name for auto-generated Assets. |
 | `projectDir` | string | Yes | - | Local path to the dbt project directory (relative or absolute). |
 | `autoSync` | boolean | — | - | Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`). |
-| `defaultSync` | DefaultSync | — | - | User-defined Sync to override the auto-generated `nagi-dbt-run`. |
+| `defaultSync` | DefaultSync | — | - | User-defined Sync to override the auto-generated `{origin}-dbt-run`. |
 
 <!-- schema:auto-generated:end:OriginSpec -->

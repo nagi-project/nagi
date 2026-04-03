@@ -179,7 +179,7 @@ By default, only read-only tools (`nagi_status`, `nagi_evaluate`) are exposed.
 
 | Syntax | Description |
 | --- | --- |
-| `name` | The specified Asset |
+| `name` | The specified Asset (e.g. `my-project.orders`) |
 | `+name` | The specified Asset and all upstream Assets |
 | `name+` | The specified Asset and all downstream Assets |
 | `+name+` | The specified Asset and all upstream and downstream Assets |

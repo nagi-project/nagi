@@ -50,5 +50,11 @@ milestones.md
 *.duckdb
 *.duckdb.wal
 
+# dbt test projects
+python/tests/dbt_projects/dev.duckdb
+python/tests/dbt_projects/*/target/
+python/tests/dbt_projects/*/logs/
+python/tests/dbt_projects/*/profiles/.user.yml
+
 # MkDocs build output
 site/

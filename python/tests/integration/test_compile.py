@@ -27,17 +27,32 @@ class TestCompileDbtOrigin:
 
         assets_dir = target / "assets"
         for name in [
-            "stg_customers",
-            "stg_orders",
-            "stg_products",
-            "customers",
-            "order_summary",
-            "product_summary",
-            "raw.raw_customers",
-            "raw.raw_orders",
-            "raw.raw_products",
+            "analytics.stg_customers",
+            "analytics.stg_orders",
+            "analytics.stg_products",
+            "analytics.customers",
+            "analytics.order_summary",
+            "analytics.product_summary",
+            "analytics.ecommerce.customers",
+            "analytics.ecommerce.orders",
+            "analytics.raw.raw_products",
         ]:
             assert (assets_dir / f"{name}.yaml").exists(), f"missing {name}.yaml"
+
+    def test_origin_prefixed_sync_and_model_name(self, compiled_project: Path) -> None:
+        import yaml
+
+        target = compiled_project / "target"
+        asset = yaml.safe_load(
+            (target / "assets" / "analytics.customers.yaml").read_text()
+        )
+        on_drift = asset["spec"]["onDrift"][0]
+        # Sync name is prefixed with Origin name
+        assert on_drift["syncRefName"] == "analytics-dbt-run"
+        # dbt run --select uses modelName (without Origin prefix)
+        sync_args = on_drift["sync"]["run"]["args"]
+        select_idx = sync_args.index("--select")
+        assert sync_args[select_idx + 1] == "customers"
 
     @pytest.mark.parametrize(
         ("kind", "expected_nonempty"),
@@ -156,12 +171,12 @@ class TestCompileOverlayMerge:
             "    type: Command\n"
             '    args: ["echo", "user-sync"]\n'
         )
-        # User-defined Asset overlays "customers" with beforeOrigin entry
+        # User-defined Asset overlays "analytics.customers" with beforeOrigin entry
         (resources_dir / "user-asset.yaml").write_text(
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Asset\n"
             "metadata:\n"
-            "  name: customers\n"
+            "  name: analytics.customers\n"
             "spec:\n"
             "  onDrift:\n"
             "    - conditions: user-freshness\n"
@@ -171,18 +186,101 @@ class TestCompileOverlayMerge:
 
         compile_project(nagi_project)
 
-        compiled = yaml.safe_load(
-            (nagi_project / "target" / "assets" / "customers.yaml").read_text()
-        )
+        path = nagi_project / "target" / "assets" / "analytics.customers.yaml"
+        compiled = yaml.safe_load(path.read_text())
         on_drift = compiled["spec"]["onDrift"]
         conditions_refs = [e["conditionsRef"] for e in on_drift]
 
         # beforeOrigin entry comes first, then Origin-generated
         assert conditions_refs[0] == "user-freshness"
-        assert "dbt-tests-customers" in conditions_refs
+        assert "dbt-tests-analytics.customers" in conditions_refs
         assert conditions_refs.index("user-freshness") < conditions_refs.index(
-            "dbt-tests-customers"
+            "dbt-tests-analytics.customers"
         )
+
+
+class TestCompileMultiOrigin:
+    """Compile with two dbt Origins verifies cross-project linking."""
+
+    def test_matched_source_assets_are_suppressed(
+        self, multi_origin_project: Path
+    ) -> None:
+        target = multi_origin_project / "target"
+        asset_files = [f.stem for f in (target / "assets").glob("*.yaml")]
+        assert "analytics.ecommerce.customers" not in asset_files
+        assert "analytics.ecommerce.orders" not in asset_files
+        assert "ecommerce.customers" in asset_files
+        assert "ecommerce.orders" in asset_files
+
+    def test_upstreams_rewired_to_upstream_model(
+        self, multi_origin_project: Path
+    ) -> None:
+        import yaml
+
+        target = multi_origin_project / "target"
+        stg_customers = yaml.safe_load(
+            (target / "assets" / "analytics.stg_customers.yaml").read_text()
+        )
+        upstreams = stg_customers["spec"]["upstreams"]
+        assert "ecommerce.customers" in upstreams
+        assert "analytics.ecommerce.customers" not in upstreams
+
+    def test_unmatched_source_preserved(self, multi_origin_project: Path) -> None:
+        target = multi_origin_project / "target"
+        assert (target / "assets" / "analytics.raw.raw_products.yaml").exists()
+
+    def test_graph_reflects_cross_project_edges(
+        self, multi_origin_project: Path
+    ) -> None:
+        target = multi_origin_project / "target"
+        graph = json.loads((target / "graph.json").read_text())
+        edges = graph["edges"]
+        has_cross_edge = any(
+            e["from"] == "ecommerce.customers" and e["to"] == "analytics.stg_customers"
+            for e in edges
+        )
+        assert has_cross_edge, (
+            f"Expected edge ecommerce.customers → analytics.stg_customers, got: {edges}"
+        )
+
+    def test_duplicate_relation_output_errors(
+        self,
+        dbt_ecommerce_ready: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> None:
+        """Two Origins outputting to the same Relation should cause a compile error."""
+        from tests.integration.helper import (
+            run_nagi,
+            write_nagi_project,
+            write_profiles,
+        )
+
+        tmp = tmp_path_factory.mktemp("dup")
+        profiles_dir = write_profiles(tmp / "profiles", {"ecommerce": "dev"})
+        # Register the same dbt project as two different Origins.
+        # Both will output to the same Relations.
+        project_dir = tmp / "project"
+        write_nagi_project(
+            project_dir,
+            [
+                ("origin-a", "ecommerce", dbt_ecommerce_ready, profiles_dir),
+                ("origin-b", "ecommerce", dbt_ecommerce_ready, profiles_dir),
+            ],
+        )
+        result = run_nagi(
+            [
+                "compile",
+                "--resources-dir",
+                str(project_dir / "resources"),
+                "--target-dir",
+                str(project_dir / "target"),
+                "--yes",
+            ],
+            cwd=project_dir,
+        )
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "multiple Origins" in output
 
 
 class TestCompileFailure:

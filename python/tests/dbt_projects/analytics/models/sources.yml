@@ -1,15 +1,18 @@
 version: 2
 
 sources:
-  - name: raw
-    schema: main
+  - name: ecommerce
+    schema: ecommerce
     tables:
-      - name: raw_customers
-      - name: raw_orders
+      - name: customers
+      - name: orders
         columns:
           - name: order_id
             tests:
               - not_null
+  - name: raw
+    schema: main
+    tables:
       - name: raw_products
         tags:
           - product

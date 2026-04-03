@@ -1,164 +1,108 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.integration.helper import run_nagi
+from tests.integration.helper import (
+    ANALYTICS_DIR,
+    ECOMMERCE_DIR,
+    SHARED_DB,
+    compile_nagi_project,
+    dbt_seed_and_run,
+    write_nagi_project,
+    write_profiles,
+)
 
-DBT_PROJECT_DIR = Path(__file__).parent.parent / "dbt_project"
+# ── dbt project fixtures ────────────────────────────────────────────────
 
 
 @pytest.fixture(scope="session")
-def dbt_project_ready() -> Path:
-    """Ensure dbt project has been seeded and compiled. Returns project path."""
-    assert DBT_PROJECT_DIR.exists(), f"dbt project not found: {DBT_PROJECT_DIR}"
-    subprocess.run(
-        ["uv", "run", "dbt", "seed", "--profiles-dir", "profiles"],
-        cwd=DBT_PROJECT_DIR,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["uv", "run", "dbt", "run", "--profiles-dir", "profiles"],
-        cwd=DBT_PROJECT_DIR,
-        check=True,
-        capture_output=True,
-    )
-    return DBT_PROJECT_DIR
+def dbt_ecommerce_ready() -> Path:
+    """Seed and run the ecommerce dbt project."""
+    assert ECOMMERCE_DIR.exists(), f"not found: {ECOMMERCE_DIR}"
+    dbt_seed_and_run(ECOMMERCE_DIR)
+    return ECOMMERCE_DIR
+
+
+@pytest.fixture(scope="session")
+def dbt_analytics_ready(dbt_ecommerce_ready: Path) -> Path:
+    """Seed and run the analytics dbt project.
+
+    Depends on ecommerce because analytics sources reference
+    tables produced by ecommerce in the shared DuckDB.
+    """
+    assert ANALYTICS_DIR.exists(), f"not found: {ANALYTICS_DIR}"
+    dbt_seed_and_run(ANALYTICS_DIR)
+    return ANALYTICS_DIR
+
+
+# ── nagi project fixtures ───────────────────────────────────────────────
 
 
 @pytest.fixture(scope="session")
 def compiled_project(
-    dbt_project_ready: Path, tmp_path_factory: pytest.TempPathFactory
+    dbt_analytics_ready: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> Path:
-    """Session-scoped compiled nagi project with dbt Origin.
-
-    Compile runs once. Tests share target/ (read-only) but use their own
-    cache_dir via test-level tmp_path.
-    """
+    """Session-scoped compiled nagi project with single Origin (analytics)."""
     tmp = tmp_path_factory.mktemp("compiled")
+    profiles_dir = write_profiles(tmp / "profiles", {"analytics": "dev"})
+
     project_dir = tmp / "project"
-    project_dir.mkdir()
-
-    resources_dir = project_dir / "resources"
-    resources_dir.mkdir()
-
-    nagi_dir = project_dir / ".nagi"
-    (project_dir / "nagi.yaml").write_text(
-        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
-    )
-
-    abs_duckdb_path = dbt_project_ready / "dev.duckdb"
-    profiles_dir = tmp / "profiles"
-    profiles_dir.mkdir()
-    (profiles_dir / "profiles.yml").write_text(
-        "integration_test:\n"
-        "  target: dev\n"
-        "  outputs:\n"
-        "    dev:\n"
-        "      type: duckdb\n"
-        f"      path: {abs_duckdb_path}\n"
-    )
-
-    (resources_dir / "connection.yaml").write_text(
-        "apiVersion: nagi.io/v1alpha1\n"
-        "kind: Connection\n"
-        "metadata:\n"
-        "  name: integration-test-dev\n"
-        "spec:\n"
-        "  type: dbt\n"
-        "  profile: integration_test\n"
-        "  target: dev\n"
-        f"  profilesDir: {profiles_dir}\n"
-    )
-    (resources_dir / "origin.yaml").write_text(
-        "apiVersion: nagi.io/v1alpha1\n"
-        "kind: Origin\n"
-        "metadata:\n"
-        "  name: integration-test\n"
-        "spec:\n"
-        "  type: DBT\n"
-        "  connection: integration-test-dev\n"
-        f"  projectDir: {dbt_project_ready}\n"
-    )
-
-    result = run_nagi(
+    write_nagi_project(
+        project_dir,
         [
-            "compile",
-            "--resources-dir",
-            str(resources_dir),
-            "--target-dir",
-            str(project_dir / "target"),
-            "--yes",
+            ("analytics", "analytics", dbt_analytics_ready, profiles_dir),
         ],
-        cwd=project_dir,
     )
-    assert result.returncode == 0, (
-        f"compile failed:\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    compile_nagi_project(project_dir)
     return project_dir
 
 
 @pytest.fixture()
-def nagi_project(dbt_project_ready: Path, tmp_path: Path) -> Path:
-    """Function-scoped nagi project (not compiled). For tests that need
-    to write additional resources before compiling."""
+def nagi_project(dbt_analytics_ready: Path, tmp_path: Path) -> Path:
+    """Function-scoped nagi project (not compiled)."""
+    profiles_dir = write_profiles(tmp_path / "profiles", {"analytics": "dev"})
+
     project_dir = tmp_path / "project"
-    project_dir.mkdir()
+    write_nagi_project(
+        project_dir,
+        [
+            ("analytics", "analytics", dbt_analytics_ready, profiles_dir),
+        ],
+    )
+    return project_dir
 
-    resources_dir = project_dir / "resources"
-    resources_dir.mkdir()
 
-    nagi_dir = project_dir / ".nagi"
-    (project_dir / "nagi.yaml").write_text(
-        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
+@pytest.fixture(scope="session")
+def multi_origin_project(
+    dbt_analytics_ready: Path,
+    dbt_ecommerce_ready: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """Session-scoped compiled nagi project with two Origins."""
+    tmp = tmp_path_factory.mktemp("multi")
+    profiles_dir = write_profiles(
+        tmp / "profiles", {"ecommerce": "dev", "analytics": "dev"}
     )
 
-    abs_duckdb_path = dbt_project_ready / "dev.duckdb"
-    profiles_dir = tmp_path / "profiles"
-    profiles_dir.mkdir()
-    (profiles_dir / "profiles.yml").write_text(
-        "integration_test:\n"
-        "  target: dev\n"
-        "  outputs:\n"
-        "    dev:\n"
-        "      type: duckdb\n"
-        f"      path: {abs_duckdb_path}\n"
+    project_dir = tmp / "project"
+    write_nagi_project(
+        project_dir,
+        [
+            ("ecommerce", "ecommerce", dbt_ecommerce_ready, profiles_dir),
+            ("analytics", "analytics", dbt_analytics_ready, profiles_dir),
+        ],
     )
-
-    (resources_dir / "connection.yaml").write_text(
-        "apiVersion: nagi.io/v1alpha1\n"
-        "kind: Connection\n"
-        "metadata:\n"
-        "  name: integration-test-dev\n"
-        "spec:\n"
-        "  type: dbt\n"
-        "  profile: integration_test\n"
-        "  target: dev\n"
-        f"  profilesDir: {profiles_dir}\n"
-    )
-    (resources_dir / "origin.yaml").write_text(
-        "apiVersion: nagi.io/v1alpha1\n"
-        "kind: Origin\n"
-        "metadata:\n"
-        "  name: integration-test\n"
-        "spec:\n"
-        "  type: DBT\n"
-        "  connection: integration-test-dev\n"
-        f"  projectDir: {dbt_project_ready}\n"
-    )
-
+    compile_nagi_project(project_dir)
     return project_dir
 
 
 @pytest.fixture()
-def duckdb_path(tmp_path: Path, dbt_project_ready: Path) -> Path:
-    """Return the path to the seeded DuckDB database (copied to tmp_path)."""
-    src = dbt_project_ready / "dev.duckdb"
+def duckdb_path(tmp_path: Path, dbt_analytics_ready: Path) -> Path:
+    """Copy the shared DuckDB to tmp_path for isolated test use."""
     dst = tmp_path / "test.duckdb"
-    if src.exists():
-        shutil.copy2(src, dst)
+    if SHARED_DB.exists():
+        shutil.copy2(SHARED_DB, dst)
     return dst

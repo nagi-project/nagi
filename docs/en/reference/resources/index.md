@@ -25,15 +25,35 @@ Each kind has a different role within the reconciliation loop.
 
 ## Template Variables
 
-The following template variables can be used within `args` of Sync and Conditions. Values specified in the Asset's `onDrift[].with` are expanded at compile time.
+The following template variables can be used within `args` of Sync and Conditions. They are expanded at compile time.
 
 | Variable | Description |
 | --- | --- |
-| `{{ asset.name }}` | Expands to the name of the Asset that references this Sync / Conditions |
-| `{{ sync.<key> }}` | Expands to the value specified in the Asset's `onDrift[].with` |
+| `{{ asset.name }}` | The Asset's `metadata.name`. For Origin-generated Assets this is prefixed with the Origin name (e.g. `my-project.orders`) |
+| `{{ asset.modelName }}` | The original model name without the Origin prefix (e.g. `orders`). For user-defined Assets, same as `{{ asset.name }}`. Use this for external tool arguments such as `dbt run --select` |
+| `{{ sync.<key> }}` | The value of `<key>` from the Asset's `onDrift[].with` map. For example, `{{ sync.selector }}` expands to the value of `with.selector` |
+
+### `{{ asset.name }}` and `{{ asset.modelName }}`
+
+These variables are always available and do not require `with`.
 
 ```yaml
-# Sync definition
+kind: Sync
+metadata:
+  name: my-sync
+spec:
+  run:
+    type: Command
+    args: ["echo", "{{ asset.name }}"]
+    # For Origin "my-project", model "orders": expands to "my-project.orders"
+```
+
+### `{{ sync.<key> }}`
+
+The Asset's `onDrift[].with` passes key-value pairs to the Sync. Each key becomes a `{{ sync.<key> }}` variable.
+
+```yaml
+# Sync definition: uses {{ sync.selector }} as a placeholder
 kind: Sync
 metadata:
   name: dbt-default
@@ -44,7 +64,7 @@ spec:
 ```
 
 ```yaml
-# Specifying with on the Asset side
+# Asset passes the value via with
 onDrift:
   - conditions: daily-sla
     sync: dbt-default
@@ -52,4 +72,4 @@ onDrift:
       selector: "+daily_sales"   # {{ sync.selector }} expands to "+daily_sales"
 ```
 
-When `with` is omitted, `{{ asset.name }}` is automatically expanded, but `{{ sync.<key> }}` remains unexpanded.
+When `with` is omitted, `{{ asset.name }}` and `{{ asset.modelName }}` are still expanded, but `{{ sync.<key> }}` remains unexpanded.

@@ -48,9 +48,16 @@ run = "cargo llvm-cov --no-default-features"
 description = "Check dependencies for known vulnerabilities (requires cargo-audit)"
 run = "cargo audit"
 
+[tasks."test:dbt-setup"]
+description = "Seed and compile dbt projects for integration tests"
+run = """
+cd python/tests/dbt_projects/ecommerce && uv run dbt seed --profiles-dir profiles && uv run dbt compile --profiles-dir profiles
+cd python/tests/dbt_projects/analytics && uv run dbt seed --profiles-dir profiles && uv run dbt compile --profiles-dir profiles
+"""
+
 [tasks."test:integration"]
-description = "Run integration tests (requires dbt:setup)"
-depends = ["build", "dbt:setup"]
+description = "Run integration tests"
+depends = ["build", "test:dbt-setup"]
 run = "uv run pytest python/tests/integration/ -v -m integration"
 
 [tasks."test:scenario"]
@@ -64,14 +71,6 @@ run = """
 cargo run -p nagi-schema-gen
 uv run python scripts/gen_schema_docs.py docs/schemas docs/en
 uv run python scripts/gen_schema_docs.py docs/schemas docs/ja
-"""
-
-[tasks."dbt:setup"]
-description = "Initialize the integration test dbt project"
-dir = "python/tests/dbt_project"
-run = """
-uv run dbt seed --profiles-dir profiles
-uv run dbt compile --profiles-dir profiles
 """
 
 [tasks."docs:build"]

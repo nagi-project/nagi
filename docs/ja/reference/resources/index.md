@@ -25,15 +25,35 @@ kind ごとに reconciliation loop の中での役割が異なります。
 
 ## Template Variables
 
-Sync と Conditions の `args` 内で以下のテンプレート変数を使用できます。Asset の `onDrift[].with` で指定した値が compile 時に展開されます。
+Sync と Conditions の `args` 内で以下のテンプレート変数を使用できます。compile 時に展開されます。
 
 | Variable | Description |
 | --- | --- |
-| `{{ asset.name }}` | この Sync / Conditions を参照する Asset の名前に展開される |
-| `{{ sync.<key> }}` | Asset の `onDrift[].with` で指定した値に展開される |
+| `{{ asset.name }}` | Asset の `metadata.name`。Origin 生成の Asset では Origin 名がプレフィックスとして付与される（例: `my-project.orders`） |
+| `{{ asset.modelName }}` | Origin プレフィックスなしの元のモデル名（例: `orders`）。ユーザー定義の Asset では `{{ asset.name }}` と同じ値。`dbt run --select` など外部ツールへの引数に使用する |
+| `{{ sync.<key> }}` | Asset の `onDrift[].with` で指定した `<key>` の値。例えば `{{ sync.selector }}` は `with.selector` の値に展開される |
+
+### `{{ asset.name }}` and `{{ asset.modelName }}`
+
+これらの変数は常に利用可能で、`with` の指定は不要です。
 
 ```yaml
-# Sync 定義
+kind: Sync
+metadata:
+  name: my-sync
+spec:
+  run:
+    type: Command
+    args: ["echo", "{{ asset.name }}"]
+    # Origin 名 my-project, model 名 orders の場合 "my-project.orders" に展開
+```
+
+### `{{ sync.<key> }}`
+
+Asset の `onDrift[].with` でキーと値のペアを Sync に渡します。各キーが `{{ sync.<key> }}` 変数になります。
+
+```yaml
+# Sync 定義: {{ sync.selector }} をプレースホルダーとして使用
 kind: Sync
 metadata:
   name: dbt-default
@@ -44,7 +64,7 @@ spec:
 ```
 
 ```yaml
-# Asset 側で with を指定
+# Asset 側で with を使って値を渡す
 onDrift:
   - conditions: daily-sla
     sync: dbt-default
@@ -52,4 +72,4 @@ onDrift:
       selector: "+daily_sales"   # {{ sync.selector }} が "+daily_sales" に展開される
 ```
 
-`with` を省略した場合、`{{ asset.name }}` は自動で展開されますが、`{{ sync.<key> }}` は展開されずそのまま残ります。
+`with` を省略した場合、`{{ asset.name }}` と `{{ asset.modelName }}` は展開されますが、`{{ sync.<key> }}` は展開されずそのまま残ります。

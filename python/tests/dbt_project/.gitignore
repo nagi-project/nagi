@@ -1,5 +1,0 @@
-target/
-*.duckdb
-*.duckdb.wal
-logs/
-profiles/.user.yml

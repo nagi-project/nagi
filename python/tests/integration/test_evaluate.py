@@ -24,8 +24,10 @@ class TestEvaluateDbtOrigin:
     @pytest.mark.parametrize(
         ("selector", "expected_asset"),
         [
-            pytest.param("customers", "customers", id="single-asset"),
-            pytest.param("tag:finance", "order_summary", id="tag-selector"),
+            pytest.param(
+                "analytics.customers", "analytics.customers", id="single-asset"
+            ),
+            pytest.param("tag:finance", "analytics.order_summary", id="tag-selector"),
         ],
     )
     def test_evaluate_select(
@@ -45,20 +47,20 @@ class TestEvaluateDbtOrigin:
         ("selector", "must_include", "must_exclude"),
         [
             pytest.param(
-                "1+customers",
-                ["customers", "stg_customers"],
+                "1+analytics.customers",
+                ["analytics.customers", "analytics.stg_customers"],
                 [],
                 id="upstream-1",
             ),
             pytest.param(
-                "stg_customers+",
-                ["stg_customers", "customers"],
+                "analytics.stg_customers+",
+                ["analytics.stg_customers", "analytics.customers"],
                 [],
                 id="downstream",
             ),
             pytest.param(
-                "+stg_customers+",
-                ["stg_customers", "customers"],
+                "+analytics.stg_customers+",
+                ["analytics.stg_customers", "analytics.customers"],
                 [],
                 id="both-directions",
             ),
@@ -111,7 +113,7 @@ class TestEvaluateDbtOrigin:
     ) -> None:
         output = evaluate_project(
             compiled_project,
-            select="stg_customers",
+            select="analytics.stg_customers",
             cache_dir=tmp_path / "cache",
         )
         assert len(output) == 1

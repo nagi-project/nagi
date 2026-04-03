@@ -289,6 +289,7 @@ spec: {{}}
                 on_drift: vec![],
                 auto_sync: true,
                 evaluate_cache_ttl: None,
+                model_name: None,
             },
         };
         let err = resource.validate().unwrap_err();
@@ -311,6 +312,7 @@ spec: {{}}
                     on_drift: vec![],
                     auto_sync: true,
                     evaluate_cache_ttl: None,
+                    model_name: None,
                 },
             };
             let err = resource.validate().unwrap_err();

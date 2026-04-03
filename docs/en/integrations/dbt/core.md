@@ -43,7 +43,11 @@ The Origin's `projectDir` is used as the `--project-dir` option.
 
 ## Compile
 
-Running [`nagi compile`](../../reference/cli.md#compile) causes Origin to read the dbt project and generate Asset / Conditions / Sync in `target/`. For resource generation mapping and merge behavior, see [Resource Generation](./resource-generation.md).
+Running [`nagi compile`](../../reference/cli.md#compile) reads the dbt project based on the Origin definition and generates Asset / Conditions / Sync in `target/`.
+
+Asset names follow the pattern `{Origin name}.{model name}`.
+
+For resource generation mapping and merge behavior, see [Resource Generation](./resource-generation.md).
 
 ## Evaluate
 
@@ -59,3 +63,7 @@ Executes dbt CLI as a subprocess (e.g., `dbt run --select daily_sales`).
 ## Customization
 
 If you define an Asset with the same name as an Origin-generated Asset in `resources/`, the `onDrift` lists are concatenated. For merge rules and examples, see [Resource Generation - Merge with User-defined Resources](./resource-generation.md#merge-with-user-defined-resources).
+
+## Multi Projects
+
+When multiple dbt projects are configured as Origins, Nagi automatically maps dependencies between projects. Mapping is based on dbt Relations (`database.schema.identifier`).

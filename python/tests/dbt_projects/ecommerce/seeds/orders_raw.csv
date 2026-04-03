@@ -1,0 +1,5 @@
+order_id,customer_id,amount,status,ordered_at
+101,1,1200,completed,2025-01-15
+102,2,800,completed,2025-01-16
+103,1,450,pending,2025-01-17
+104,3,2100,completed,2025-01-18

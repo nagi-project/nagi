@@ -1,7 +1,7 @@
-name: integration_test
+name: analytics
 version: '1.0.0'
 
-profile: integration_test
+profile: analytics
 
 model-paths: ["models"]
 seed-paths: ["seeds"]

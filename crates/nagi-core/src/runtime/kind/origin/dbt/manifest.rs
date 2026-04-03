@@ -18,17 +18,32 @@ pub struct DbtManifest {
 
 #[derive(Debug, Deserialize)]
 pub struct DbtNode {
+    /// e.g. `model.my_project.orders` or `test.my_project.not_null_orders_id`.
     pub unique_id: String,
+    /// `model`, `test`, `seed`, `snapshot`, etc.
     pub resource_type: String,
+    /// Node name without package prefix (e.g. `orders`).
     pub name: String,
     #[serde(rename = "package_name")]
     pub _package_name: String,
+    /// dbt tags defined on this node.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Nodes this node depends on (upstream references).
     #[serde(default)]
     pub depends_on: DbtDependsOn,
+    /// Present when the node is a generic test (not_null, unique, etc.).
     #[serde(default)]
     pub test_metadata: Option<DbtTestMetadata>,
+    /// Output database for the model. Used for cross-project resolution.
+    #[serde(default)]
+    pub database: Option<String>,
+    /// Output schema for the model. Used for cross-project resolution.
+    #[serde(default)]
+    pub schema: Option<String>,
+    /// Output table name override. Falls back to `name` when absent.
+    #[serde(default)]
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -52,13 +67,33 @@ pub struct DbtSource {
     pub source_name: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Referenced database.
+    #[serde(default)]
+    pub database: Option<String>,
+    /// Referenced schema.
+    #[serde(default)]
+    pub schema: Option<String>,
+    /// Referenced table name override. Falls back to `name` when absent.
+    #[serde(default)]
+    pub identifier: Option<String>,
+}
+
+/// Connection-resolved dbt CLI context passed to `manifest_to_resources`.
+#[derive(Default)]
+pub struct DbtCliContext<'a> {
+    pub profiles_dir: Option<&'a str>,
+    pub profile: Option<&'a str>,
+    pub target: Option<&'a str>,
 }
 
 /// Converts a parsed dbt manifest into Nagi resources.
+///
+/// Asset names are prefixed with the Origin name: `{origin_name}.{model_name}`.
 pub fn manifest_to_resources(
     manifest: &DbtManifest,
     origin: &OriginSpec,
-    profiles_dir: Option<&str>,
+    origin_name: &str,
+    cli_ctx: &DbtCliContext<'_>,
 ) -> Vec<NagiKind> {
     let OriginSpec::Dbt {
         connection,
@@ -68,15 +103,24 @@ pub fn manifest_to_resources(
         ..
     } = origin;
 
-    // Build extra args for dbt commands (--project-dir, --profiles-dir).
+    // Build extra args for dbt commands (--project-dir, --profiles-dir, --profile, --target).
     let mut dbt_extra_args: Vec<String> = vec!["--project-dir".to_string(), project_dir.clone()];
-    if let Some(d) = profiles_dir {
+    if let Some(d) = cli_ctx.profiles_dir {
         dbt_extra_args.push("--profiles-dir".to_string());
         dbt_extra_args.push(d.to_string());
     }
+    if let Some(p) = cli_ctx.profile {
+        dbt_extra_args.push("--profile".to_string());
+        dbt_extra_args.push(p.to_string());
+    }
+    if let Some(t) = cli_ctx.target {
+        dbt_extra_args.push("--target".to_string());
+        dbt_extra_args.push(t.to_string());
+    }
 
-    let (dbt_source_map, dbt_source_names, dbt_source_tags) = collect_dbt_source_names(manifest);
-    let (model_names, model_nodes) = collect_models(manifest);
+    let (dbt_source_map, dbt_source_names, dbt_source_tags) =
+        collect_dbt_source_names(manifest, origin_name);
+    let (model_names, model_nodes) = collect_models(manifest, origin_name);
     let dbt_source_tests = collect_tests(manifest, &dbt_source_map);
     let model_tests = collect_tests(manifest, &model_names);
 
@@ -97,13 +141,14 @@ pub fn manifest_to_resources(
         resources.push(make_skip_sync());
     }
 
-    // When defaultSync is not set, auto-generate the nagi-dbt-run Sync.
+    // When defaultSync is not set, auto-generate the {origin}-dbt-run Sync.
+    let run_sync_name = format!("{origin_name}-dbt-run");
     let effective_sync = match default_sync {
         Some(ds) => ds.clone(),
         None => {
-            resources.push(make_dbt_run_sync_with_args(&dbt_extra_args));
+            resources.push(make_dbt_run_sync(&run_sync_name, &dbt_extra_args));
             DefaultSync {
-                sync: DBT_RUN_SYNC_NAME.to_string(),
+                sync: run_sync_name,
                 with: HashMap::new(),
             }
         }
@@ -127,23 +172,21 @@ pub fn manifest_to_resources(
 }
 
 const SKIP_SYNC_NAME: &str = "nagi-skip-sync";
-const DBT_RUN_SYNC_NAME: &str = "nagi-dbt-run";
-
 // ── Auto-generated Sync resources ─────────────────────────────────────
 
-/// Generates the `nagi-dbt-run` Sync resource: `dbt run --select {{ asset.name }}`.
-fn make_dbt_run_sync_with_args(dbt_extra_args: &[String]) -> NagiKind {
+/// Generates the `{origin}-dbt-run` Sync resource: `dbt run --select {{ asset.modelName }}`.
+fn make_dbt_run_sync(name: &str, dbt_extra_args: &[String]) -> NagiKind {
     let mut args = vec![
         "dbt".to_string(),
         "run".to_string(),
         "--select".to_string(),
-        "{{ asset.name }}".to_string(),
+        "{{ asset.modelName }}".to_string(),
     ];
     args.extend_from_slice(dbt_extra_args);
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
         metadata: Metadata {
-            name: DBT_RUN_SYNC_NAME.to_string(),
+            name: name.to_string(),
         },
         spec: SyncSpec {
             pre: None,
@@ -233,6 +276,7 @@ fn build_dbt_source_assets(
                 on_drift,
                 auto_sync: ctx.auto_sync,
                 evaluate_cache_ttl: None,
+                model_name: None,
             },
         });
     }
@@ -259,11 +303,15 @@ fn build_dbt_model_assets(
     let mut resources: Vec<NagiKind> = Vec::new();
 
     for model in model_nodes {
+        let prefixed_name = model_names
+            .get(&model.unique_id)
+            .map(|s| s.as_str())
+            .unwrap_or(&model.name);
         let upstreams = resolve_upstreams(&model.depends_on.nodes, dbt_source_map, model_names);
 
         let (on_drift, conditions_resource) = build_on_drift(
             model_tests.get(&model.unique_id),
-            &model.name,
+            prefixed_name,
             default_sync,
             ctx.dbt_extra_args,
         );
@@ -275,7 +323,7 @@ fn build_dbt_model_assets(
         resources.push(NagiKind::Asset {
             api_version: API_VERSION.to_string(),
             metadata: Metadata {
-                name: model.name.clone(),
+                name: prefixed_name.to_string(),
             },
             spec: AssetSpec {
                 tags: model.tags.clone(),
@@ -284,6 +332,7 @@ fn build_dbt_model_assets(
                 on_drift,
                 auto_sync: ctx.auto_sync,
                 evaluate_cache_ttl: None,
+                model_name: Some(model.name.clone()),
             },
         });
     }
@@ -296,6 +345,7 @@ fn build_dbt_model_assets(
 #[allow(clippy::type_complexity)]
 fn collect_dbt_source_names(
     manifest: &DbtManifest,
+    origin_name: &str,
 ) -> (
     HashMap<String, String>,
     Vec<String>,
@@ -307,7 +357,7 @@ fn collect_dbt_source_names(
     let mut name_to_tags: HashMap<String, Vec<String>> = HashMap::new();
 
     for dbt_src in manifest.sources.values() {
-        let nagi_name = format!("{}.{}", dbt_src.source_name, dbt_src.name);
+        let nagi_name = format!("{origin_name}.{}.{}", dbt_src.source_name, dbt_src.name);
         id_to_name.insert(dbt_src.unique_id.clone(), nagi_name.clone());
         name_to_tags.insert(nagi_name.clone(), dbt_src.tags.clone());
         if seen.insert(nagi_name.clone()) {
@@ -319,12 +369,18 @@ fn collect_dbt_source_names(
 }
 
 /// Extracts model nodes sorted by name and builds a unique_id → name lookup.
-fn collect_models(manifest: &DbtManifest) -> (HashMap<String, String>, Vec<&DbtNode>) {
+fn collect_models<'a>(
+    manifest: &'a DbtManifest,
+    origin_name: &str,
+) -> (HashMap<String, String>, Vec<&'a DbtNode>) {
     let mut model_names: HashMap<String, String> = HashMap::new();
     let mut model_nodes: Vec<&DbtNode> = Vec::new();
     for node in manifest.nodes.values() {
         if node.resource_type == "model" {
-            model_names.insert(node.unique_id.clone(), node.name.clone());
+            model_names.insert(
+                node.unique_id.clone(),
+                format!("{origin_name}.{}", node.name),
+            );
             model_nodes.push(node);
         }
     }
@@ -431,6 +487,8 @@ fn tests_to_conditions(tests: &[&DbtNode], dbt_extra_args: &[String]) -> Vec<Des
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ORIGIN_NAME: &str = "jaffle";
 
     /// A simplified jaffle_shop manifest for testing.
     fn jaffle_shop_manifest_json() -> &'static str {
@@ -603,29 +661,88 @@ mod tests {
     #[test]
     fn manifest_to_resources_generates_assets_for_sources_and_models() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         let assets: Vec<_> = resources.iter().filter(|r| r.kind() == "Asset").collect();
         // 2 dbt source Assets + 4 model Assets
         assert_eq!(assets.len(), 6);
 
         let asset_names: HashSet<_> = assets.iter().map(|a| a.metadata().name.as_str()).collect();
-        assert!(asset_names.contains("raw.customers"));
-        assert!(asset_names.contains("raw.orders"));
-        assert!(asset_names.contains("customers"));
-        assert!(asset_names.contains("orders"));
-        assert!(asset_names.contains("stg_customers"));
-        assert!(asset_names.contains("stg_orders"));
+        assert!(asset_names.contains("jaffle.raw.customers"));
+        assert!(asset_names.contains("jaffle.raw.orders"));
+        assert!(asset_names.contains("jaffle.customers"));
+        assert!(asset_names.contains("jaffle.orders"));
+        assert!(asset_names.contains("jaffle.stg_customers"));
+        assert!(asset_names.contains("jaffle.stg_orders"));
+    }
+
+    #[test]
+    fn manifest_to_resources_sets_model_name_on_model_assets() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
+
+        let orders = resources
+            .iter()
+            .find(|r| r.metadata().name == "jaffle.orders")
+            .unwrap();
+        if let NagiKind::Asset { spec, .. } = orders {
+            assert_eq!(
+                spec.model_name.as_deref(),
+                Some("orders"),
+                "model Asset should have model_name set to the original dbt model name"
+            );
+        } else {
+            panic!("expected Asset");
+        }
+    }
+
+    #[test]
+    fn manifest_to_resources_source_assets_have_no_model_name() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
+
+        let raw_customers = resources
+            .iter()
+            .find(|r| r.metadata().name == "jaffle.raw.customers")
+            .unwrap();
+        if let NagiKind::Asset { spec, .. } = raw_customers {
+            assert!(
+                spec.model_name.is_none(),
+                "source Assets should not have model_name set"
+            );
+        } else {
+            panic!("expected Asset");
+        }
     }
 
     #[test]
     fn manifest_to_resources_maps_tags() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         let orders = resources
             .iter()
-            .find(|r| r.metadata().name == "orders")
+            .find(|r| r.metadata().name == "jaffle.orders")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = orders {
             assert!(spec.tags.contains(&"finance".to_string()));
@@ -638,11 +755,16 @@ mod tests {
     #[test]
     fn manifest_to_resources_maps_dbt_source_tags() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         let raw_orders = resources
             .iter()
-            .find(|r| r.metadata().name == "raw.orders")
+            .find(|r| r.metadata().name == "jaffle.raw.orders")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = raw_orders {
             assert_eq!(spec.tags, vec!["external"]);
@@ -652,7 +774,7 @@ mod tests {
 
         let raw_customers = resources
             .iter()
-            .find(|r| r.metadata().name == "raw.customers")
+            .find(|r| r.metadata().name == "jaffle.raw.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = raw_customers {
             assert!(spec.tags.is_empty());
@@ -664,15 +786,20 @@ mod tests {
     #[test]
     fn manifest_to_resources_resolves_upstreams() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         // stg_customers depends on raw.customers
         let stg_customers = resources
             .iter()
-            .find(|r| r.metadata().name == "stg_customers")
+            .find(|r| r.metadata().name == "jaffle.stg_customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = stg_customers {
-            assert_eq!(spec.upstreams, vec!["raw.customers"]);
+            assert_eq!(spec.upstreams, vec!["jaffle.raw.customers"]);
         } else {
             panic!("stg_customers should be an Asset");
         }
@@ -680,11 +807,11 @@ mod tests {
         // customers depends on model stg_customers and stg_orders
         let customers = resources
             .iter()
-            .find(|r| r.metadata().name == "customers")
+            .find(|r| r.metadata().name == "jaffle.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
-            assert!(spec.upstreams.contains(&"stg_customers".to_string()));
-            assert!(spec.upstreams.contains(&"stg_orders".to_string()));
+            assert!(spec.upstreams.contains(&"jaffle.stg_customers".to_string()));
+            assert!(spec.upstreams.contains(&"jaffle.stg_orders".to_string()));
         } else {
             panic!("customers should be an Asset");
         }
@@ -693,16 +820,21 @@ mod tests {
     #[test]
     fn manifest_to_resources_applies_default_sync_via_on_drift() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         let customers = resources
             .iter()
-            .find(|r| r.metadata().name == "customers")
+            .find(|r| r.metadata().name == "jaffle.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
             assert_eq!(spec.on_drift.len(), 1);
             assert_eq!(spec.on_drift[0].sync, "dbt-default");
-            assert_eq!(spec.on_drift[0].conditions, "dbt-tests-customers");
+            assert_eq!(spec.on_drift[0].conditions, "dbt-tests-jaffle.customers");
         } else {
             panic!("customers should be an Asset");
         }
@@ -711,12 +843,17 @@ mod tests {
     #[test]
     fn manifest_to_resources_applies_dbt_source_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         // raw.orders has a not_null test → should have on_drift with nagi-skip-sync
         let raw_orders = resources
             .iter()
-            .find(|r| r.metadata().name == "raw.orders")
+            .find(|r| r.metadata().name == "jaffle.raw.orders")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = raw_orders {
             assert_eq!(spec.on_drift.len(), 1);
@@ -729,7 +866,7 @@ mod tests {
         // raw.customers has no tests → on_drift should be empty
         let raw_customers = resources
             .iter()
-            .find(|r| r.metadata().name == "raw.customers")
+            .find(|r| r.metadata().name == "jaffle.raw.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = raw_customers {
             assert!(spec.on_drift.is_empty());
@@ -747,11 +884,16 @@ mod tests {
     #[test]
     fn manifest_to_resources_generates_conditions_for_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         let group = resources
             .iter()
-            .find(|r| r.metadata().name == "dbt-tests-customers")
+            .find(|r| r.metadata().name == "dbt-tests-jaffle.customers")
             .unwrap();
         if let NagiKind::Conditions { spec, .. } = group {
             let has_not_null = spec.0.iter().any(|c| {
@@ -777,11 +919,16 @@ mod tests {
     #[test]
     fn manifest_to_resources_maps_generic_test_as_command() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         let group = resources
             .iter()
-            .find(|r| r.metadata().name == "dbt-tests-orders")
+            .find(|r| r.metadata().name == "dbt-tests-jaffle.orders")
             .unwrap();
         if let NagiKind::Conditions { spec, .. } = group {
             let has_command = spec.0.iter().any(|c| {
@@ -806,66 +953,133 @@ mod tests {
             default_sync: None,
             auto_sync: None,
         };
-        let resources = manifest_to_resources(&manifest, &origin, None);
+        let resources =
+            manifest_to_resources(&manifest, &origin, ORIGIN_NAME, &DbtCliContext::default());
 
-        // Auto-generated nagi-dbt-run Sync should be present
+        // Auto-generated {origin}-dbt-run Sync should be present
         let dbt_run_sync = resources
             .iter()
-            .find(|r| r.metadata().name == "nagi-dbt-run");
+            .find(|r| r.metadata().name == "jaffle-dbt-run");
         assert!(
             dbt_run_sync.is_some(),
-            "nagi-dbt-run Sync should be auto-generated"
+            "jaffle-dbt-run Sync should be auto-generated"
         );
         if let Some(NagiKind::Sync { spec, .. }) = dbt_run_sync {
-            assert!(spec.run.args.len() >= 4);
             assert_eq!(
-                &spec.run.args[..4],
-                &["dbt", "run", "--select", "{{ asset.name }}"]
+                spec.run.args,
+                &[
+                    "dbt",
+                    "run",
+                    "--select",
+                    "{{ asset.modelName }}",
+                    "--project-dir",
+                    "../dbt-project",
+                ]
             );
         }
 
-        // Model Assets with tests should reference nagi-dbt-run
+        // Model Assets with tests should reference {origin}-dbt-run
         let customers = resources
             .iter()
-            .find(|r| r.metadata().name == "customers")
+            .find(|r| r.metadata().name == "jaffle.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
             assert_eq!(spec.on_drift.len(), 1);
-            assert_eq!(spec.on_drift[0].sync, "nagi-dbt-run");
+            assert_eq!(spec.on_drift[0].sync, "jaffle-dbt-run");
         } else {
             panic!("customers should be an Asset");
         }
     }
 
     #[test]
-    fn manifest_to_resources_default_sync_suppresses_auto_generation() {
+    fn manifest_to_resources_sync_includes_profile_and_target() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let origin = OriginSpec::Dbt {
+            connection: "my-bq".to_string(),
+            project_dir: "../dbt-project".to_string(),
+            default_sync: None,
+            auto_sync: None,
+        };
+        let cli_ctx = DbtCliContext {
+            profiles_dir: Some("/path/to/profiles"),
+            profile: Some("my_project"),
+            target: Some("prod"),
+        };
+        let resources = manifest_to_resources(&manifest, &origin, ORIGIN_NAME, &cli_ctx);
 
         let dbt_run_sync = resources
             .iter()
-            .any(|r| r.metadata().name == "nagi-dbt-run");
+            .find(|r| r.metadata().name == "jaffle-dbt-run")
+            .unwrap();
+        if let NagiKind::Sync { spec, .. } = dbt_run_sync {
+            assert_eq!(
+                spec.run.args,
+                &[
+                    "dbt",
+                    "run",
+                    "--select",
+                    "{{ asset.modelName }}",
+                    "--project-dir",
+                    "../dbt-project",
+                    "--profiles-dir",
+                    "/path/to/profiles",
+                    "--profile",
+                    "my_project",
+                    "--target",
+                    "prod",
+                ]
+            );
+        } else {
+            panic!("expected Sync");
+        }
+    }
+
+    #[test]
+    fn manifest_to_resources_default_sync_suppresses_auto_generation() {
+        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
+
+        let dbt_run_sync = resources
+            .iter()
+            .any(|r| r.metadata().name == "jaffle-dbt-run");
         assert!(
             !dbt_run_sync,
-            "nagi-dbt-run should not be generated when defaultSync is set"
+            "jaffle-dbt-run should not be generated when defaultSync is set"
         );
     }
 
     #[test]
     fn manifest_to_resources_ignores_seeds() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
-        let has_seed = resources
-            .iter()
-            .any(|r| r.metadata().name == "raw_customers" && r.kind() == "Asset");
+        let has_seed = resources.iter().any(|r| {
+            r.kind() == "Asset"
+                && (r.metadata().name == "raw_customers"
+                    || r.metadata().name == "jaffle.raw_customers")
+        });
         assert!(!has_seed, "seeds should not be converted to Assets");
     }
 
     #[test]
     fn manifest_to_resources_sets_connection_on_all_assets() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(&manifest, &jaffle_shop_origin(), None);
+        let resources = manifest_to_resources(
+            &manifest,
+            &jaffle_shop_origin(),
+            ORIGIN_NAME,
+            &DbtCliContext::default(),
+        );
 
         for r in &resources {
             if let NagiKind::Asset { spec, .. } = r {
@@ -877,33 +1091,40 @@ mod tests {
     #[test]
     fn collect_dbt_source_names_deduplicates() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (id_to_name, names, _dbt_source_tags) = collect_dbt_source_names(&manifest);
+        let (id_to_name, names, _dbt_source_tags) =
+            collect_dbt_source_names(&manifest, ORIGIN_NAME);
 
         assert_eq!(id_to_name.len(), 2);
         assert_eq!(names.len(), 2);
         assert_eq!(
             id_to_name.get("source.jaffle_shop.raw.customers").unwrap(),
-            "raw.customers"
+            "jaffle.raw.customers"
         );
     }
 
     #[test]
     fn collect_models_sorted_by_name() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (model_names, model_nodes) = collect_models(&manifest);
+        let (model_names, model_nodes) = collect_models(&manifest, ORIGIN_NAME);
 
         assert_eq!(model_names.len(), 4);
+        // model_nodes are sorted by raw name; Origin-prefixed names are in model_names map
         let names: Vec<&str> = model_nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(
             names,
             vec!["customers", "orders", "stg_customers", "stg_orders"]
+        );
+        // model_names values are Origin-prefixed
+        assert_eq!(
+            model_names.get("model.jaffle_shop.customers").unwrap(),
+            "jaffle.customers"
         );
     }
 
     #[test]
     fn collect_tests_groups_by_model() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (model_names, _) = collect_models(&manifest);
+        let (model_names, _) = collect_models(&manifest, ORIGIN_NAME);
         let tests = collect_tests(&manifest, &model_names);
 
         assert_eq!(tests.get("model.jaffle_shop.customers").unwrap().len(), 2);
@@ -915,13 +1136,13 @@ mod tests {
     fn resolve_upstreams_includes_dbt_sources_and_models() {
         let dbt_source_map: HashMap<String, String> = [(
             "source.jaffle_shop.raw.orders".to_string(),
-            "raw.orders".to_string(),
+            "jaffle.raw.orders".to_string(),
         )]
         .into_iter()
         .collect();
         let model_names: HashMap<String, String> = [(
             "model.jaffle_shop.stg_orders".to_string(),
-            "stg_orders".to_string(),
+            "jaffle.stg_orders".to_string(),
         )]
         .into_iter()
         .collect();
@@ -931,7 +1152,7 @@ mod tests {
             "unknown.id".to_string(),
         ];
         let upstreams = resolve_upstreams(&deps, &dbt_source_map, &model_names);
-        assert_eq!(upstreams, vec!["raw.orders", "stg_orders"]);
+        assert_eq!(upstreams, vec!["jaffle.raw.orders", "jaffle.stg_orders"]);
     }
 
     #[test]
@@ -958,6 +1179,9 @@ mod tests {
                 _name: "not_null".to_string(),
                 _kwargs: HashMap::new(),
             }),
+            database: None,
+            schema: None,
+            alias: None,
         };
         let tests = vec![&test_node];
         let ds = DefaultSync {
@@ -977,7 +1201,7 @@ mod tests {
     fn build_dbt_source_assets_with_tests() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let (dbt_source_map, dbt_source_names, dbt_source_tags) =
-            collect_dbt_source_names(&manifest);
+            collect_dbt_source_names(&manifest, ORIGIN_NAME);
         let dbt_source_tests = collect_tests(&manifest, &dbt_source_map);
 
         let ctx = DbtBuildContext {
@@ -1011,7 +1235,7 @@ mod tests {
 
     #[test]
     fn build_dbt_source_assets_without_tests() {
-        let names = vec!["raw.customers".to_string()];
+        let names = vec!["jaffle.raw.customers".to_string()];
         let dbt_source_map = HashMap::new();
         let dbt_source_tests = HashMap::new();
         let dbt_source_tags = HashMap::new();
@@ -1042,8 +1266,8 @@ mod tests {
     #[test]
     fn build_dbt_model_assets_includes_upstreams_and_on_drift() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
-        let (model_names, model_nodes) = collect_models(&manifest);
+        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest, ORIGIN_NAME);
+        let (model_names, model_nodes) = collect_models(&manifest, ORIGIN_NAME);
         let model_tests = collect_tests(&manifest, &model_names);
         let ds = DefaultSync {
             sync: "dbt-run".to_string(),
@@ -1069,11 +1293,11 @@ mod tests {
         // customers has model-to-model upstreams
         let customers = assets
             .iter()
-            .find(|r| r.metadata().name == "customers")
+            .find(|r| r.metadata().name == "jaffle.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
-            assert!(spec.upstreams.contains(&"stg_customers".to_string()));
-            assert!(spec.upstreams.contains(&"stg_orders".to_string()));
+            assert!(spec.upstreams.contains(&"jaffle.stg_customers".to_string()));
+            assert!(spec.upstreams.contains(&"jaffle.stg_orders".to_string()));
             assert_eq!(spec.on_drift.len(), 1);
         } else {
             panic!("expected Asset");
@@ -1083,8 +1307,8 @@ mod tests {
     #[test]
     fn build_dbt_model_assets_with_custom_sync_with() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
-        let (model_names, model_nodes) = collect_models(&manifest);
+        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest, ORIGIN_NAME);
+        let (model_names, model_nodes) = collect_models(&manifest, ORIGIN_NAME);
         let model_tests = collect_tests(&manifest, &model_names);
         let ds = DefaultSync {
             sync: "custom-sync".to_string(),
@@ -1107,7 +1331,7 @@ mod tests {
 
         let customers = resources
             .iter()
-            .find(|r| r.metadata().name == "customers")
+            .find(|r| r.metadata().name == "jaffle.customers")
             .unwrap();
         if let NagiKind::Asset { spec, .. } = customers {
             assert_eq!(spec.on_drift[0].sync, "custom-sync");
@@ -1123,8 +1347,8 @@ mod tests {
     #[test]
     fn build_dbt_model_assets_does_not_include_syncs() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest);
-        let (model_names, model_nodes) = collect_models(&manifest);
+        let (dbt_source_map, _, _) = collect_dbt_source_names(&manifest, ORIGIN_NAME);
+        let (model_names, model_nodes) = collect_models(&manifest, ORIGIN_NAME);
         let model_tests = collect_tests(&manifest, &model_names);
 
         let ds = DefaultSync {
@@ -1164,7 +1388,8 @@ mod tests {
             }),
             auto_sync: Some(false),
         };
-        let resources = manifest_to_resources(&manifest, &origin, None);
+        let resources =
+            manifest_to_resources(&manifest, &origin, ORIGIN_NAME, &DbtCliContext::default());
 
         for r in &resources {
             if let NagiKind::Asset { spec, .. } = r {

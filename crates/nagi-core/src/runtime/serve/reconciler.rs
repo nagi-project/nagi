@@ -506,6 +506,7 @@ mod tests {
                 auto_sync: true,
                 dbt_cloud_job_ids: None,
                 evaluate_cache_ttl: asset_ttl.map(|s| serde_yaml::from_str(s).unwrap()),
+                model_name: None,
             },
             connection: None,
         }

@@ -455,6 +455,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
                 auto_sync: true,
                 tags: vec![],
                 evaluate_cache_ttl: None,
+                model_name: None,
             },
         };
         resources.push(asset);

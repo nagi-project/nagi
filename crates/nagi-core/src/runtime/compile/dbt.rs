@@ -86,6 +86,7 @@ mod tests {
             metadata: Metadata {
                 name: name.to_string(),
             },
+            model_name: name.to_string(),
             spec: AssetSpec {
                 tags: vec![],
                 upstreams: vec![],
@@ -93,6 +94,7 @@ mod tests {
                 connection: None,
                 auto_sync: true,
                 evaluate_cache_ttl: None,
+                model_name: None,
             },
             resolved_on_drift: vec![],
             connection: None,

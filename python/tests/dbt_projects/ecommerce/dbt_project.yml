@@ -1,0 +1,15 @@
+name: ecommerce
+version: '1.0.0'
+
+profile: ecommerce
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  ecommerce:
+    +schema: ecommerce

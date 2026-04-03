@@ -81,7 +81,7 @@ pub(crate) fn collect_dbt_origin_configs(resources: &[NagiKind]) -> Vec<DbtOrigi
 /// 2. Runs `dbt compile` and reads manifest for each Origin
 /// 3. Generates Assets and Syncs from manifest
 /// 4. Returns all resources with generated ones appended
-pub fn expand(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
+pub fn generate(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
     let configs = collect_dbt_origin_configs(&resources);
     if configs.is_empty() {
         return Ok(resources);
@@ -98,19 +98,22 @@ pub fn expand(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
         manifests.insert(config.origin_name.clone(), manifest_json);
     }
 
-    let profiles_dirs: HashMap<String, Option<String>> = configs
+    let cli_contexts: HashMap<String, DbtOriginConfig> = configs
         .into_iter()
-        .map(|c| (c.origin_name, c.profiles_dir))
+        .map(|c| {
+            let name = c.origin_name.clone();
+            (name, c)
+        })
         .collect();
 
-    expand_with_manifests(resources, &manifests, Some(&profiles_dirs))
+    generate_with_manifests(resources, &manifests, Some(&cli_contexts))
 }
 
-/// Expands Origin resources using pre-loaded manifest JSON strings.
-pub(crate) fn expand_with_manifests(
+/// Generates resources from Origins using pre-loaded manifest JSON strings.
+pub(crate) fn generate_with_manifests(
     resources: Vec<NagiKind>,
     manifests: &HashMap<String, String>,
-    profiles_dirs: Option<&HashMap<String, Option<String>>>,
+    cli_contexts: Option<&HashMap<String, DbtOriginConfig>>,
 ) -> Result<Vec<NagiKind>, CompileError> {
     let origins: Vec<(String, OriginSpec)> = resources
         .iter()
@@ -124,19 +127,34 @@ pub(crate) fn expand_with_manifests(
         return Ok(resources);
     }
 
-    let mut expanded = resources;
-    for (name, spec) in &origins {
+    // Parse all manifests first for cross-project resolution.
+    let mut parsed_manifests: HashMap<String, DbtManifest> = HashMap::new();
+    for (name, _) in &origins {
         let manifest_str = manifests.get(name).ok_or_else(|| {
             CompileError::ManifestParse(format!("no manifest found for Origin '{name}'"))
         })?;
         let manifest: DbtManifest = serde_json::from_str(manifest_str)
             .map_err(|e| CompileError::ManifestParse(e.to_string()))?;
-        let profiles_dir = profiles_dirs
+        parsed_manifests.insert(name.clone(), manifest);
+    }
+
+    let mut expanded = resources;
+    for (name, spec) in &origins {
+        let manifest = &parsed_manifests[name];
+        let cli_ctx = cli_contexts
             .and_then(|m| m.get(name))
-            .and_then(|d| d.as_deref());
-        let generated = manifest::manifest_to_resources(&manifest, spec, profiles_dir);
+            .map(|config| manifest::DbtCliContext {
+                profiles_dir: config.profiles_dir.as_deref(),
+                profile: Some(config.profile.as_str()),
+                target: config.target.as_deref(),
+            })
+            .unwrap_or_default();
+        let generated = manifest::manifest_to_resources(manifest, spec, name, &cli_ctx);
         expanded.extend(generated);
     }
+
+    // dbt Mesh: link cross-Origin sources to their upstream models.
+    expanded = super::mesh::link_sources_to_models(expanded, &parsed_manifests)?;
 
     Ok(expanded)
 }

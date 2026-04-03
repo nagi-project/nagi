@@ -45,6 +45,12 @@ pub struct AssetSpec {
     /// Conditions can override this with their own `evaluateCacheTtl`.
     #[serde(default, rename = "evaluateCacheTtl")]
     pub evaluate_cache_ttl: Option<Duration>,
+    /// Original model name without the Origin prefix.
+    /// Set by Origin during generation. For user-defined Assets, defaults to None
+    /// (compile treats it as equal to `metadata.name`).
+    #[serde(default, rename = "modelName", skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub model_name: Option<String>,
 }
 
 fn default_auto_sync() -> bool {
@@ -350,6 +356,7 @@ autoSync: false
             on_drift: vec![],
             auto_sync: true,
             evaluate_cache_ttl: None,
+            model_name: None,
         };
         assert!(spec.validate().is_ok(), "empty onDrift means always Ready");
     }
@@ -368,6 +375,7 @@ autoSync: false
             }],
             auto_sync: true,
             evaluate_cache_ttl: None,
+            model_name: None,
         };
         assert!(spec.validate().is_ok());
     }
@@ -386,6 +394,7 @@ autoSync: false
             }],
             auto_sync: true,
             evaluate_cache_ttl: None,
+            model_name: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -405,6 +414,7 @@ autoSync: false
             }],
             auto_sync: true,
             evaluate_cache_ttl: None,
+            model_name: None,
         };
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));

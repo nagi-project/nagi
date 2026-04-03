@@ -5,6 +5,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+DBT_PROJECTS_DIR = Path(__file__).parent.parent / "dbt_projects"
+ANALYTICS_DIR = DBT_PROJECTS_DIR / "analytics"
+ECOMMERCE_DIR = DBT_PROJECTS_DIR / "ecommerce"
+SHARED_DB = DBT_PROJECTS_DIR / "dev.duckdb"
+
 NOOP_SYNC = (
     "apiVersion: nagi.io/v1alpha1\n"
     "kind: Sync\n"
@@ -46,6 +51,101 @@ DRIFTED_ASSET = (
     "    - conditions: cmd-check\n"
     "      sync: reload\n"
 )
+
+
+def dbt_seed_and_run(project_dir: Path, profiles_dir: str | Path = "profiles") -> None:
+    """Run dbt seed + run for a project."""
+    args_prefix = ["uv", "run", "dbt"]
+    profiles_arg = ["--profiles-dir", str(profiles_dir)]
+    subprocess.run(
+        [*args_prefix, "seed", *profiles_arg],
+        cwd=project_dir,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [*args_prefix, "run", *profiles_arg],
+        cwd=project_dir,
+        check=True,
+        capture_output=True,
+    )
+
+
+def write_profiles(dest: Path, profiles: dict[str, str]) -> Path:
+    """Write a profiles.yml mapping profile names to the shared DuckDB."""
+    dest.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for name, target in profiles.items():
+        entries.append(
+            f"{name}:\n"
+            f"  target: {target}\n"
+            f"  outputs:\n"
+            f"    {target}:\n"
+            f"      type: duckdb\n"
+            f"      path: {SHARED_DB}\n"
+        )
+    (dest / "profiles.yml").write_text("".join(entries))
+    return dest
+
+
+def write_nagi_project(
+    project_dir: Path,
+    origins: list[tuple[str, str, Path, Path]],
+) -> None:
+    """Create a nagi project with the given Origins.
+
+    Each origin is (origin_name, profile_name, project_path, profiles_dir).
+    """
+    project_dir.mkdir(parents=True, exist_ok=True)
+    resources_dir = project_dir / "resources"
+    resources_dir.mkdir(exist_ok=True)
+
+    nagi_dir = project_dir / ".nagi"
+    (project_dir / "nagi.yaml").write_text(
+        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
+    )
+
+    for origin_name, profile_name, dbt_project_path, profiles_dir in origins:
+        conn_name = f"{origin_name}-dev"
+        (resources_dir / f"connection-{origin_name}.yaml").write_text(
+            "apiVersion: nagi.io/v1alpha1\n"
+            "kind: Connection\n"
+            "metadata:\n"
+            f"  name: {conn_name}\n"
+            "spec:\n"
+            "  type: dbt\n"
+            f"  profile: {profile_name}\n"
+            "  target: dev\n"
+            f"  profilesDir: {profiles_dir}\n"
+        )
+        (resources_dir / f"origin-{origin_name}.yaml").write_text(
+            "apiVersion: nagi.io/v1alpha1\n"
+            "kind: Origin\n"
+            "metadata:\n"
+            f"  name: {origin_name}\n"
+            "spec:\n"
+            "  type: DBT\n"
+            f"  connection: {conn_name}\n"
+            f"  projectDir: {dbt_project_path}\n"
+        )
+
+
+def compile_nagi_project(project_dir: Path) -> None:
+    """Run nagi compile and assert success."""
+    result = run_nagi(
+        [
+            "compile",
+            "--resources-dir",
+            str(project_dir / "resources"),
+            "--target-dir",
+            str(project_dir / "target"),
+            "--yes",
+        ],
+        cwd=project_dir,
+    )
+    assert result.returncode == 0, (
+        f"compile failed:\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
 
 
 def run_nagi(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:

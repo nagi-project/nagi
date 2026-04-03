@@ -179,7 +179,7 @@ nagi mcp [OPTIONS]
 
 | 構文 | 説明 |
 | --- | --- |
-| `name` | 指定した Asset |
+| `name` | 指定した Asset（例: `my-project.orders`） |
 | `+name` | 指定した Asset とすべての上流 |
 | `name+` | 指定した Asset とすべての下流 |
 | `+name+` | 指定した Asset と上流・下流すべて |

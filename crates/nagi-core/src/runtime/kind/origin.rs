@@ -30,7 +30,8 @@ pub enum OriginSpec {
         connection: String,
         /// Local path to the dbt project directory (relative or absolute).
         project_dir: String,
-        /// User-defined Sync to override the auto-generated `nagi-dbt-run`.
+        /// User-defined Sync to override the auto-generated Sync
+        /// (e.g. `my-project-dbt-run` for Origin named `my-project`).
         #[serde(default)]
         default_sync: Option<DefaultSync>,
         /// Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).
@@ -65,11 +66,11 @@ impl OriginSpec {
     }
 }
 
-/// Expands Origin resources by loading external project data and generating Assets/Syncs.
-pub fn expand(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
+/// Generates resources from Origins by loading external project data.
+pub fn generate(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError> {
     // Currently only DBT Origins exist. When new Origin types are added,
     // dispatch by OriginSpec variant here.
-    dbt::expand::expand(resources)
+    dbt::generate::generate(resources)
 }
 
 #[cfg(test)]
@@ -99,7 +100,7 @@ projectDir: ../dbt-project
 defaultSync:
   sync: my-custom-sync
   with:
-    selector: "+{{ asset.name }}"
+    selector: "+{{ asset.modelName }}"
 "#;
         let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
         match &spec {
@@ -108,7 +109,7 @@ defaultSync:
                 ..
             } => {
                 assert_eq!(ds.sync, "my-custom-sync");
-                assert_eq!(ds.with.get("selector").unwrap(), "+{{ asset.name }}");
+                assert_eq!(ds.with.get("selector").unwrap(), "+{{ asset.modelName }}");
             }
             _ => panic!("expected DBT with defaultSync"),
         }

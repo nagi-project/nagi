@@ -74,6 +74,10 @@ pub struct CompileOutput {
 #[derive(Debug, Clone)]
 pub struct ResolvedAsset {
     pub metadata: Metadata,
+    /// Original model name without the Origin prefix.
+    /// For Origin-generated Assets this is the dbt model name (e.g. "orders").
+    /// For user-defined Assets this equals `metadata.name`.
+    pub model_name: String,
     pub spec: AssetSpec,
     /// Resolved on_drift entries: conditions expanded + sync specs resolved.
     pub resolved_on_drift: Vec<ResolvedOnDriftEntry>,
@@ -105,7 +109,7 @@ pub fn compile(
 ) -> Result<CompileOutput, CompileError> {
     let resources = load_resources(resources_dir)?;
 
-    let mut resources = crate::runtime::kind::origin::expand(resources)?;
+    let mut resources = crate::runtime::kind::origin::generate(resources)?;
 
     if let Some(cfg) = export_config {
         resources.extend(crate::runtime::export::generate_export_resources(cfg));
@@ -247,10 +251,18 @@ fn require_sync_ref(syncs: &HashMap<String, SyncSpec>, name: &str) -> Result<(),
 }
 
 /// Expands template variables in a SyncSpec's args.
-/// Supported variables: `{{ asset.name }}`, `{{ sync.<key> }}` (from `with` map).
+///
+/// Supported variables:
+/// - `{{ asset.name }}` — the Asset's `metadata.name` (Origin-prefixed, e.g. `origin.model`).
+///   Use for Nagi-internal references.
+/// - `{{ asset.modelName }}` — the original model name without the Origin prefix
+///   (e.g. `model`). Falls back to `asset.name` when unset.
+///   Use for external tool arguments (e.g. `dbt run --select`).
+/// - `{{ sync.<key> }}` — value from the `onDrift[].with` map.
 fn expand_sync_templates(
     sync_spec: &SyncSpec,
     asset_name: &str,
+    model_name: &str,
     with: &HashMap<String, String>,
 ) -> SyncSpec {
     let expand_step =
@@ -260,7 +272,7 @@ fn expand_sync_templates(
                 args: step
                     .args
                     .iter()
-                    .map(|arg| expand_template_string(arg, asset_name, with))
+                    .map(|arg| expand_template_string(arg, asset_name, model_name, with))
                     .collect(),
                 env: step.env.clone(),
             }
@@ -276,6 +288,7 @@ fn expand_sync_templates(
 fn expand_condition_templates(
     condition: &DesiredCondition,
     asset_name: &str,
+    model_name: &str,
     with: &HashMap<String, String>,
 ) -> DesiredCondition {
     match condition {
@@ -289,7 +302,7 @@ fn expand_condition_templates(
             name: name.clone(),
             run: run
                 .iter()
-                .map(|arg| expand_template_string(arg, asset_name, with))
+                .map(|arg| expand_template_string(arg, asset_name, model_name, with))
                 .collect(),
             interval: interval.clone(),
             env: env.clone(),
@@ -299,8 +312,14 @@ fn expand_condition_templates(
     }
 }
 
-fn expand_template_string(s: &str, asset_name: &str, with: &HashMap<String, String>) -> String {
+fn expand_template_string(
+    s: &str,
+    asset_name: &str,
+    model_name: &str,
+    with: &HashMap<String, String>,
+) -> String {
     let mut result = s.replace("{{ asset.name }}", asset_name);
+    result = result.replace("{{ asset.modelName }}", model_name);
     for (key, value) in with {
         result = result.replace(&format!("{{{{ sync.{key} }}}}"), value);
     }
@@ -425,8 +444,18 @@ fn resolve_asset(
         }
     }
 
-    let resolved_on_drift =
-        resolve_on_drift(&metadata.name, &spec.on_drift, conditions_groups, syncs)?;
+    let model_name = spec
+        .model_name
+        .as_deref()
+        .unwrap_or(&metadata.name)
+        .to_string();
+    let resolved_on_drift = resolve_on_drift(
+        &metadata.name,
+        &model_name,
+        &spec.on_drift,
+        conditions_groups,
+        syncs,
+    )?;
     let connection = spec
         .connection
         .as_deref()
@@ -435,6 +464,7 @@ fn resolve_asset(
 
     Ok(ResolvedAsset {
         metadata,
+        model_name,
         spec,
         resolved_on_drift,
         connection,
@@ -445,6 +475,7 @@ fn resolve_asset(
 /// Resolves on_drift entries: validates conditions/sync refs and expands templates.
 fn resolve_on_drift(
     asset_name: &str,
+    model_name: &str,
     on_drift: &[asset::OnDriftEntry],
     conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
     syncs: &HashMap<String, SyncSpec>,
@@ -462,11 +493,11 @@ fn resolve_on_drift(
 
         require_sync_ref(syncs, &entry.sync)?;
         let sync_spec = &syncs[&entry.sync];
-        let resolved_sync = expand_sync_templates(sync_spec, asset_name, &entry.with);
+        let resolved_sync = expand_sync_templates(sync_spec, asset_name, model_name, &entry.with);
 
         let expanded_conditions: Vec<DesiredCondition> = conditions
             .iter()
-            .map(|c| expand_condition_templates(c, asset_name, &entry.with))
+            .map(|c| expand_condition_templates(c, asset_name, model_name, &entry.with))
             .collect();
         all_conditions.extend(expanded_conditions.clone());
         resolved.push(ResolvedOnDriftEntry {
@@ -581,6 +612,7 @@ struct CompiledAssetSpecYaml<'a> {
     dbt_cloud_job_ids: &'a Option<HashSet<i64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     evaluate_cache_ttl: &'a Option<crate::runtime::duration::Duration>,
+    model_name: &'a str,
 }
 
 /// Deserialization struct for reading compiled asset YAML from `target/`.
@@ -613,6 +645,10 @@ pub struct CompiledAssetSpec {
     /// Asset-level default evaluate cache TTL.
     #[serde(default, rename = "evaluateCacheTtl")]
     pub evaluate_cache_ttl: Option<crate::runtime::duration::Duration>,
+    /// Original model name without the Origin prefix.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub model_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -635,6 +671,7 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
                 auto_sync: asset.spec.auto_sync,
                 dbt_cloud_job_ids: &asset.dbt_cloud_job_ids,
                 evaluate_cache_ttl: &asset.spec.evaluate_cache_ttl,
+                model_name: &asset.model_name,
             },
             connection: &asset.connection,
         };
@@ -742,6 +779,7 @@ spec:
             metadata: Metadata {
                 name: name.to_string(),
             },
+            model_name: name.to_string(),
             spec: AssetSpec {
                 tags: vec![],
                 connection: None,
@@ -749,6 +787,7 @@ spec:
                 on_drift,
                 auto_sync: true,
                 evaluate_cache_ttl: None,
+                model_name: None,
             },
             resolved_on_drift,
             connection: None,
@@ -871,7 +910,7 @@ spec:
 
     #[test]
     fn resolve_on_drift_empty() {
-        let result = resolve_on_drift("a", &[], &HashMap::new(), &HashMap::new()).unwrap();
+        let result = resolve_on_drift("a", "a", &[], &HashMap::new(), &HashMap::new()).unwrap();
         assert!(result.is_empty());
     }
 
@@ -884,6 +923,7 @@ spec:
             merge_position: asset::MergePosition::BeforeOrigin,
         };
         let result = resolve_on_drift(
+            "daily-sales",
             "daily-sales",
             &[entry],
             &sample_conditions(),
@@ -907,7 +947,8 @@ spec:
             with: HashMap::new(),
             merge_position: asset::MergePosition::BeforeOrigin,
         };
-        let err = resolve_on_drift("a", &[entry], &HashMap::new(), &sample_syncs()).unwrap_err();
+        let err =
+            resolve_on_drift("a", "a", &[entry], &HashMap::new(), &sample_syncs()).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, .. } if kind == "Conditions"));
     }
 
@@ -919,8 +960,8 @@ spec:
             with: HashMap::new(),
             merge_position: asset::MergePosition::BeforeOrigin,
         };
-        let err =
-            resolve_on_drift("a", &[entry], &sample_conditions(), &HashMap::new()).unwrap_err();
+        let err = resolve_on_drift("a", "a", &[entry], &sample_conditions(), &HashMap::new())
+            .unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, .. } if kind == "Sync"));
     }
 
@@ -962,7 +1003,7 @@ spec:
                 merge_position: asset::MergePosition::BeforeOrigin,
             },
         ];
-        let err = resolve_on_drift("a", &entries, &conditions, &sample_syncs()).unwrap_err();
+        let err = resolve_on_drift("a", "a", &entries, &conditions, &sample_syncs()).unwrap_err();
         assert!(matches!(err, CompileError::Kind(_)));
     }
 
@@ -991,8 +1032,14 @@ spec:
             with: HashMap::from([("selector".to_string(), "+daily_sales".to_string())]),
             merge_position: asset::MergePosition::BeforeOrigin,
         };
-        let result =
-            resolve_on_drift("daily-sales", &[entry], &sample_conditions(), &syncs).unwrap();
+        let result = resolve_on_drift(
+            "daily-sales",
+            "daily-sales",
+            &[entry],
+            &sample_conditions(),
+            &syncs,
+        )
+        .unwrap();
         assert_eq!(result[0].sync.run.args[3], "+daily_sales");
     }
 
@@ -1020,6 +1067,7 @@ spec:
         };
         let result = resolve_on_drift(
             "nagi-export-evaluate_logs",
+            "nagi-export-evaluate_logs",
             &[entry],
             &conditions,
             &sample_syncs(),
@@ -1030,6 +1078,86 @@ spec:
         } else {
             panic!("expected Command condition");
         }
+    }
+
+    #[test]
+    fn resolve_on_drift_expands_model_name_template() {
+        let syncs = HashMap::from([(
+            "dbt-run".to_string(),
+            SyncSpec {
+                pre: None,
+                run: crate::runtime::kind::sync::SyncStep {
+                    step_type: crate::runtime::kind::sync::StepType::Command,
+                    args: vec![
+                        "dbt".to_string(),
+                        "run".to_string(),
+                        "--select".to_string(),
+                        "{{ asset.modelName }}".to_string(),
+                    ],
+                    env: HashMap::new(),
+                },
+                post: None,
+            },
+        )]);
+        // Origin-generated Asset: model_name differs from asset name
+        let entry = asset::OnDriftEntry {
+            conditions: "daily-sla".to_string(),
+            sync: "dbt-run".to_string(),
+            with: HashMap::new(),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let result = resolve_on_drift(
+            "my-dbt.orders",
+            "orders",
+            &[entry],
+            &sample_conditions(),
+            &syncs,
+        )
+        .unwrap();
+        assert_eq!(
+            result[0].sync.run.args[3], "orders",
+            "{{ asset.modelName }} should expand to the original model name"
+        );
+    }
+
+    #[test]
+    fn resolve_on_drift_model_name_falls_back_to_asset_name() {
+        let syncs = HashMap::from([(
+            "dbt-run".to_string(),
+            SyncSpec {
+                pre: None,
+                run: crate::runtime::kind::sync::SyncStep {
+                    step_type: crate::runtime::kind::sync::StepType::Command,
+                    args: vec![
+                        "dbt".to_string(),
+                        "run".to_string(),
+                        "--select".to_string(),
+                        "{{ asset.modelName }}".to_string(),
+                    ],
+                    env: HashMap::new(),
+                },
+                post: None,
+            },
+        )]);
+        // User-defined Asset: model_name equals asset name
+        let entry = asset::OnDriftEntry {
+            conditions: "daily-sla".to_string(),
+            sync: "dbt-run".to_string(),
+            with: HashMap::new(),
+            merge_position: asset::MergePosition::BeforeOrigin,
+        };
+        let result = resolve_on_drift(
+            "custom-report",
+            "custom-report",
+            &[entry],
+            &sample_conditions(),
+            &syncs,
+        )
+        .unwrap();
+        assert_eq!(
+            result[0].sync.run.args[3], "custom-report",
+            "user-defined Asset: modelName should equal asset name"
+        );
     }
 
     // ── resolve (integration) tests ─────────────────────────────────────
@@ -1608,7 +1736,7 @@ spec:
     fn expand_origins_generates_resources_from_manifest() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+        let expanded = crate::runtime::kind::origin::dbt::generate::generate_with_manifests(
             resources, &manifests, None,
         )
         .unwrap();
@@ -1626,7 +1754,7 @@ spec:
     fn expand_origins_noop_without_origin() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, ASSET_RAW_SALES]));
         let count = resources.len();
-        let expanded = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+        let expanded = crate::runtime::kind::origin::dbt::generate::generate_with_manifests(
             resources,
             &HashMap::new(),
             None,
@@ -1638,7 +1766,7 @@ spec:
     #[test]
     fn expand_origins_error_when_no_manifest() {
         let resources = parse(ORIGIN_YAML);
-        let err = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+        let err = crate::runtime::kind::origin::dbt::generate::generate_with_manifests(
             resources,
             &HashMap::new(),
             None,
@@ -1651,7 +1779,7 @@ spec:
     fn resolve_with_origin_expansion() {
         let resources = parse(&yaml_docs(&[CONNECTION_MY_BQ, SYNC_DBT_RUN, ORIGIN_YAML]));
         let manifests = manifests_for("my-dbt");
-        let expanded = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+        let expanded = crate::runtime::kind::origin::dbt::generate::generate_with_manifests(
             resources, &manifests, None,
         )
         .unwrap();
@@ -1662,7 +1790,7 @@ spec:
         let customer_asset = output
             .assets
             .iter()
-            .find(|a| a.metadata.name == "customers")
+            .find(|a| a.metadata.name == "my-dbt.customers")
             .unwrap();
         assert!(!customer_asset.resolved_on_drift.is_empty());
 
@@ -1674,12 +1802,12 @@ spec:
             .map(|e| (e.from.as_str(), e.to.as_str()))
             .collect();
         assert!(
-            edge_pairs.contains(&("stg_customers", "customers")),
+            edge_pairs.contains(&("my-dbt.stg_customers", "my-dbt.customers")),
             "model-to-model dependency must produce a graph edge: edges = {edge_pairs:?}"
         );
         // raw.customers → stg_customers edge
         assert!(
-            edge_pairs.contains(&("raw.customers", "stg_customers")),
+            edge_pairs.contains(&("my-dbt.raw.customers", "my-dbt.stg_customers")),
             "upstream dependency must produce a graph edge: edges = {edge_pairs:?}"
         );
     }
@@ -1699,7 +1827,7 @@ spec:
 
         let resources = load_resources(&resources_dir).unwrap();
         let manifests = manifests_for("my-dbt");
-        let resources = crate::runtime::kind::origin::dbt::expand::expand_with_manifests(
+        let resources = crate::runtime::kind::origin::dbt::generate::generate_with_manifests(
             resources, &manifests, None,
         )
         .unwrap();
@@ -1707,7 +1835,7 @@ spec:
         write_output(&output, &target_dir).unwrap();
 
         assert!(target_dir.join("graph.json").exists());
-        assert!(target_dir.join("assets/customers.yaml").exists());
-        assert!(target_dir.join("assets/stg_customers.yaml").exists());
+        assert!(target_dir.join("assets/my-dbt.customers.yaml").exists());
+        assert!(target_dir.join("assets/my-dbt.stg_customers.yaml").exists());
     }
 }
