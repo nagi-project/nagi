@@ -82,8 +82,8 @@ class TestCompileDbtOrigin:
                 )
 
 
-class TestCompileHandwritten:
-    """Compile with hand-written Asset + DuckDB direct connection."""
+class TestCompileUserDefinedAsset:
+    """Compile with user-defined Asset + DuckDB direct connection."""
 
     RESOURCES = {
         "upstream.yaml": (

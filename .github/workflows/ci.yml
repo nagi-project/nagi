@@ -155,12 +155,6 @@ jobs:
       - name: Unit test
         run: uv run pytest python/tests/ -v -m "not integration and not scenario" -n auto
 
-      - name: Setup dbt project
-        working-directory: python/tests/dbt_project
-        run: |
-          uv run dbt seed --profiles-dir profiles
-          uv run dbt compile --profiles-dir profiles
-
       - name: Integration test
         run: uv run pytest python/tests/integration/ -v -m integration
 
