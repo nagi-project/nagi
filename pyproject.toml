@@ -101,3 +101,4 @@ manifest-path = "crates/nagi-core/Cargo.toml"
 features = ["python"]
 python-source = "python"
 module-name = "nagi_cli._nagi_core"
+include = [{ path = "LICENSE", format = "sdist" }]
