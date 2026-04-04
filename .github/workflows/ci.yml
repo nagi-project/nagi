@@ -121,13 +121,18 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       min: ${{ steps.parse.outputs.min }}
+      latest: ${{ steps.parse.outputs.latest }}
       dbt: ${{ steps.parse.outputs.dbt }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-uv
+
       - id: parse
         shell: bash
         run: |
           echo "min=$(grep 'requires-python' pyproject.toml | sed 's/.*>=\([0-9.]*\).*/\1/')" >> "$GITHUB_OUTPUT"
+          echo "latest=$(uv python list | grep -E '^cpython-3\.' | grep -v 'freethreaded\|a[0-9]\|b[0-9]\|rc[0-9]' | head -1 | sed 's/cpython-\([0-9]*\.[0-9]*\)\..*/\1/')" >> "$GITHUB_OUTPUT"
           echo "dbt=$(grep '^UV_PYTHON' mise.toml | sed 's/.*= *"\(.*\)"/\1/')" >> "$GITHUB_OUTPUT"
 
   build-and-test-rust:
@@ -155,12 +160,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # Empty string means uv auto-selects the latest available version.
-        python: ["${{ needs.python-versions.outputs.min }}", ""]
-        exclude:
-          - os: windows-latest
-            python: "${{ needs.python-versions.outputs.min }}"
-          - os: macos-latest
+        python: ["${{ needs.python-versions.outputs.latest }}"]
+        include:
+          - os: ubuntu-latest
             python: "${{ needs.python-versions.outputs.min }}"
     runs-on: ${{ matrix.os }}
     env:
