@@ -44,17 +44,15 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Setup QEMU
-        if: matrix.target == 'aarch64' && runner.os == 'Linux'
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-        with:
-          platforms: arm64
-
       - uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1.50.1
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           args: --release --out dist --find-interpreter
+          before-script-linux: |
+            if [ "${{ matrix.target }}" = "aarch64" ]; then
+              apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+            fi
 
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
