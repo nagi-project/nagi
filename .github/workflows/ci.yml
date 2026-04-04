@@ -120,7 +120,7 @@ jobs:
   build-and-test-rust:
     needs: static-check-rust
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -139,7 +139,7 @@ jobs:
   build-and-test-python:
     needs: static-check-python
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
