@@ -48,29 +48,6 @@ impl Cache for LocalCache {
     }
 }
 
-#[cfg(test)]
-impl LocalCache {
-    fn list(&self) -> Result<Vec<AssetEvalResult>, StorageError> {
-        if !self.cache_dir.exists() {
-            return Ok(Vec::new());
-        }
-        let mut results = Vec::new();
-        for entry in std::fs::read_dir(&self.cache_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let content = std::fs::read_to_string(&path)?;
-                let result: AssetEvalResult = serde_json::from_str(&content)?;
-                results.push(result);
-            }
-        }
-        results.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
-        Ok(results)
-    }
-}
-
-// ── LocalSuspendedStore ──────────────────────────────────────────────────────
-
 /// Local file-based suspended store.
 /// Stores suspension flags as `{dir}/{asset_name}.json`.
 #[derive(Debug)]
@@ -120,32 +97,6 @@ impl SuspendedStore for LocalSuspendedStore {
         Ok(self.asset_path(asset_name)?.exists())
     }
 }
-
-#[cfg(test)]
-impl LocalSuspendedStore {
-    fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError> {
-        let entries = match std::fs::read_dir(&self.dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
-        };
-        let mut result = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                let data = std::fs::read_to_string(&path)?;
-                if let Ok(info) = serde_json::from_str::<SuspendedInfo>(&data) {
-                    result.push(info);
-                }
-            }
-        }
-        result.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
-        Ok(result)
-    }
-}
-
-// ── LocalConditionCache ────────────────────────────────────────────────────
 
 /// Local file-based cache for per-condition evaluate results with timestamps.
 /// Stores as `{dir}/{asset_name}.json` containing a map of condition name → entry.
@@ -223,24 +174,6 @@ impl ConditionCache for LocalConditionCache {
     }
 }
 
-#[cfg(test)]
-impl LocalConditionCache {
-    fn read_condition(
-        &self,
-        asset_name: &str,
-        condition_name: &str,
-    ) -> Result<Option<ConditionCacheEntry>, StorageError> {
-        let path = self.condition_path(asset_name, condition_name)?;
-        match std::fs::read_to_string(path) {
-            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
-
-// ── LocalReadinessStore ───────────────────────────────────────────────────
-
 /// Local file-based readiness store.
 /// Stores each asset's readiness as `{dir}/{asset_name}.json`.
 #[derive(Debug)]
@@ -293,6 +226,165 @@ impl ReadinessStore for LocalReadinessStore {
             }
         }
         Ok(result)
+    }
+}
+
+/// Local file-based sync lock.
+/// Each asset gets a lock file at `{dir}/{asset_name}.lock`.
+/// Uses atomic file creation for mutual exclusion and TTL for deadlock prevention.
+pub struct LocalSyncLock {
+    dir: PathBuf,
+}
+
+impl LocalSyncLock {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    fn lock_path(&self, sync_ref: &str) -> Result<PathBuf, StorageError> {
+        super::validate_filename(sync_ref)?;
+        Ok(self.dir.join(format!("{sync_ref}.lock")))
+    }
+}
+
+/// Result of checking an existing lock file.
+enum LockCheck {
+    /// No lock file exists or it was cleared — safe to acquire.
+    Cleared,
+    /// Lock is actively held — cannot acquire.
+    Held,
+}
+
+/// Checks an existing lock file and returns whether it can be cleared.
+/// Removes expired or corrupted lock files.
+fn check_existing_lock(path: &std::path::Path) -> Result<LockCheck, StorageError> {
+    if !path.exists() {
+        return Ok(LockCheck::Cleared);
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            if let Ok(info) = serde_json::from_str::<LockInfo>(&content) {
+                if info.is_expired() {
+                    std::fs::remove_file(path)?;
+                    Ok(LockCheck::Cleared)
+                } else {
+                    Ok(LockCheck::Held)
+                }
+            } else {
+                std::fs::remove_file(path)?;
+                Ok(LockCheck::Cleared)
+            }
+        }
+        Err(_) => Ok(LockCheck::Held),
+    }
+}
+
+impl SyncLock for LocalSyncLock {
+    fn acquire(
+        &self,
+        sync_ref: &str,
+        ttl: Duration,
+        execution_id: &str,
+    ) -> Result<bool, StorageError> {
+        std::fs::create_dir_all(&self.dir)?;
+        let path = self.lock_path(sync_ref)?;
+
+        if matches!(check_existing_lock(&path)?, LockCheck::Held) {
+            return Ok(false);
+        }
+
+        let info = LockInfo {
+            execution_id: execution_id.to_string(),
+            acquired_at_epoch_secs: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            ttl_secs: ttl.as_secs(),
+        };
+        let json = serde_json::to_string_pretty(&info)?;
+
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => {
+                std::fs::write(&path, json)?;
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn release(&self, sync_ref: &str) -> Result<(), StorageError> {
+        let path = self.lock_path(sync_ref)?;
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+#[cfg(test)]
+impl LocalCache {
+    fn list(&self) -> Result<Vec<AssetEvalResult>, StorageError> {
+        if !self.cache_dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut results = Vec::new();
+        for entry in std::fs::read_dir(&self.cache_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                let content = std::fs::read_to_string(&path)?;
+                let result: AssetEvalResult = serde_json::from_str(&content)?;
+                results.push(result);
+            }
+        }
+        results.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
+        Ok(results)
+    }
+}
+
+#[cfg(test)]
+impl LocalSuspendedStore {
+    fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut result = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                let data = std::fs::read_to_string(&path)?;
+                if let Ok(info) = serde_json::from_str::<SuspendedInfo>(&data) {
+                    result.push(info);
+                }
+            }
+        }
+        result.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
+        Ok(result)
+    }
+}
+
+#[cfg(test)]
+impl LocalConditionCache {
+    fn read_condition(
+        &self,
+        asset_name: &str,
+        condition_name: &str,
+    ) -> Result<Option<ConditionCacheEntry>, StorageError> {
+        let path = self.condition_path(asset_name, condition_name)?;
+        match std::fs::read_to_string(path) {
+            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
@@ -402,8 +494,6 @@ mod tests {
         let second = cache.read("asset").unwrap().unwrap();
         assert!(second.ready);
     }
-
-    // ── LocalConditionCache tests ──────────────────────────────────────
 
     fn sample_condition_entry(name: &str, ready: bool) -> (String, ConditionCacheEntry) {
         use crate::runtime::evaluate::{ConditionResult, ConditionStatus};
@@ -516,8 +606,6 @@ mod tests {
         ));
     }
 
-    // ── LocalSuspendedStore tests ────────────────────────────────────────
-
     fn sample_suspended(name: &str) -> SuspendedInfo {
         SuspendedInfo {
             asset_name: name.to_string(),
@@ -577,11 +665,9 @@ mod tests {
 
     #[test]
     fn suspended_list_nonexistent_dir() {
-        let store = LocalSuspendedStore::new(PathBuf::from("/tmp/nonexistent-nagi-test"));
+        let store = LocalSuspendedStore::new(std::env::temp_dir().join("nonexistent-nagi-test"));
         assert!(store.list().unwrap().is_empty());
     }
-
-    // ── LocalReadinessStore tests ─────────────────────────────────────────
 
     #[test]
     fn readiness_write_all_and_read() {
@@ -627,7 +713,8 @@ mod tests {
 
     #[test]
     fn readiness_read_all_nonexistent_dir() {
-        let store = LocalReadinessStore::new(PathBuf::from("/tmp/nonexistent-readiness-test"));
+        let store =
+            LocalReadinessStore::new(std::env::temp_dir().join("nonexistent-readiness-test"));
         assert!(store.read_all().unwrap().is_empty());
     }
 
@@ -666,111 +753,6 @@ mod tests {
         assert!(lock.lock_path("a\\b").is_err());
         assert!(lock.lock_path("valid-ref").is_ok());
     }
-}
-
-// ── LocalSyncLock ────────────────────────────────────────────────────────────
-
-/// Local file-based sync lock.
-/// Each asset gets a lock file at `{dir}/{asset_name}.lock`.
-/// Uses atomic file creation for mutual exclusion and TTL for deadlock prevention.
-pub struct LocalSyncLock {
-    dir: PathBuf,
-}
-
-impl LocalSyncLock {
-    pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
-    }
-
-    fn lock_path(&self, sync_ref: &str) -> Result<PathBuf, StorageError> {
-        super::validate_filename(sync_ref)?;
-        Ok(self.dir.join(format!("{sync_ref}.lock")))
-    }
-}
-
-/// Result of checking an existing lock file.
-enum LockCheck {
-    /// No lock file exists or it was cleared — safe to acquire.
-    Cleared,
-    /// Lock is actively held — cannot acquire.
-    Held,
-}
-
-/// Checks an existing lock file and returns whether it can be cleared.
-/// Removes expired or corrupted lock files.
-fn check_existing_lock(path: &std::path::Path) -> Result<LockCheck, StorageError> {
-    if !path.exists() {
-        return Ok(LockCheck::Cleared);
-    }
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            if let Ok(info) = serde_json::from_str::<LockInfo>(&content) {
-                if info.is_expired() {
-                    std::fs::remove_file(path)?;
-                    Ok(LockCheck::Cleared)
-                } else {
-                    Ok(LockCheck::Held)
-                }
-            } else {
-                std::fs::remove_file(path)?;
-                Ok(LockCheck::Cleared)
-            }
-        }
-        Err(_) => Ok(LockCheck::Held),
-    }
-}
-
-impl SyncLock for LocalSyncLock {
-    fn acquire(
-        &self,
-        sync_ref: &str,
-        ttl: Duration,
-        execution_id: &str,
-    ) -> Result<bool, StorageError> {
-        std::fs::create_dir_all(&self.dir)?;
-        let path = self.lock_path(sync_ref)?;
-
-        if matches!(check_existing_lock(&path)?, LockCheck::Held) {
-            return Ok(false);
-        }
-
-        let info = LockInfo {
-            execution_id: execution_id.to_string(),
-            acquired_at_epoch_secs: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            ttl_secs: ttl.as_secs(),
-        };
-        let json = serde_json::to_string_pretty(&info)?;
-
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(_) => {
-                std::fs::write(&path, json)?;
-                Ok(true)
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    fn release(&self, sync_ref: &str) -> Result<(), StorageError> {
-        let path = self.lock_path(sync_ref)?;
-        match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
-
-#[cfg(test)]
-mod lock_tests {
-    use super::*;
 
     #[test]
     fn acquire_and_release() {

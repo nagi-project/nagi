@@ -92,8 +92,6 @@ fn serde_err(e: serde_json::Error) -> StorageError {
     StorageError::Serde(e)
 }
 
-// ── Cache ─────────────────────────────────────────────────────────────────────
-
 impl Cache for RemoteObjectStore {
     fn write(&self, result: &AssetEvalResult) -> Result<(), StorageError> {
         let path = self.cache_path(&result.asset_name)?;
@@ -115,8 +113,6 @@ impl Cache for RemoteObjectStore {
         }
     }
 }
-
-// ── SuspendedStore ────────────────────────────────────────────────────────────
 
 impl SuspendedStore for RemoteObjectStore {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError> {
@@ -157,8 +153,6 @@ impl SuspendedStore for RemoteObjectStore {
     }
 }
 
-// ── ReadinessStore ────────────────────────────────────────────────────────────
-
 impl ReadinessStore for RemoteObjectStore {
     fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError> {
         for (name, &ready) in readiness {
@@ -197,8 +191,6 @@ impl ReadinessStore for RemoteObjectStore {
         Ok(result)
     }
 }
-
-// ── SyncLock ──────────────────────────────────────────────────────────────────
 
 impl SyncLock for RemoteObjectStore {
     /// Attempts to acquire the lock using a conditional put (`PutMode::Create`).
@@ -335,8 +327,6 @@ fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
-// ── Backend factory ───────────────────────────────────────────────────────────
-
 /// Creates a `RemoteObjectStore` from the given `BackendConfig`.
 ///
 /// Credentials are resolved from the environment at call time and not stored:
@@ -443,8 +433,6 @@ impl RemoteObjectStore {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,8 +467,6 @@ mod tests {
             execution_id: None,
         }
     }
-
-    // ── Cache ──────────────────────────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cache_write_and_read() {
@@ -521,8 +507,6 @@ mod tests {
         assert_eq!(got.asset_name, "asset-x");
     }
 
-    // ── SuspendedStore ─────────────────────────────────────────────────────
-
     #[tokio::test(flavor = "multi_thread")]
     async fn suspended_write_read_remove() {
         let store = in_memory_store(None);
@@ -555,8 +539,6 @@ mod tests {
         names.sort();
         assert_eq!(names, ["x", "y"]);
     }
-
-    // ── ReadinessStore ────────────────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread")]
     async fn readiness_write_all_and_read() {
@@ -597,8 +579,6 @@ mod tests {
         assert_eq!(store.readiness_read("z").unwrap(), Some(true));
     }
 
-    // ── SyncLock ───────────────────────────────────────────────────────────
-
     #[tokio::test(flavor = "multi_thread")]
     async fn sync_lock_acquire_and_release() {
         let store = in_memory_store(None);
@@ -637,8 +617,6 @@ mod tests {
         let store = in_memory_store(None);
         store.release("ref-ghost").unwrap();
     }
-
-    // ── read_lock tests ────────────────────────────────────────────────
 
     fn write_lock_info(store: &RemoteObjectStore, sync_ref: &str, info: &LockInfo) {
         let path = store.lock_path(sync_ref).unwrap();
@@ -704,8 +682,6 @@ mod tests {
             LockReadResult::Expired(None)
         ));
     }
-
-    // ── replace_if_holder_unchanged tests ─────────────────────────────
 
     #[tokio::test(flavor = "multi_thread")]
     async fn replace_if_holder_unchanged_succeeds_when_id_matches() {

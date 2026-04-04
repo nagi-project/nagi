@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn suspended_list_nonexistent_dir() {
-        let list = list_suspended(Path::new("/tmp/nonexistent-nagi-test-dir")).unwrap();
+        let list = list_suspended(&std::env::temp_dir().join("nonexistent-nagi-test-dir")).unwrap();
         assert!(list.is_empty());
     }
 }
