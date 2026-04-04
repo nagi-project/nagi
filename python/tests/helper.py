@@ -12,6 +12,31 @@ ARGS_SLEEP_2 = (
     else '["sleep", "2"]'
 )
 
+
+def yaml_args_touch(path: Path) -> str:
+    """Return YAML args list that creates a file. Cross-platform."""
+    p = path.as_posix()
+    return f'["python", "-c", "open(\'{p}\', \'w\').close()"]'
+
+
+def yaml_args_mkdir_and_touch(dir_path: Path, file_path: Path) -> str:
+    """Return YAML args list that creates a directory and a file. Cross-platform."""
+    d = dir_path.as_posix()
+    f = file_path.as_posix()
+    return (
+        f'["python", "-c", '
+        f"\"import os; os.makedirs('{d}', exist_ok=True);"
+        f" open('{f}', 'w').close()\"]"
+    )
+
+
+def yaml_run_file_exists(path: Path) -> str:
+    """Return YAML run list that checks if a file exists. Cross-platform."""
+    p = path.as_posix()
+    cmd = f"import sys,os; sys.exit(0 if os.path.exists('{p}') else 1)"
+    return f"['python', '-c', '{cmd}']"
+
+
 # Resource names
 CONNECTION_NAME = "my-bq"
 SOURCE_NAME = "raw-sales"

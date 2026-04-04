@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helper import yaml_run_file_exists
 from tests.scenario.conftest import StartServe
 from tests.scenario.helper import (
     NOOP_SYNC,
@@ -83,10 +84,11 @@ class TestScenario1LinearChain:
                 "spec:\n"
                 f"  - name: file-exists-{name}\n"
                 "    type: Command\n"
-                f"    run: ['test', '-f', '{marker}']\n"
+                f"    run: {yaml_run_file_exists(marker)}\n"
                 "    interval: 3s\n"
             )
         conditions = "---\n".join(cond_docs)
+        md = marker_dir.as_posix()
         sync_yaml = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -96,11 +98,10 @@ class TestScenario1LinearChain:
             "  run:\n"
             "    type: Command\n"
             "    args:\n"
-            "      - sh\n"
+            "      - python\n"
             "      - -c\n"
-            f'      - "mkdir -p {marker_dir}'
-            " && touch "
-            f'{marker_dir}/{{{{ asset.name }}}}.ok"\n'
+            f"      - \"import os; os.makedirs('{md}', exist_ok=True);"
+            f" open('{md}/{{{{{{ asset.name }}}}}}.ok', 'w').close()\"\n"
         )
         project = run_serve(
             {
@@ -304,9 +305,10 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "spec:\n"
             "  - name: file-exists-a\n"
             "    type: Command\n"
-            f"    run: ['test', '-f', '{a_marker}']\n"
+            f"    run: {yaml_run_file_exists(a_marker)}\n"
             "    interval: 3s\n"
         )
+        md = marker_dir.as_posix()
         sync_yaml = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -316,11 +318,10 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "  run:\n"
             "    type: Command\n"
             "    args:\n"
-            "      - sh\n"
+            "      - python\n"
             "      - -c\n"
-            f'      - "mkdir -p {marker_dir}'
-            " && touch "
-            f'{marker_dir}/{{{{ asset.name }}}}.ok"\n'
+            f"      - \"import os; os.makedirs('{md}', exist_ok=True);"
+            f" open('{md}/{{{{{{ asset.name }}}}}}.ok', 'w').close()\"\n"
         )
         project = run_serve(
             {

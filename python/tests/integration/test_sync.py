@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helper import ARGS_FALSE
+from tests.helper import ARGS_FALSE, yaml_args_mkdir_and_touch, yaml_args_touch
 from tests.integration.helper import (
     DRIFTED_ASSET,
     DRIFTED_CONDITIONS,
@@ -140,6 +140,9 @@ class TestSyncExecution:
     def test_sync_pre_and_post_stages(self, tmp_path: Path, duckdb_path: Path) -> None:
         """Sync with pre/post stages executes all three."""
         marker_dir = tmp_path / "markers"
+        pre_ok = marker_dir / "pre.ok"
+        run_ok = marker_dir / "run.ok"
+        post_ok = marker_dir / "post.ok"
         sync_with_stages = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -148,14 +151,13 @@ class TestSyncExecution:
             "spec:\n"
             "  pre:\n"
             "    type: Command\n"
-            f'    args: ["sh", "-c", "mkdir -p {marker_dir}'
-            f' && touch {marker_dir}/pre.ok"]\n'
+            f"    args: {yaml_args_mkdir_and_touch(marker_dir, pre_ok)}\n"
             "  run:\n"
             "    type: Command\n"
-            f'    args: ["sh", "-c", "touch {marker_dir}/run.ok"]\n'
+            f"    args: {yaml_args_touch(run_ok)}\n"
             "  post:\n"
             "    type: Command\n"
-            f'    args: ["sh", "-c", "touch {marker_dir}/post.ok"]\n'
+            f"    args: {yaml_args_touch(post_ok)}\n"
         )
         project = tmp_path / "project"
         write_duckdb_project(
