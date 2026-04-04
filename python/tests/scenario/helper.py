@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from tests.helper import ARGS_SLEEP_2, CMD_TRUE
+
 
 def init_nagi_dir(project: Path) -> None:
     from nagi_cli._nagi_core import init_workspace
@@ -224,7 +226,7 @@ def asset_yaml(
 def conditions_yaml(
     name: str,
     *,
-    command: str = "'true'",
+    command: str = CMD_TRUE,
     interval: str | None = None,
 ) -> str:
     """Generate Conditions YAML with a Command type."""
@@ -262,5 +264,5 @@ SLOW_SYNC = (
     "spec:\n"
     "  run:\n"
     "    type: Command\n"
-    '    args: ["sleep", "2"]\n'
+    f"    args: {ARGS_SLEEP_2}\n"
 )

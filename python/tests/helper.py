@@ -1,4 +1,16 @@
+import sys
 from pathlib import Path
+
+# Platform-dependent shell commands for YAML test fixtures.
+# These are interpolated into kind: Conditions / kind: Sync YAML.
+CMD_TRUE = "'cmd', '/C', 'exit 0'" if sys.platform == "win32" else "'true'"
+CMD_FALSE = "'cmd', '/C', 'exit 1'" if sys.platform == "win32" else "'false'"
+ARGS_FALSE = '["cmd", "/C", "exit 1"]' if sys.platform == "win32" else '["false"]'
+ARGS_SLEEP_2 = (
+    '["python", "-c", "import time; time.sleep(2)"]'
+    if sys.platform == "win32"
+    else '["sleep", "2"]'
+)
 
 # Resource names
 CONNECTION_NAME = "my-bq"

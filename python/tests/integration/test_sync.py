@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helper import ARGS_FALSE
 from tests.integration.helper import (
     DRIFTED_ASSET,
     DRIFTED_CONDITIONS,
@@ -104,7 +105,7 @@ class TestSyncExecution:
             "spec:\n"
             "  run:\n"
             "    type: Command\n"
-            '    args: ["false"]\n'
+            f"    args: {ARGS_FALSE}\n"
         )
         project = tmp_path / "project"
         write_duckdb_project(

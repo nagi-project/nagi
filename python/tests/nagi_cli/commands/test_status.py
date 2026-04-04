@@ -1,4 +1,5 @@
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,15 +45,20 @@ class TestStatusSuccess:
                 id="with-select",
             ),
             pytest.param(
-                ["--cache-dir", "/tmp/custom-cache"],
+                ["--cache-dir", str(Path(tempfile.gettempdir()) / "custom-cache")],
                 [],
-                "/tmp/custom-cache",
+                str(Path(tempfile.gettempdir()) / "custom-cache"),
                 id="with-cache-dir",
             ),
             pytest.param(
-                ["--select", ASSET_NAME, "--cache-dir", "/tmp/c"],
+                [
+                    "--select",
+                    ASSET_NAME,
+                    "--cache-dir",
+                    str(Path(tempfile.gettempdir()) / "c"),
+                ],
                 [ASSET_NAME],
-                "/tmp/c",
+                str(Path(tempfile.gettempdir()) / "c"),
                 id="select-and-cache-dir",
             ),
         ],
