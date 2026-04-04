@@ -16,21 +16,21 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
     #[error("failed to serialize/deserialize: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("invalid asset name: {0}")]
-    InvalidAssetName(String),
+    #[error("invalid filename: {0}")]
+    InvalidFilename(String),
 }
 
-/// Validates that the asset name is a safe filename component (no path
+/// Validates that a string is a safe single-component filename (no path
 /// separators, no `.` or `..`, no null bytes).
-pub fn validate_asset_name(asset_name: &str) -> Result<(), StorageError> {
-    if asset_name.is_empty()
-        || asset_name == "."
-        || asset_name == ".."
-        || asset_name.contains('/')
-        || asset_name.contains('\\')
-        || asset_name.contains('\0')
+pub fn validate_filename(name: &str) -> Result<(), StorageError> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
     {
-        return Err(StorageError::InvalidAssetName(asset_name.to_string()));
+        return Err(StorageError::InvalidFilename(name.to_string()));
     }
     Ok(())
 }
@@ -98,4 +98,32 @@ pub trait SyncLock: Send + Sync {
     ) -> Result<bool, StorageError>;
     /// Releases the lock. No-op if not held.
     fn release(&self, sync_ref: &str) -> Result<(), StorageError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! validate_filename_test {
+        ($($name:ident: $input:expr => $ok:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(validate_filename($input).is_ok(), $ok);
+                }
+            )*
+        };
+    }
+
+    validate_filename_test! {
+        valid_simple: "my-sync" => true;
+        valid_with_dots: "check.freshness" => true;
+        reject_empty: "" => false;
+        reject_dot: "." => false;
+        reject_dotdot: ".." => false;
+        reject_slash: "a/b" => false;
+        reject_backslash: "a\\b" => false;
+        reject_null: "a\0b" => false;
+        reject_traversal: "../etc" => false;
+    }
 }

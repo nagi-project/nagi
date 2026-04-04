@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-26T11:44:24.288886Z"
+exclude-newer = "2026-03-28T09:31:59.079884Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -1034,6 +1034,10 @@ mcp = [
 ]
 
 [package.dev-dependencies]
+dbt = [
+    { name = "dbt-core" },
+    { name = "dbt-duckdb" },
+]
 dev = [
     { name = "dbt-core" },
     { name = "dbt-duckdb" },
@@ -1045,6 +1049,19 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+docs = [
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+]
+lint = [
+    { name = "ruff" },
+    { name = "ty" },
+]
+test = [
+    { name = "pytest" },
+    { name = "pytest-mock" },
+    { name = "pytest-xdist" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1055,6 +1072,10 @@ requires-dist = [
 provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]
+dbt = [
+    { name = "dbt-core", specifier = ">=1.11.7" },
+    { name = "dbt-duckdb", specifier = ">=1.10.1" },
+]
 dev = [
     { name = "dbt-core", specifier = ">=1.11.7" },
     { name = "dbt-duckdb", specifier = ">=1.10.1" },
@@ -1065,6 +1086,19 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.0" },
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
+]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6,<2" },
+    { name = "mkdocs-material", specifier = ">=9.0" },
+]
+lint = [
+    { name = "ruff", specifier = ">=0.11" },
+    { name = "ty", specifier = ">=0.0.1a7" },
+]
+test = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-mock", specifier = ">=3.0" },
+    { name = "pytest-xdist", specifier = ">=3.0" },
 ]
 
 [[package]]

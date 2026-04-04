@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helper import CMD_FALSE, CMD_TRUE
 from tests.integration.helper import (
     NOOP_SYNC,
     build_and_evaluate,
@@ -240,8 +241,8 @@ class TestEvaluateConditionTypes:
     @pytest.mark.parametrize(
         ("command", "expected_ready"),
         [
-            pytest.param("'true'", True, id="command-ready"),
-            pytest.param("'false'", False, id="command-drifted"),
+            pytest.param(CMD_TRUE, True, id="command-ready"),
+            pytest.param(CMD_FALSE, False, id="command-drifted"),
         ],
     )
     def test_command(

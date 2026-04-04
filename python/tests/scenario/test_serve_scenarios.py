@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helper import yaml_run_file_exists, yaml_sync_cmd_mkdir_and_touch
 from tests.scenario.conftest import StartServe
 from tests.scenario.helper import (
     NOOP_SYNC,
@@ -83,10 +84,12 @@ class TestScenario1LinearChain:
                 "spec:\n"
                 f"  - name: file-exists-{name}\n"
                 "    type: Command\n"
-                f"    run: ['test', '-f', '{marker}']\n"
+                f"    run: {yaml_run_file_exists(marker)}\n"
                 "    interval: 3s\n"
             )
         conditions = "---\n".join(cond_docs)
+        md = marker_dir.as_posix()
+        file_tpl = f"{md}/{{{{ asset.name }}}}.ok"
         sync_yaml = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -94,13 +97,7 @@ class TestScenario1LinearChain:
             "  name: create-marker\n"
             "spec:\n"
             "  run:\n"
-            "    type: Command\n"
-            "    args:\n"
-            "      - sh\n"
-            "      - -c\n"
-            f'      - "mkdir -p {marker_dir}'
-            " && touch "
-            f'{marker_dir}/{{{{ asset.name }}}}.ok"\n'
+            "    type: Command\n" + yaml_sync_cmd_mkdir_and_touch(md, file_tpl)
         )
         project = run_serve(
             {
@@ -304,9 +301,11 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "spec:\n"
             "  - name: file-exists-a\n"
             "    type: Command\n"
-            f"    run: ['test', '-f', '{a_marker}']\n"
+            f"    run: {yaml_run_file_exists(a_marker)}\n"
             "    interval: 3s\n"
         )
+        md = marker_dir.as_posix()
+        file_tpl = f"{md}/{{{{ asset.name }}}}.ok"
         sync_yaml = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -314,13 +313,7 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "  name: create-marker\n"
             "spec:\n"
             "  run:\n"
-            "    type: Command\n"
-            "    args:\n"
-            "      - sh\n"
-            "      - -c\n"
-            f'      - "mkdir -p {marker_dir}'
-            " && touch "
-            f'{marker_dir}/{{{{ asset.name }}}}.ok"\n'
+            "    type: Command\n" + yaml_sync_cmd_mkdir_and_touch(md, file_tpl)
         )
         project = run_serve(
             {

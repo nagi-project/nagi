@@ -40,19 +40,16 @@ pub fn write_stage_logs(
     })
 }
 
-/// Returns the expected log directory for an asset on a given date.
-/// `date` must be a validated YYYY-MM-DD string (via `parse_date`).
-#[cfg(test)]
-pub fn log_dir_for(logs_dir: &Path, asset_name: &str, date: &str) -> std::path::PathBuf {
-    let (yyyy, mm, dd) = split_date(date);
-    logs_dir.join(asset_name).join(yyyy).join(mm).join(dd)
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    fn log_dir_for(logs_dir: &Path, asset_name: &str, date: &str) -> PathBuf {
+        let (yyyy, mm, dd) = split_date(date);
+        logs_dir.join(asset_name).join(yyyy).join(mm).join(dd)
+    }
 
     #[test]
     fn write_creates_files_with_correct_content() {
@@ -111,11 +108,8 @@ mod tests {
 
     #[test]
     fn log_dir_for_returns_correct_path() {
-        let base = Path::new("/home/user/.nagi/logs");
-        let path = log_dir_for(base, "my-asset", "2026-03-16");
-        assert_eq!(
-            path,
-            PathBuf::from("/home/user/.nagi/logs/my-asset/2026/03/16")
-        );
+        let base = PathBuf::from("logs");
+        let path = log_dir_for(&base, "my-asset", "2026-03-16");
+        assert_eq!(path, PathBuf::from("logs").join("my-asset/2026/03/16"));
     }
 }

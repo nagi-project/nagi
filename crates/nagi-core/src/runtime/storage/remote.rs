@@ -41,20 +41,24 @@ impl RemoteObjectStore {
         }
     }
 
-    fn cache_path(&self, asset_name: &str) -> OsPath {
-        self.resolve(&format!("cache/{asset_name}.json"))
+    fn cache_path(&self, asset_name: &str) -> Result<OsPath, StorageError> {
+        super::validate_filename(asset_name)?;
+        Ok(self.resolve(&format!("cache/{asset_name}.json")))
     }
 
-    fn suspended_path(&self, asset_name: &str) -> OsPath {
-        self.resolve(&format!("suspended/{asset_name}.json"))
+    fn suspended_path(&self, asset_name: &str) -> Result<OsPath, StorageError> {
+        super::validate_filename(asset_name)?;
+        Ok(self.resolve(&format!("suspended/{asset_name}.json")))
     }
 
-    fn readiness_path(&self, asset_name: &str) -> OsPath {
-        self.resolve(&format!("readiness/{asset_name}.json"))
+    fn readiness_path(&self, asset_name: &str) -> Result<OsPath, StorageError> {
+        super::validate_filename(asset_name)?;
+        Ok(self.resolve(&format!("readiness/{asset_name}.json")))
     }
 
-    fn lock_path(&self, sync_ref: &str) -> OsPath {
-        self.resolve(&format!("locks/{sync_ref}.lock"))
+    fn lock_path(&self, sync_ref: &str) -> Result<OsPath, StorageError> {
+        super::validate_filename(sync_ref)?;
+        Ok(self.resolve(&format!("locks/{sync_ref}.lock")))
     }
 
     /// Uploads a local file to the remote store. Returns the object store URI.
@@ -88,18 +92,16 @@ fn serde_err(e: serde_json::Error) -> StorageError {
     StorageError::Serde(e)
 }
 
-// ── Cache ─────────────────────────────────────────────────────────────────────
-
 impl Cache for RemoteObjectStore {
     fn write(&self, result: &AssetEvalResult) -> Result<(), StorageError> {
-        let path = self.cache_path(&result.asset_name);
+        let path = self.cache_path(&result.asset_name)?;
         let bytes = serde_json::to_vec(result).map_err(serde_err)?;
         block(self.store.put(&path, bytes.into())).map_err(remote_err)?;
         Ok(())
     }
 
     fn read(&self, asset_name: &str) -> Result<Option<AssetEvalResult>, StorageError> {
-        let path = self.cache_path(asset_name);
+        let path = self.cache_path(asset_name)?;
         match block(self.store.get(&path)) {
             Ok(result) => {
                 let bytes = block(result.bytes()).map_err(remote_err)?;
@@ -112,18 +114,16 @@ impl Cache for RemoteObjectStore {
     }
 }
 
-// ── SuspendedStore ────────────────────────────────────────────────────────────
-
 impl SuspendedStore for RemoteObjectStore {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError> {
-        let path = self.suspended_path(&info.asset_name);
+        let path = self.suspended_path(&info.asset_name)?;
         let bytes = serde_json::to_vec(info).map_err(serde_err)?;
         block(self.store.put(&path, bytes.into())).map_err(remote_err)?;
         Ok(())
     }
 
     fn read(&self, asset_name: &str) -> Result<Option<SuspendedInfo>, StorageError> {
-        let path = self.suspended_path(asset_name);
+        let path = self.suspended_path(asset_name)?;
         match block(self.store.get(&path)) {
             Ok(result) => {
                 let bytes = block(result.bytes()).map_err(remote_err)?;
@@ -136,7 +136,7 @@ impl SuspendedStore for RemoteObjectStore {
     }
 
     fn remove(&self, asset_name: &str) -> Result<(), StorageError> {
-        let path = self.suspended_path(asset_name);
+        let path = self.suspended_path(asset_name)?;
         match block(self.store.delete(&path)) {
             Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(e) => Err(remote_err(e)),
@@ -144,7 +144,7 @@ impl SuspendedStore for RemoteObjectStore {
     }
 
     fn exists(&self, asset_name: &str) -> Result<bool, StorageError> {
-        let path = self.suspended_path(asset_name);
+        let path = self.suspended_path(asset_name)?;
         match block(self.store.head(&path)) {
             Ok(_) => Ok(true),
             Err(object_store::Error::NotFound { .. }) => Ok(false),
@@ -153,12 +153,10 @@ impl SuspendedStore for RemoteObjectStore {
     }
 }
 
-// ── ReadinessStore ────────────────────────────────────────────────────────────
-
 impl ReadinessStore for RemoteObjectStore {
     fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError> {
         for (name, &ready) in readiness {
-            let path = self.readiness_path(name);
+            let path = self.readiness_path(name)?;
             let bytes = serde_json::to_vec(&ready).map_err(serde_err)?;
             block(self.store.put(&path, bytes.into())).map_err(remote_err)?;
         }
@@ -194,8 +192,6 @@ impl ReadinessStore for RemoteObjectStore {
     }
 }
 
-// ── SyncLock ──────────────────────────────────────────────────────────────────
-
 impl SyncLock for RemoteObjectStore {
     /// Attempts to acquire the lock using a conditional put (`PutMode::Create`).
     ///
@@ -208,7 +204,7 @@ impl SyncLock for RemoteObjectStore {
         ttl: Duration,
         execution_id: &str,
     ) -> Result<bool, StorageError> {
-        let path = self.lock_path(sync_ref);
+        let path = self.lock_path(sync_ref)?;
         let info = LockInfo {
             execution_id: execution_id.to_string(),
             acquired_at_epoch_secs: now_epoch_secs(),
@@ -224,7 +220,7 @@ impl SyncLock for RemoteObjectStore {
     }
 
     fn release(&self, sync_ref: &str) -> Result<(), StorageError> {
-        let path = self.lock_path(sync_ref);
+        let path = self.lock_path(sync_ref)?;
         match block(self.store.delete(&path)) {
             Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(e) => Err(remote_err(e)),
@@ -331,8 +327,6 @@ fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
-// ── Backend factory ───────────────────────────────────────────────────────────
-
 /// Creates a `RemoteObjectStore` from the given `BackendConfig`.
 ///
 /// Credentials are resolved from the environment at call time and not stored:
@@ -426,7 +420,7 @@ impl RemoteObjectStore {
     }
 
     fn readiness_read(&self, asset_name: &str) -> Result<Option<bool>, StorageError> {
-        let path = self.readiness_path(asset_name);
+        let path = self.readiness_path(asset_name)?;
         match block(self.store.get(&path)) {
             Ok(result) => {
                 let bytes = block(result.bytes()).map_err(remote_err)?;
@@ -438,8 +432,6 @@ impl RemoteObjectStore {
         }
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -475,8 +467,6 @@ mod tests {
             execution_id: None,
         }
     }
-
-    // ── Cache ──────────────────────────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cache_write_and_read() {
@@ -517,8 +507,6 @@ mod tests {
         assert_eq!(got.asset_name, "asset-x");
     }
 
-    // ── SuspendedStore ─────────────────────────────────────────────────────
-
     #[tokio::test(flavor = "multi_thread")]
     async fn suspended_write_read_remove() {
         let store = in_memory_store(None);
@@ -551,8 +539,6 @@ mod tests {
         names.sort();
         assert_eq!(names, ["x", "y"]);
     }
-
-    // ── ReadinessStore ────────────────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread")]
     async fn readiness_write_all_and_read() {
@@ -593,8 +579,6 @@ mod tests {
         assert_eq!(store.readiness_read("z").unwrap(), Some(true));
     }
 
-    // ── SyncLock ───────────────────────────────────────────────────────────
-
     #[tokio::test(flavor = "multi_thread")]
     async fn sync_lock_acquire_and_release() {
         let store = in_memory_store(None);
@@ -634,10 +618,8 @@ mod tests {
         store.release("ref-ghost").unwrap();
     }
 
-    // ── read_lock tests ────────────────────────────────────────────────
-
     fn write_lock_info(store: &RemoteObjectStore, sync_ref: &str, info: &LockInfo) {
-        let path = store.lock_path(sync_ref);
+        let path = store.lock_path(sync_ref).unwrap();
         let bytes = serde_json::to_vec(info).unwrap();
         block(store.store.put(&path, bytes.into())).unwrap();
     }
@@ -645,7 +627,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn read_lock_returns_not_found_when_missing() {
         let store = in_memory_store(None);
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         assert!(matches!(
             read_lock(&store.store, &path).unwrap(),
             LockReadResult::NotFound
@@ -664,7 +646,7 @@ mod tests {
                 ttl_secs: 3600,
             },
         );
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         assert!(matches!(
             read_lock(&store.store, &path).unwrap(),
             LockReadResult::Held
@@ -683,7 +665,7 @@ mod tests {
                 ttl_secs: 1,
             },
         );
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         assert!(matches!(
             read_lock(&store.store, &path).unwrap(),
             LockReadResult::Expired(Some(ref id)) if id == "exec-old"
@@ -693,15 +675,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn read_lock_returns_expired_none_for_corrupted_content() {
         let store = in_memory_store(None);
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         block(store.store.put(&path, b"not json".to_vec().into())).unwrap();
         assert!(matches!(
             read_lock(&store.store, &path).unwrap(),
             LockReadResult::Expired(None)
         ));
     }
-
-    // ── replace_if_holder_unchanged tests ─────────────────────────────
 
     #[tokio::test(flavor = "multi_thread")]
     async fn replace_if_holder_unchanged_succeeds_when_id_matches() {
@@ -715,7 +695,7 @@ mod tests {
                 ttl_secs: 1,
             },
         );
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         let new_bytes = serde_json::to_vec(&LockInfo {
             execution_id: "exec-new".to_string(),
             acquired_at_epoch_secs: now_epoch_secs(),
@@ -743,7 +723,7 @@ mod tests {
                 ttl_secs: 3600,
             },
         );
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         let new_bytes = serde_json::to_vec(&LockInfo {
             execution_id: "exec-new".to_string(),
             acquired_at_epoch_secs: now_epoch_secs(),
@@ -763,7 +743,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn replace_if_holder_unchanged_creates_when_not_found() {
         let store = in_memory_store(None);
-        let path = store.lock_path("ref");
+        let path = store.lock_path("ref").unwrap();
         let new_bytes = serde_json::to_vec(&LockInfo {
             execution_id: "exec-new".to_string(),
             acquired_at_epoch_secs: now_epoch_secs(),

@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 # Resource names
@@ -11,6 +12,21 @@ CONDITIONS_NAME = "freshness-check"
 FRESHNESS_MAX_AGE = "24h"
 FRESHNESS_INTERVAL = "6h"
 FRESHNESS_COLUMN = "updated_at"
+
+# Platform-dependent shell commands for YAML test fixtures.
+# These are interpolated into kind: Conditions / kind: Sync YAML.
+CMD_TRUE = "'powershell', '-Command', 'exit 0'" if sys.platform == "win32" else "'true'"
+CMD_FALSE = (
+    "'powershell', '-Command', 'exit 1'" if sys.platform == "win32" else "'false'"
+)
+ARGS_FALSE = (
+    '["powershell", "-Command", "exit 1"]' if sys.platform == "win32" else '["false"]'
+)
+ARGS_SLEEP_2 = (
+    '["powershell", "-Command", "Start-Sleep -Seconds 2"]'
+    if sys.platform == "win32"
+    else '["sleep", "2"]'
+)
 
 CONNECTION_YAML = (
     "apiVersion: nagi.io/v1alpha1\n"
@@ -78,3 +94,58 @@ def write_valid_resources(resources_dir: Path) -> None:
     (resources_dir / "conditions.yaml").write_text(CONDITIONS_YAML)
     (resources_dir / "asset.yaml").write_text(ASSET_YAML)
     (resources_dir / "sync.yaml").write_text(SYNC_YAML)
+
+
+def yaml_args_touch(path: Path) -> str:
+    """Return YAML args list that creates a file. Cross-platform."""
+    p = path.as_posix()
+    if sys.platform == "win32":
+        return f'["powershell", "-Command", "New-Item -Force {p}"]'
+    return f'["touch", "{p}"]'
+
+
+def yaml_args_mkdir_and_touch(dir_path: Path, file_path: Path) -> str:
+    """Return YAML args list that creates a directory and a file. Cross-platform."""
+    d = dir_path.as_posix()
+    f = file_path.as_posix()
+    if sys.platform == "win32":
+        return (
+            f'["powershell", "-Command",'
+            f' "New-Item -Force -ItemType Directory {d};'
+            f' New-Item -Force {f}"]'
+        )
+    return f'["sh", "-c", "mkdir -p {d} && touch {f}"]'
+
+
+def yaml_sync_cmd_mkdir_and_touch(dir_posix: str, file_template: str) -> str:
+    """Return YAML args block for sync that creates a dir and touches a file.
+
+    ``file_template`` may contain Nagi template variables like
+    ``{{ asset.name }}``.
+    """
+    if sys.platform == "win32":
+        return (
+            "    args:\n"
+            "      - powershell\n"
+            "      - -Command\n"
+            f'      - "New-Item -Force -ItemType Directory {dir_posix};'
+            f' New-Item -Force {file_template}"\n'
+        )
+    return (
+        "    args:\n"
+        "      - sh\n"
+        "      - -c\n"
+        f'      - "mkdir -p {dir_posix}'
+        f' && touch {file_template}"\n'
+    )
+
+
+def yaml_run_file_exists(path: Path) -> str:
+    """Return YAML run list that checks if a file exists. Cross-platform."""
+    p = path.as_posix()
+    if sys.platform == "win32":
+        return (
+            f"['powershell', '-Command',"
+            f" 'if (Test-Path {p}) {{ exit 0 }} else {{ exit 1 }}']"
+        )
+    return f"['test', '-f', '{p}']"

@@ -15,27 +15,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-rust:
+  static-check-rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
           components: clippy, rustfmt
-
-      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: check-rust-${{ hashFiles('**/Cargo.lock', 'crates/**/*.rs') }}
-          restore-keys: check-rust-
-
-      - uses: ./.github/actions/setup-duckdb
+          cache-prefix: static-check-rust
 
       - name: Check formatting
         run: cargo fmt --check
@@ -67,36 +55,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Test
-        run: cargo test
-
-  check-python:
+  static-check-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
+          cache-prefix: static-check-python
 
-      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: check-python-${{ hashFiles('**/Cargo.lock', 'crates/**/*.rs') }}
-          restore-keys: check-python-
-
-      - uses: ./.github/actions/setup-duckdb
-
-      - name: Read uv version
-        id: uv-version
-        run: echo "version=$(grep '^uv = ' mise.toml | sed 's/.*= *"\(.*\)"/\1/')" >> "$GITHUB_OUTPUT"
-
-      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
-        with:
-          version: ${{ steps.uv-version.outputs.version }}
+      - uses: ./.github/actions/setup-uv
 
       - name: Ruff check
         run: uvx ruff check python/
@@ -105,7 +73,7 @@ jobs:
         run: uvx ruff format --check python/
 
       - name: Build
-        run: uv sync --all-extras
+        run: uv sync --all-extras --no-dev --group lint
 
       - name: Audit .pth files
         run: |
@@ -149,14 +117,100 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  python-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      min: ${{ steps.parse.outputs.min }}
+      latest: ${{ steps.parse.outputs.latest }}
+      dbt: ${{ steps.parse.outputs.dbt }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-uv
+
+      - id: parse
+        shell: bash
+        run: |
+          echo "min=$(grep 'requires-python' pyproject.toml | sed 's/.*>=\([0-9.]*\).*/\1/')" >> "$GITHUB_OUTPUT"
+          echo "latest=$(uv python list | grep -E '^cpython-3\.' | grep -v 'freethreaded\|a[0-9]\|b[0-9]\|rc[0-9]' | head -1 | sed 's/cpython-\([0-9]*\.[0-9]*\)\..*/\1/')" >> "$GITHUB_OUTPUT"
+          echo "dbt=$(grep '^UV_PYTHON' mise.toml | sed 's/.*= *"\(.*\)"/\1/')" >> "$GITHUB_OUTPUT"
+
+  build-and-test-rust:
+    needs: static-check-rust
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-prefix: build-and-test-rust
+
+      - uses: ./.github/actions/setup-duckdb
+
+      - name: Test
+        run: cargo test
+
+  unit-test-python:
+    needs: [static-check-python, python-versions]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["${{ needs.python-versions.outputs.latest }}"]
+        include:
+          - os: ubuntu-latest
+            python: "${{ needs.python-versions.outputs.min }}"
+    runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-prefix: unit-test-python
+
+      - uses: ./.github/actions/setup-uv
+
+      - name: Build
+        run: uv sync --all-extras --no-dev --group lint --group test
+
       - name: Type check
-        run: uv run ty check python/
+        run: uv run --no-dev --group lint ty check python/
 
       - name: Unit test
-        run: uv run pytest python/tests/ -v -m "not integration and not scenario" -n auto
+        run: uv run --no-dev --group test pytest python/tests/ -v -m "not integration and not scenario" -n auto
+
+  integration-test-python:
+    needs: [static-check-python, python-versions]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # dbt-core does not support Python 3.14+.
+      UV_PYTHON: ${{ needs.python-versions.outputs.dbt }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-prefix: integration-test-python
+
+      - uses: ./.github/actions/setup-duckdb
+
+      - uses: ./.github/actions/setup-uv
+
+      - name: Build
+        run: uv sync --all-extras --no-dev --group test --group dbt
 
       - name: Integration test
-        run: uv run pytest python/tests/integration/ -v -m integration
+        run: uv run --no-dev --group test --group dbt pytest python/tests/integration/ -v -m integration
 
       - name: Scenario test
-        run: uv run pytest python/tests/scenario/ -v -m scenario
+        run: uv run --no-dev --group test --group dbt pytest python/tests/scenario/ -v -m scenario

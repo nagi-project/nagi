@@ -39,14 +39,20 @@ mod tests {
 
     #[tokio::test]
     async fn exit_zero_is_ready() {
+        #[cfg(not(windows))]
         let run = vec!["true".to_string()];
+        #[cfg(windows)]
+        let run = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
         let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert_eq!(status, ConditionStatus::Ready);
     }
 
     #[tokio::test]
     async fn exit_nonzero_is_drifted() {
+        #[cfg(not(windows))]
         let run = vec!["false".to_string()];
+        #[cfg(windows)]
+        let run = vec!["powershell".into(), "-Command".into(), "exit 1".into()];
         let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert!(matches!(status, ConditionStatus::Drifted { .. }));
     }
@@ -60,10 +66,17 @@ mod tests {
 
     #[tokio::test]
     async fn env_vars_are_passed_to_subprocess() {
+        #[cfg(not(windows))]
         let run = vec![
             "sh".to_string(),
             "-c".to_string(),
             "test \"$NAGI_TEST_VAR\" = hello".to_string(),
+        ];
+        #[cfg(windows)]
+        let run = vec![
+            "powershell".into(),
+            "-Command".into(),
+            "if ($env:NAGI_TEST_VAR -eq 'hello') { exit 0 } else { exit 1 }".into(),
         ];
         let mut env = HashMap::new();
         env.insert("NAGI_TEST_VAR".to_string(), "hello".to_string());

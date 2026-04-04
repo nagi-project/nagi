@@ -127,6 +127,11 @@ struct JwtClaims {
 }
 
 async fn token_from_adc(client: &reqwest::Client) -> Result<String, ConnectionError> {
+    #[cfg(windows)]
+    let adc_path = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("gcloud/application_default_credentials.json");
+    #[cfg(not(windows))]
     let adc_path = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".config/gcloud/application_default_credentials.json");

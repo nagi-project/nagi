@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from tests.helper import CMD_FALSE
+
 DBT_PROJECTS_DIR = Path(__file__).parent.parent / "dbt_projects"
 ANALYTICS_DIR = DBT_PROJECTS_DIR / "analytics"
 ECOMMERCE_DIR = DBT_PROJECTS_DIR / "ecommerce"
@@ -38,7 +40,7 @@ DRIFTED_CONDITIONS = (
     "spec:\n"
     "  - name: always-fail\n"
     "    type: Command\n"
-    "    run: ['false']\n"
+    f"    run: [{CMD_FALSE}]\n"
 )
 
 DRIFTED_ASSET = (
