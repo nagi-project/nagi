@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn exit_zero_is_ready() {
-        #[cfg(unix)]
+        #[cfg(not(windows))]
         let run = vec!["true".to_string()];
         #[cfg(windows)]
         let run = vec!["cmd".into(), "/C".into(), "exit 0".into()];
@@ -49,7 +49,7 @@ mod tests {
 
     #[tokio::test]
     async fn exit_nonzero_is_drifted() {
-        #[cfg(unix)]
+        #[cfg(not(windows))]
         let run = vec!["false".to_string()];
         #[cfg(windows)]
         let run = vec!["cmd".into(), "/C".into(), "exit 1".into()];
@@ -66,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn env_vars_are_passed_to_subprocess() {
-        #[cfg(unix)]
+        #[cfg(not(windows))]
         let run = vec![
             "sh".to_string(),
             "-c".to_string(),
