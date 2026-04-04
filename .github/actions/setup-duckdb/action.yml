@@ -10,6 +10,7 @@ runs:
       run: |
         VERSION=$(grep '^duckdb = ' mise.toml | sed 's/.*= *"\(.*\)"/\1/')
         curl https://install.duckdb.org | DUCKDB_VERSION="$VERSION" sh
+        echo "$HOME/.duckdb/cli/$VERSION" >> "$GITHUB_PATH"
 
     - name: Install DuckDB CLI (Windows)
       if: runner.os == 'Windows'
