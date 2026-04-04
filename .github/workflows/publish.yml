@@ -34,7 +34,7 @@ jobs:
           - os: ubuntu-latest
             target: aarch64
             manylinux: auto
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64
           - os: macos-latest
             target: aarch64
@@ -43,6 +43,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup QEMU
+        if: matrix.target == 'aarch64' && runner.os == 'Linux'
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        with:
+          platforms: arm64
 
       - uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1.50.1
         with:
