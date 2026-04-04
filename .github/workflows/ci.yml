@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'mkdocs.ja.yml'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'mkdocs.ja.yml'
 
 permissions:
   contents: read
