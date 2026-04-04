@@ -60,6 +60,7 @@ markers = [
 
 [tool.uv]
 exclude-newer = "7 days"
+cache-keys = [{ file = "crates/**/*.rs" }, { file = "Cargo.toml" }, { file = "Cargo.lock" }]
 
 [tool.maturin]
 manifest-path = "crates/nagi-core/Cargo.toml"
