@@ -4,8 +4,8 @@ description: Install DuckDB CLI binary
 runs:
   using: composite
   steps:
-    - name: Install DuckDB CLI (Linux)
-      if: runner.os == 'Linux'
+    - name: Install DuckDB CLI (Linux/macOS)
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         VERSION=$(grep '^duckdb = ' mise.toml | sed 's/.*= *"\(.*\)"/\1/')

@@ -1,5 +1,11 @@
 # Get Started
 
+## Supported Platforms
+
+- Linux (x86_64)
+- macOS (ARM)
+- Windows (x86_64)
+
 ## Install
 
 ```bash
