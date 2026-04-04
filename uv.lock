@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-28T09:31:59.079884Z"
+exclude-newer = "2026-03-28T13:43:59.547904Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -1021,7 +1021,6 @@ wheels = [
 
 [[package]]
 name = "nagi-cli"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
