@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-28T08:51:13.999539Z"
+exclude-newer = "2026-03-28T09:31:59.079884Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -1034,6 +1034,10 @@ mcp = [
 ]
 
 [package.dev-dependencies]
+dbt = [
+    { name = "dbt-core" },
+    { name = "dbt-duckdb" },
+]
 dev = [
     { name = "dbt-core" },
     { name = "dbt-duckdb" },
@@ -1054,8 +1058,6 @@ lint = [
     { name = "ty" },
 ]
 test = [
-    { name = "dbt-core" },
-    { name = "dbt-duckdb" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "pytest-xdist" },
@@ -1070,6 +1072,10 @@ requires-dist = [
 provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]
+dbt = [
+    { name = "dbt-core", specifier = ">=1.11.7" },
+    { name = "dbt-duckdb", specifier = ">=1.10.1" },
+]
 dev = [
     { name = "dbt-core", specifier = ">=1.11.7" },
     { name = "dbt-duckdb", specifier = ">=1.10.1" },
@@ -1090,8 +1096,6 @@ lint = [
     { name = "ty", specifier = ">=0.0.1a7" },
 ]
 test = [
-    { name = "dbt-core", specifier = ">=1.11.7" },
-    { name = "dbt-duckdb", specifier = ">=1.10.1" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-mock", specifier = ">=3.0" },
     { name = "pytest-xdist", specifier = ">=3.0" },
