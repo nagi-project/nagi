@@ -34,7 +34,7 @@ jobs:
           - os: ubuntu-latest
             target: aarch64
             manylinux: auto
-          - os: macos-15-large
+          - os: macos-15-intel
             target: x86_64
           - os: macos-latest
             target: aarch64
