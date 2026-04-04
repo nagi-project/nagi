@@ -4,21 +4,12 @@ description: Read uv version from mise.toml and install it
 runs:
   using: composite
   steps:
-    - name: Read uv version (Linux/macOS)
-      if: runner.os != 'Windows'
-      id: uv-version-unix
+    - name: Read uv version from mise.toml
+      id: config
       shell: bash
       run: echo "version=$(grep '^uv = ' mise.toml | sed 's/.*= *"\(.*\)"/\1/')" >> "$GITHUB_OUTPUT"
 
-    - name: Read uv version (Windows)
-      if: runner.os == 'Windows'
-      id: uv-version-windows
-      shell: pwsh
-      run: |
-        $version = (Select-String -Path mise.toml -Pattern '^uv = "(.*)"').Matches.Groups[1].Value
-        echo "version=$version" >> $env:GITHUB_OUTPUT
-
     - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
       with:
-        version: ${{ steps.uv-version-unix.outputs.version || steps.uv-version-windows.outputs.version }}
+        version: ${{ steps.config.outputs.version }}
         enable-cache: true

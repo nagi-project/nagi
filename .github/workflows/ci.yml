@@ -154,6 +154,11 @@ jobs:
 
       - uses: ./.github/actions/setup-uv
 
+      # dbt-core does not support Python 3.14+. UV_PYTHON is pinned in mise.toml.
+      - name: Set UV_PYTHON from mise.toml
+        shell: bash
+        run: echo "UV_PYTHON=$(grep '^UV_PYTHON = ' mise.toml | sed 's/.*= *"\(.*\)"/\1/')" >> "$GITHUB_ENV"
+
       - name: Build
         run: uv sync --all-extras --no-dev --group lint --group test
 
