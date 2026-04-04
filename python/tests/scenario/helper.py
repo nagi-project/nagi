@@ -10,6 +10,7 @@ import os
 import signal
 import sqlite3
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -40,21 +41,30 @@ def write_project(
 
 
 def start_serve(project: Path) -> subprocess.Popen[bytes]:
+    args = [
+        "uv",
+        "run",
+        "nagi",
+        "serve",
+        "--resources-dir",
+        str(project / "resources"),
+        "--target-dir",
+        str(project / "target"),
+        "--cache-dir",
+        str(project / "cache"),
+        "--project-dir",
+        str(project),
+    ]
+    if sys.platform == "win32":
+        return subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=project,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
     return subprocess.Popen(
-        [
-            "uv",
-            "run",
-            "nagi",
-            "serve",
-            "--resources-dir",
-            str(project / "resources"),
-            "--target-dir",
-            str(project / "target"),
-            "--cache-dir",
-            str(project / "cache"),
-            "--project-dir",
-            str(project),
-        ],
+        args,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=project,
@@ -65,11 +75,17 @@ def start_serve(project: Path) -> subprocess.Popen[bytes]:
 def stop_serve(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            if sys.platform == "win32":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
             proc.wait(timeout=10)
         except (subprocess.TimeoutExpired, ProcessLookupError):
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                if sys.platform == "win32":
+                    proc.kill()
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
             proc.wait(timeout=5)

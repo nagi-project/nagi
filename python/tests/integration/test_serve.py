@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,14 @@ def _start_serve(
     ]
     if extra_args:
         args.extend(extra_args)
+    if sys.platform == "win32":
+        return subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=project,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
     return subprocess.Popen(
         args,
         stdout=subprocess.DEVNULL,
@@ -104,11 +113,17 @@ def _stop_serve(proc: subprocess.Popen[bytes]) -> None:
 
     if proc.poll() is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            if sys.platform == "win32":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
             proc.wait(timeout=10)
         except (subprocess.TimeoutExpired, ProcessLookupError):
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                if sys.platform == "win32":
+                    proc.kill()
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
             proc.wait(timeout=5)
