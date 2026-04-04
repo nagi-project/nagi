@@ -6,12 +6,11 @@ Tests verify evaluate/sync execution counts and ordering by querying logs.db.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-from tests.helper import yaml_run_file_exists
+from tests.helper import yaml_run_file_exists, yaml_sync_cmd_mkdir_and_touch
 from tests.scenario.conftest import StartServe
 from tests.scenario.helper import (
     NOOP_SYNC,
@@ -90,23 +89,7 @@ class TestScenario1LinearChain:
             )
         conditions = "---\n".join(cond_docs)
         md = marker_dir.as_posix()
-        if sys.platform == "win32":
-            sync_cmd = (
-                "    args:\n"
-                "      - cmd\n"
-                "      - /C\n"
-                f'      - "mkdir {md} 2>nul'
-                f' & type nul > {md}/{{{{ asset.name }}}}.ok"\n'
-            )
-        else:
-            sync_cmd = (
-                "    args:\n"
-                "      - sh\n"
-                "      - -c\n"
-                f'      - "mkdir -p {md}'
-                " && touch "
-                f'{md}/{{{{ asset.name }}}}.ok"\n'
-            )
+        file_tpl = f"{md}/{{{{ asset.name }}}}.ok"
         sync_yaml = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -114,7 +97,7 @@ class TestScenario1LinearChain:
             "  name: create-marker\n"
             "spec:\n"
             "  run:\n"
-            "    type: Command\n" + sync_cmd
+            "    type: Command\n" + yaml_sync_cmd_mkdir_and_touch(md, file_tpl)
         )
         project = run_serve(
             {
@@ -322,23 +305,7 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "    interval: 3s\n"
         )
         md = marker_dir.as_posix()
-        if sys.platform == "win32":
-            sync_cmd = (
-                "    args:\n"
-                "      - cmd\n"
-                "      - /C\n"
-                f'      - "mkdir {md} 2>nul'
-                f' & type nul > {md}/{{{{ asset.name }}}}.ok"\n'
-            )
-        else:
-            sync_cmd = (
-                "    args:\n"
-                "      - sh\n"
-                "      - -c\n"
-                f'      - "mkdir -p {md}'
-                " && touch "
-                f'{md}/{{{{ asset.name }}}}.ok"\n'
-            )
+        file_tpl = f"{md}/{{{{ asset.name }}}}.ok"
         sync_yaml = (
             "apiVersion: nagi.io/v1alpha1\n"
             "kind: Sync\n"
@@ -346,7 +313,7 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "  name: create-marker\n"
             "spec:\n"
             "  run:\n"
-            "    type: Command\n" + sync_cmd
+            "    type: Command\n" + yaml_sync_cmd_mkdir_and_touch(md, file_tpl)
         )
         project = run_serve(
             {
