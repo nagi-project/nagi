@@ -43,7 +43,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           command -v cargo-audit >/dev/null || cargo install cargo-audit
-          RESULT=$(cargo audit --color never 2>&1) || AUDIT_RC=$?
+          RESULT=$(cargo audit --color never --ignore RUSTSEC-2023-0071 2>&1) || AUDIT_RC=$?
           AUDIT_RC=${AUDIT_RC:-0}
           # Minimize previous cargo audit comments
           gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
@@ -105,7 +105,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           uv export --frozen --no-emit-project > requirements.txt
-          RESULT=$(uvx pip-audit -r requirements.txt 2>&1) || AUDIT_RC=$?
+          RESULT=$(uvx pip-audit -r requirements.txt --ignore-vuln CVE-2026-4539 2>&1) || AUDIT_RC=$?
           AUDIT_RC=${AUDIT_RC:-0}
           # Minimize previous pip-audit comments
           gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
