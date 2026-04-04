@@ -73,7 +73,7 @@ jobs:
         run: uvx ruff format --check python/
 
       - name: Build
-        run: uv sync --all-extras --no-group test --no-group docs
+        run: uv sync --all-extras --no-dev --group lint
 
       - name: Audit .pth files
         run: |
@@ -155,7 +155,7 @@ jobs:
       - uses: ./.github/actions/setup-uv
 
       - name: Build
-        run: uv sync --all-extras --no-group docs
+        run: uv sync --all-extras --no-dev --group lint --group test
 
       - name: Type check
         run: uv run ty check python/
