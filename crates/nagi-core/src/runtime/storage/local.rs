@@ -23,7 +23,7 @@ impl LocalCache {
     }
 
     fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
-        super::validate_asset_name(asset_name)?;
+        super::validate_filename(asset_name)?;
         Ok(self.cache_dir.join(format!("{asset_name}.json")))
     }
 }
@@ -84,14 +84,14 @@ impl LocalSuspendedStore {
     }
 
     fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
-        super::validate_asset_name(asset_name)?;
+        super::validate_filename(asset_name)?;
         Ok(self.dir.join(format!("{asset_name}.json")))
     }
 }
 
 impl SuspendedStore for LocalSuspendedStore {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError> {
-        super::validate_asset_name(&info.asset_name)?;
+        super::validate_filename(&info.asset_name)?;
         std::fs::create_dir_all(&self.dir)?;
         let json = serde_json::to_string_pretty(info)?;
         std::fs::write(self.asset_path(&info.asset_name)?, json)?;
@@ -159,7 +159,7 @@ impl LocalConditionCache {
     }
 
     fn asset_dir(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
-        super::validate_asset_name(asset_name)?;
+        super::validate_filename(asset_name)?;
         Ok(self.dir.join(asset_name))
     }
 
@@ -169,6 +169,7 @@ impl LocalConditionCache {
         condition_name: &str,
     ) -> Result<PathBuf, StorageError> {
         let dir = self.asset_dir(asset_name)?;
+        super::validate_filename(condition_name)?;
         Ok(dir.join(format!("{condition_name}.json")))
     }
 }
@@ -253,7 +254,7 @@ impl LocalReadinessStore {
     }
 
     fn asset_path(&self, asset_name: &str) -> Result<PathBuf, StorageError> {
-        super::validate_asset_name(asset_name)?;
+        super::validate_filename(asset_name)?;
         Ok(self.dir.join(format!("{asset_name}.json")))
     }
 }
@@ -262,7 +263,7 @@ impl ReadinessStore for LocalReadinessStore {
     fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError> {
         std::fs::create_dir_all(&self.dir)?;
         for (name, &ready) in readiness {
-            super::validate_asset_name(name)?;
+            super::validate_filename(name)?;
             let json = serde_json::to_string(&ready)?;
             std::fs::write(self.asset_path(name)?, json)?;
         }
@@ -646,26 +647,24 @@ mod tests {
         assert_eq!(store.read("a").unwrap(), Some(true));
     }
 
-    macro_rules! validate_asset_name_test {
-        ($($name:ident: $input:expr => $ok:expr;)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    assert_eq!(crate::runtime::storage::validate_asset_name($input).is_ok(), $ok);
-                }
-            )*
-        };
+    #[test]
+    fn condition_path_rejects_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LocalConditionCache::new(dir.path().to_path_buf());
+        assert!(cache.condition_path("asset", "../etc").is_err());
+        assert!(cache.condition_path("asset", "a/b").is_err());
+        assert!(cache.condition_path("asset", "a\\b").is_err());
+        assert!(cache.condition_path("asset", "valid-name").is_ok());
     }
 
-    validate_asset_name_test! {
-        valid_simple: "daily-sales" => true;
-        valid_with_dots: "my.asset" => true;
-        reject_empty: "" => false;
-        reject_dot: "." => false;
-        reject_dotdot: ".." => false;
-        reject_slash: "a/b" => false;
-        reject_backslash: "a\\b" => false;
-        reject_null: "a\0b" => false;
+    #[test]
+    fn lock_path_rejects_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = LocalSyncLock::new(dir.path().to_path_buf());
+        assert!(lock.lock_path("../etc").is_err());
+        assert!(lock.lock_path("a/b").is_err());
+        assert!(lock.lock_path("a\\b").is_err());
+        assert!(lock.lock_path("valid-ref").is_ok());
     }
 }
 
@@ -683,8 +682,9 @@ impl LocalSyncLock {
         Self { dir }
     }
 
-    fn lock_path(&self, sync_ref: &str) -> PathBuf {
-        self.dir.join(format!("{sync_ref}.lock"))
+    fn lock_path(&self, sync_ref: &str) -> Result<PathBuf, StorageError> {
+        super::validate_filename(sync_ref)?;
+        Ok(self.dir.join(format!("{sync_ref}.lock")))
     }
 }
 
@@ -728,7 +728,7 @@ impl SyncLock for LocalSyncLock {
         execution_id: &str,
     ) -> Result<bool, StorageError> {
         std::fs::create_dir_all(&self.dir)?;
-        let path = self.lock_path(sync_ref);
+        let path = self.lock_path(sync_ref)?;
 
         if matches!(check_existing_lock(&path)?, LockCheck::Held) {
             return Ok(false);
@@ -759,7 +759,7 @@ impl SyncLock for LocalSyncLock {
     }
 
     fn release(&self, sync_ref: &str) -> Result<(), StorageError> {
-        let path = self.lock_path(sync_ref);
+        let path = self.lock_path(sync_ref)?;
         match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
