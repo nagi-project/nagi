@@ -101,7 +101,7 @@ class TestScenario1LinearChain:
             "      - python\n"
             "      - -c\n"
             f"      - \"import os; os.makedirs('{md}', exist_ok=True);"
-            f" open('{md}/{{{{{{ asset.name }}}}}}.ok', 'w').close()\"\n"
+            f" open('{md}/{{{{ asset.name }}}}.ok', 'w').close()\"\n"
         )
         project = run_serve(
             {
@@ -321,7 +321,7 @@ class TestScenario7UpstreamDriftedBlocksDownstream:
             "      - python\n"
             "      - -c\n"
             f"      - \"import os; os.makedirs('{md}', exist_ok=True);"
-            f" open('{md}/{{{{{{ asset.name }}}}}}.ok', 'w').close()\"\n"
+            f" open('{md}/{{{{ asset.name }}}}.ok', 'w').close()\"\n"
         )
         project = run_serve(
             {
