@@ -15,11 +15,15 @@ FRESHNESS_COLUMN = "updated_at"
 
 # Platform-dependent shell commands for YAML test fixtures.
 # These are interpolated into kind: Conditions / kind: Sync YAML.
-CMD_TRUE = "'cmd', '/C', 'exit 0'" if sys.platform == "win32" else "'true'"
-CMD_FALSE = "'cmd', '/C', 'exit 1'" if sys.platform == "win32" else "'false'"
-ARGS_FALSE = '["cmd", "/C", "exit 1"]' if sys.platform == "win32" else '["false"]'
+CMD_TRUE = "'powershell', '-Command', 'exit 0'" if sys.platform == "win32" else "'true'"
+CMD_FALSE = (
+    "'powershell', '-Command', 'exit 1'" if sys.platform == "win32" else "'false'"
+)
+ARGS_FALSE = (
+    '["powershell", "-Command", "exit 1"]' if sys.platform == "win32" else '["false"]'
+)
 ARGS_SLEEP_2 = (
-    '["python", "-c", "import time; time.sleep(2)"]'
+    '["powershell", "-Command", "Start-Sleep -Seconds 2"]'
     if sys.platform == "win32"
     else '["sleep", "2"]'
 )
@@ -96,7 +100,7 @@ def yaml_args_touch(path: Path) -> str:
     """Return YAML args list that creates a file. Cross-platform."""
     p = path.as_posix()
     if sys.platform == "win32":
-        return f'["cmd", "/C", "type nul > {p}"]'
+        return f'["powershell", "-Command", "New-Item -Force {p}"]'
     return f'["touch", "{p}"]'
 
 
@@ -105,7 +109,11 @@ def yaml_args_mkdir_and_touch(dir_path: Path, file_path: Path) -> str:
     d = dir_path.as_posix()
     f = file_path.as_posix()
     if sys.platform == "win32":
-        return f'["cmd", "/C", "mkdir {d} 2>nul & type nul > {f}"]'
+        return (
+            f'["powershell", "-Command",'
+            f' "New-Item -Force -ItemType Directory {d};'
+            f' New-Item -Force {f}"]'
+        )
     return f'["sh", "-c", "mkdir -p {d} && touch {f}"]'
 
 
@@ -118,10 +126,10 @@ def yaml_sync_cmd_mkdir_and_touch(dir_posix: str, file_template: str) -> str:
     if sys.platform == "win32":
         return (
             "    args:\n"
-            "      - cmd\n"
-            "      - /C\n"
-            f'      - "mkdir {dir_posix} 2>nul'
-            f' & type nul > {file_template}"\n'
+            "      - powershell\n"
+            "      - -Command\n"
+            f'      - "New-Item -Force -ItemType Directory {dir_posix};'
+            f' New-Item -Force {file_template}"\n'
         )
     return (
         "    args:\n"
@@ -136,5 +144,8 @@ def yaml_run_file_exists(path: Path) -> str:
     """Return YAML run list that checks if a file exists. Cross-platform."""
     p = path.as_posix()
     if sys.platform == "win32":
-        return f"['cmd', '/C', 'if exist {p} (exit 0) else (exit 1)']"
+        return (
+            f"['powershell', '-Command',"
+            f" 'if (Test-Path {p}) {{ exit 0 }} else {{ exit 1 }}']"
+        )
     return f"['test', '-f', '{p}']"

@@ -42,7 +42,7 @@ mod tests {
         #[cfg(not(windows))]
         let run = vec!["true".to_string()];
         #[cfg(windows)]
-        let run = vec!["cmd".into(), "/C".into(), "exit 0".into()];
+        let run = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
         let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert_eq!(status, ConditionStatus::Ready);
     }
@@ -52,7 +52,7 @@ mod tests {
         #[cfg(not(windows))]
         let run = vec!["false".to_string()];
         #[cfg(windows)]
-        let run = vec!["cmd".into(), "/C".into(), "exit 1".into()];
+        let run = vec!["powershell".into(), "-Command".into(), "exit 1".into()];
         let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert!(matches!(status, ConditionStatus::Drifted { .. }));
     }
@@ -74,9 +74,9 @@ mod tests {
         ];
         #[cfg(windows)]
         let run = vec![
-            "cmd".into(),
-            "/C".into(),
-            "if \"%NAGI_TEST_VAR%\"==\"hello\" (exit 0) else (exit 1)".into(),
+            "powershell".into(),
+            "-Command".into(),
+            "if ($env:NAGI_TEST_VAR -eq 'hello') { exit 0 } else { exit 1 }".into(),
         ];
         let mut env = HashMap::new();
         env.insert("NAGI_TEST_VAR".to_string(), "hello".to_string());
