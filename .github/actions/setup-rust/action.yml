@@ -7,7 +7,7 @@ inputs:
     required: false
     default: ""
   cache-prefix:
-    description: Cache key prefix for cargo cache
+    description: Cache key prefix for Swatinem/rust-cache
     required: true
 
 runs:
@@ -18,12 +18,10 @@ runs:
         toolchain: stable
         components: ${{ inputs.components }}
 
-    - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
-        path: |
-          ~/.cargo/bin
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ inputs.cache-prefix }}-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'crates/**/*.rs') }}
-        restore-keys: ${{ inputs.cache-prefix }}-${{ runner.os }}-
+        prefix-key: ${{ inputs.cache-prefix }}
+
+    - name: Disable incremental compilation
+      shell: bash
+      run: echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"

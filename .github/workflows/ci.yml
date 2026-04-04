@@ -15,6 +15,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.set.outputs.os }}
+    steps:
+      - id: set
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ contains(github.event.pull_request.labels.*.name, 'test:macos') }}" = "true" ]; then
+            echo 'os=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'os=["ubuntu-latest","windows-latest"]' >> "$GITHUB_OUTPUT"
+          fi
+
   static-check-rust:
     runs-on: ubuntu-latest
     steps:
@@ -118,11 +131,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   build-and-test-rust:
-    needs: static-check-rust
+    needs: [setup-matrix, static-check-rust]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJson(needs.setup-matrix.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -137,11 +150,11 @@ jobs:
         run: cargo test
 
   build-and-test-python:
-    needs: static-check-python
+    needs: [setup-matrix, static-check-python]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJson(needs.setup-matrix.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
