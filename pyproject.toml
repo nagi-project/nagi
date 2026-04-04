@@ -1,14 +1,39 @@
 [project]
 name = "nagi-cli"
-version = "0.1.0"
+dynamic = ["version"]
+description = "A reconciliation engine that declaratively defines the desired state of data and automatically converges toward that state"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    { name = "The Nagi Contributors" },
+]
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0",
     "pyyaml>=6.0",
 ]
+keywords = ["reconciliation", "desired-state", "drift-detection", "data-pipeline", "data-quality"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2.0"]
+
+[project.urls]
+Homepage = "https://nagi-project.dev/"
+Repository = "https://github.com/nagi-project/nagi"
+Documentation = "https://nagi-project.dev/"
+Issues = "https://github.com/nagi-project/nagi/issues"
 
 [project.scripts]
 nagi = "nagi_cli.main:cli"
@@ -60,6 +85,12 @@ markers = [
     "integration: tests that require real DB connections and CLI execution",
     "scenario: end-to-end serve scenario tests verifying reconciliation loop behavior",
 ]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
 
 [tool.uv]
 exclude-newer = "7 days"
