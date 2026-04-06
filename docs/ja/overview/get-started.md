@@ -2,8 +2,8 @@
 
 ## Supported Platforms
 
-- Linux (x86_64)
-- macOS (ARM / x86_64)
+- Linux (x86_64 / ARM)
+- macOS (x86_64 / ARM)
 - Windows (x86_64)
 
 ## Install
