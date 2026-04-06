@@ -1,10 +1,14 @@
 mod command;
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::runtime::compile::CompiledAsset;
 use crate::runtime::kind::sync::{SyncSpec, SyncStep};
 use crate::runtime::log::{LogError, LogStore};
+use crate::runtime::storage::Cache;
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -31,6 +35,12 @@ pub enum SyncError {
 
     #[error("dbt Cloud error: {0}")]
     DbtCloud(String),
+
+    #[error("evaluate error: {0}")]
+    Evaluate(String),
+
+    #[error("connection error: {0}")]
+    Connection(String),
 
     #[error("serialization error: {0}")]
     Serialize(String),
@@ -300,6 +310,157 @@ pub(crate) fn resolve_sync_spec(
         .ok_or_else(|| SyncError::NoSyncSpec {
             asset_name: compiled.metadata.name.clone(),
         })
+}
+
+/// Checks whether dbt Cloud jobs are running for the given asset.
+/// Skipped when `force` is true or the asset has no `dbt_cloud_job_ids`.
+pub(crate) async fn preflight_check_dbt_cloud(
+    compiled: &CompiledAsset,
+    force: bool,
+) -> Result<(), SyncError> {
+    if force {
+        return Ok(());
+    }
+    let job_ids = match &compiled.spec.dbt_cloud_job_ids {
+        Some(ids) => ids,
+        None => return Ok(()),
+    };
+    let cred_path =
+        crate::runtime::kind::origin::dbt::cloud::extract_credentials_path(&compiled.connection)
+            .ok_or_else(|| {
+                SyncError::DbtCloud(format!(
+                    "asset '{}' has dbt_cloud_job_ids but no dbt Cloud credentials in connection",
+                    compiled.metadata.name
+                ))
+            })?;
+    crate::runtime::kind::origin::dbt::cloud::preflight_check(
+        &compiled.metadata.name,
+        cred_path,
+        job_ids,
+    )
+    .await
+    .map_err(|e| SyncError::DbtCloud(e.to_string()))
+}
+
+/// Links an evaluation to a sync execution via the log store.
+/// No-op when either `log_store` or `evaluation_id` is `None`.
+fn link_evaluation(log_store: Option<&LogStore>, execution_id: &str, evaluation_id: Option<&str>) {
+    if let (Some(store), Some(eval_id)) = (log_store, evaluation_id) {
+        if let Err(e) = store.write_sync_evaluation(execution_id, eval_id) {
+            tracing::warn!(error = %e, "failed to link evaluation to execution");
+        }
+    }
+}
+
+/// Writes an evaluation result to the local cache.
+fn write_eval_cache(cache_dir: Option<&Path>, result: &crate::runtime::evaluate::AssetEvalResult) {
+    if let Some(dir) = cache_dir {
+        let cache = crate::runtime::storage::local::LocalCache::new(dir.to_path_buf());
+        if let Err(e) = cache.write(result) {
+            tracing::warn!(error = %e, "failed to write evaluation to cache");
+        }
+    }
+}
+
+/// Evaluates an asset and writes the result to the local cache.
+pub(crate) async fn evaluate_and_cache(
+    compiled: &CompiledAsset,
+    conn: Option<&dyn crate::runtime::kind::connection::Connection>,
+    log_store: Option<&LogStore>,
+    cache_dir: Option<&Path>,
+) -> Result<crate::runtime::evaluate::AssetEvalResult, SyncError> {
+    let result = crate::runtime::evaluate::evaluate_asset(
+        &compiled.metadata.name,
+        &compiled.spec.on_drift,
+        conn,
+        log_store,
+    )
+    .await
+    .map_err(|e| SyncError::Evaluate(e.to_string()))?;
+
+    write_eval_cache(cache_dir, &result);
+    Ok(result)
+}
+
+/// Parameters for `run_sync_workflow`.
+pub(crate) struct SyncWorkflowParams<'a> {
+    pub compiled: &'a CompiledAsset,
+    pub sync_type: SyncType,
+    pub stages: Option<&'a [Stage]>,
+    pub force: bool,
+    pub evaluation_id: Option<&'a str>,
+    pub log_store: Option<&'a LogStore>,
+    pub cache_dir: Option<&'a Path>,
+}
+
+/// Re-evaluates after sync and links the evaluation to the execution.
+/// Failures are logged as warnings and do not propagate.
+async fn re_evaluate_and_link(
+    compiled: &CompiledAsset,
+    log_store: Option<&LogStore>,
+    cache_dir: Option<&Path>,
+    execution_id: &str,
+) {
+    let conn = match compiled
+        .connection
+        .as_ref()
+        .map(|c| {
+            c.connect()
+                .map_err(|e| SyncError::Connection(e.to_string()))
+        })
+        .transpose()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "post-sync re-evaluation failed: connection error");
+            return;
+        }
+    };
+    match evaluate_and_cache(compiled, conn.as_deref(), log_store, cache_dir).await {
+        Ok(eval_result) => {
+            link_evaluation(
+                log_store,
+                execution_id,
+                eval_result.evaluation_id.as_deref(),
+            );
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "post-sync re-evaluation failed");
+        }
+    }
+}
+
+/// Runs the full sync workflow: preflight check, execute, link evaluations,
+/// and post-sync re-evaluation.
+pub(crate) async fn run_sync_workflow(
+    params: SyncWorkflowParams<'_>,
+) -> Result<SyncExecutionResult, SyncError> {
+    let sync_spec = resolve_sync_spec(params.compiled)?;
+
+    preflight_check_dbt_cloud(params.compiled, params.force).await?;
+
+    let result = execute_sync(
+        &params.compiled.metadata.name,
+        &sync_spec,
+        params.sync_type,
+        params.stages,
+        params.log_store,
+    )
+    .await?;
+
+    link_evaluation(params.log_store, &result.execution_id, params.evaluation_id);
+
+    if params.stages.is_none() {
+        re_evaluate_and_link(
+            params.compiled,
+            params.log_store,
+            params.cache_dir,
+            &result.execution_id,
+        )
+        .await;
+    }
+
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -583,5 +744,174 @@ mod tests {
         let parts: Vec<&str> = uuid.split('-').collect();
         assert_eq!(parts.len(), 5);
         assert!(parts[2].starts_with('4'), "UUID version should be 4");
+    }
+
+    // ── link_evaluation ─────────────────────────────────────────────────
+
+    #[test]
+    fn link_evaluation_with_store_and_eval_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        // Should not panic; write_sync_evaluation succeeds.
+        link_evaluation(Some(&store), "exec-1", Some("eval-1"));
+    }
+
+    #[test]
+    fn link_evaluation_noop_when_no_store() {
+        link_evaluation(None, "exec-1", Some("eval-1"));
+    }
+
+    #[test]
+    fn link_evaluation_noop_when_no_eval_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        link_evaluation(Some(&store), "exec-1", None);
+    }
+
+    // ── write_eval_cache ────────────────────────────────────────────────
+
+    #[test]
+    fn write_eval_cache_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = crate::runtime::evaluate::AssetEvalResult {
+            asset_name: "test-asset".to_string(),
+            ready: true,
+            conditions: vec![],
+            evaluation_id: None,
+        };
+        write_eval_cache(Some(dir.path()), &result);
+        assert!(dir.path().join("test-asset.json").exists());
+    }
+
+    #[test]
+    fn write_eval_cache_noop_when_no_dir() {
+        let result = crate::runtime::evaluate::AssetEvalResult {
+            asset_name: "test-asset".to_string(),
+            ready: true,
+            conditions: vec![],
+            evaluation_id: None,
+        };
+        write_eval_cache(None, &result);
+    }
+
+    // ── evaluate_and_cache ────────────────────────────────────────────
+
+    fn test_compiled_asset() -> CompiledAsset {
+        use crate::runtime::compile::{CompiledAssetSpec, ResolvedOnDriftEntry};
+        use crate::runtime::kind::Metadata;
+
+        CompiledAsset {
+            _api_version: "nagi.io/v1alpha1".to_string(),
+            metadata: Metadata {
+                name: "test-asset".to_string(),
+            },
+            spec: CompiledAssetSpec {
+                on_drift: vec![ResolvedOnDriftEntry {
+                    conditions: vec![crate::runtime::kind::asset::DesiredCondition::Command {
+                        name: "always-true".to_string(),
+                        run: vec!["true".to_string()],
+                        interval: None,
+                        env: HashMap::new(),
+                        evaluate_cache_ttl: None,
+                    }],
+                    conditions_ref: "test-conditions".to_string(),
+                    sync: crate::runtime::kind::sync::SyncSpec {
+                        pre: None,
+                        run: SyncStep {
+                            step_type: StepType::Command,
+                            args: vec!["true".to_string()],
+                            env: HashMap::new(),
+                        },
+                        post: None,
+                    },
+                    sync_ref_name: "test-sync".to_string(),
+                }],
+                upstreams: vec![],
+                tags: vec![],
+                auto_sync: true,
+                dbt_cloud_job_ids: None,
+                evaluate_cache_ttl: None,
+                model_name: None,
+            },
+            connection: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn evaluate_and_cache_writes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("cache");
+        let compiled = test_compiled_asset();
+
+        let result = evaluate_and_cache(&compiled, None, None, Some(cache_dir.as_path()))
+            .await
+            .unwrap();
+
+        assert!(result.ready);
+        assert!(cache_dir.join("test-asset.json").exists());
+    }
+
+    #[tokio::test]
+    async fn evaluate_and_cache_returns_evaluation_id_with_log_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        let compiled = test_compiled_asset();
+
+        let result = evaluate_and_cache(&compiled, None, Some(&store), None)
+            .await
+            .unwrap();
+
+        assert!(result.evaluation_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn evaluate_and_cache_no_evaluation_id_without_log_store() {
+        let compiled = test_compiled_asset();
+
+        let result = evaluate_and_cache(&compiled, None, None, None)
+            .await
+            .unwrap();
+
+        assert!(result.evaluation_id.is_none());
+    }
+
+    // ── re_evaluate_and_link ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn re_evaluate_and_link_writes_cache_and_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("cache");
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        let compiled = test_compiled_asset();
+
+        re_evaluate_and_link(
+            &compiled,
+            Some(&store),
+            Some(cache_dir.as_path()),
+            "exec-42",
+        )
+        .await;
+
+        assert!(cache_dir.join("test-asset.json").exists());
+    }
+
+    #[tokio::test]
+    async fn re_evaluate_and_link_without_log_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("cache");
+        let compiled = test_compiled_asset();
+
+        re_evaluate_and_link(&compiled, None, Some(cache_dir.as_path()), "exec-1").await;
+
+        assert!(cache_dir.join("test-asset.json").exists());
+    }
+
+    #[tokio::test]
+    async fn re_evaluate_and_link_without_cache_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        let compiled = test_compiled_asset();
+
+        re_evaluate_and_link(&compiled, Some(&store), None, "exec-1").await;
     }
 }

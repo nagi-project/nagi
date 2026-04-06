@@ -124,7 +124,7 @@ fn propose_sync(
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let proposals = rt
-        .block_on(crate::interface::sync::propose_sync_all(
+        .block_on(crate::interface::sync::propose_sync(
             std::path::Path::new(target_dir),
             &selector_refs,
             sync_type,

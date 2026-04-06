@@ -20,13 +20,13 @@ pub enum InitError {
 }
 
 /// Creates `resources/` directory under `base_dir` if it does not exist.
-pub fn ensure_resources_dir(base_dir: &Path) -> Result<(), InitError> {
+fn ensure_resources_dir(base_dir: &Path) -> Result<(), InitError> {
     std::fs::create_dir_all(base_dir.join("resources"))?;
     Ok(())
 }
 
 /// Creates `{nagi_dir}/config.yaml` with default content if it does not exist.
-pub fn ensure_config(nagi_dir: &Path) -> Result<(), InitError> {
+fn ensure_config(nagi_dir: &Path) -> Result<(), InitError> {
     std::fs::create_dir_all(nagi_dir)?;
     let config_path = nagi_dir.join("config.yaml");
     if !config_path.exists() {
@@ -36,7 +36,7 @@ pub fn ensure_config(nagi_dir: &Path) -> Result<(), InitError> {
 }
 
 /// Initializes the log store (creates `~/.nagi/logs.db` and `~/.nagi/logs/`).
-pub fn ensure_log_store(db_path: &Path, logs_dir: &Path) -> Result<(), InitError> {
+fn ensure_log_store(db_path: &Path, logs_dir: &Path) -> Result<(), InitError> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -46,7 +46,7 @@ pub fn ensure_log_store(db_path: &Path, logs_dir: &Path) -> Result<(), InitError
 
 /// Initializes the log store. If the database file does not exist (fresh creation),
 /// resets watermarks to ensure consistency between SQLite rowids and export state.
-pub fn ensure_log_store_with_watermarks(
+fn ensure_log_store_with_watermarks(
     db_path: &Path,
     logs_dir: &Path,
     watermarks_dir: &Path,
@@ -60,7 +60,7 @@ pub fn ensure_log_store_with_watermarks(
 }
 
 /// Removes all watermark files so that the next export re-transfers everything.
-pub fn reset_watermarks(watermarks_dir: &Path) -> Result<(), InitError> {
+fn reset_watermarks(watermarks_dir: &Path) -> Result<(), InitError> {
     if watermarks_dir.exists() {
         for entry in std::fs::read_dir(watermarks_dir)? {
             let entry = entry?;
@@ -74,13 +74,13 @@ pub fn reset_watermarks(watermarks_dir: &Path) -> Result<(), InitError> {
 }
 
 /// Creates the watermarks directory for export tracking.
-pub fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
+fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
     std::fs::create_dir_all(watermarks_dir)?;
     Ok(())
 }
 
 /// Initialises the workspace: creates `resources/`, config, log store, and watermarks directory.
-pub fn init_workspace(
+pub(crate) fn init_workspace(
     base_dir: &Path,
     nagi_dir: &crate::runtime::config::NagiDir,
 ) -> Result<(), InitError> {
@@ -95,7 +95,7 @@ pub fn init_workspace(
 }
 
 /// Builds a Connection YAML string from profile and target.
-pub fn build_connection_yaml(profile: &str, target: Option<&str>) -> String {
+fn build_connection_yaml(profile: &str, target: Option<&str>) -> String {
     let name = connection_name(profile, target);
     let mut yaml = format!(
         "apiVersion: nagi.io/v1alpha1\n\
@@ -113,7 +113,7 @@ pub fn build_connection_yaml(profile: &str, target: Option<&str>) -> String {
 }
 
 /// Builds an Origin YAML string from a dbt project directory and connection name.
-pub fn build_origin_yaml(project_dir: &Path, connection_name: &str) -> Result<String, InitError> {
+fn build_origin_yaml(project_dir: &Path, connection_name: &str) -> Result<String, InitError> {
     let project_name = read_dbt_project_name(project_dir)?;
     Ok(format!(
         "apiVersion: nagi.io/v1alpha1\n\
@@ -147,7 +147,7 @@ fn read_dbt_project_name(project_dir: &Path) -> Result<String, InitError> {
 }
 
 /// Returns the connection name from profile and optional target.
-pub fn connection_name(profile: &str, target: Option<&str>) -> String {
+fn connection_name(profile: &str, target: Option<&str>) -> String {
     match target {
         Some(t) => format!("{profile}-{t}"),
         None => profile.to_string(),
@@ -157,14 +157,14 @@ pub fn connection_name(profile: &str, target: Option<&str>) -> String {
 /// A dbt project entry collected from user input.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DbtProjectEntry {
+pub(crate) struct DbtProjectEntry {
     pub project_dir: String,
     pub profile: String,
     pub target: Option<String>,
 }
 
 /// Result of `write_init_dbt_files`.
-pub struct InitDbtFilesResult {
+pub(crate) struct InitDbtFilesResult {
     pub connection_path: Option<std::path::PathBuf>,
     pub origin_path: Option<std::path::PathBuf>,
 }
@@ -172,7 +172,7 @@ pub struct InitDbtFilesResult {
 /// Generates and writes connection.yaml and origin.yaml from collected dbt project entries.
 ///
 /// Skips writing if the target file already exists. Deduplicates connections by name.
-pub fn write_init_dbt_files(
+pub(crate) fn write_init_dbt_files(
     base_dir: &Path,
     entries: &[DbtProjectEntry],
 ) -> Result<InitDbtFilesResult, InitError> {

@@ -62,8 +62,6 @@ pub enum EvaluateError {
     Compile(#[from] crate::runtime::compile::CompileError),
     #[error("failed to parse compiled asset: {0}")]
     Parse(String),
-    #[error("profile error: {0}")]
-    Profile(String),
     #[error("SQL query must be a single SELECT statement (read-only direct access): {0}")]
     ReadOnlyViolation(String),
     #[error("cache error: {0}")]

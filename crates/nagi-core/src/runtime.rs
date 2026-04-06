@@ -7,6 +7,7 @@ pub mod export;
 pub mod kind;
 pub mod log;
 pub mod notify;
+pub mod select;
 pub mod serve;
 pub mod status;
 pub mod storage;

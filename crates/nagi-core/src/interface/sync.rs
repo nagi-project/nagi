@@ -3,17 +3,18 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::runtime::compile::CompiledAsset;
+use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::log::LogStore;
 use crate::runtime::sync::{
-    dry_run_sync, execute_sync, parse_sync_type, resolve_sync_spec, DryRunStage, Stage, SyncError,
-    SyncExecutionResult, SyncType,
+    dry_run_sync, evaluate_and_cache, parse_sync_type, resolve_sync_spec, run_sync_workflow,
+    DryRunStage, Stage, SyncError, SyncType, SyncWorkflowParams,
 };
 
-/// Builds sync proposals for all compiled assets matching the selectors.
+/// Builds sync proposals for compiled assets matching the selectors.
 ///
 /// Evaluation or dry-run failures are not fatal — each proposal will omit
 /// whichever part failed.
-pub async fn propose_sync_all(
+pub(crate) async fn propose_sync(
     target_dir: &Path,
     selectors: &[&str],
     sync_type: &str,
@@ -22,22 +23,19 @@ pub async fn propose_sync_all(
     db_path: Option<&Path>,
     logs_dir: Option<&Path>,
 ) -> Result<Vec<SyncProposal>, SyncError> {
-    let assets = crate::interface::compile::load_compiled_assets(target_dir, selectors)?;
+    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors)?;
     let st = parse_sync_type(sync_type)?;
+    let log_store = open_log_store(db_path, logs_dir)?;
     let mut proposals = Vec::with_capacity(assets.len());
 
     for (name, yaml) in &assets {
-        let evaluation = match crate::interface::evaluate::evaluate_from_compiled(
-            yaml, cache_dir, db_path, logs_dir,
-        )
-        .await
-        {
-            Ok(json) => serde_json::from_str(&json).ok(),
-            Err(_) => None,
-        };
-
         let compiled: CompiledAsset =
             serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
+
+        let evaluation = evaluate_for_proposal(&compiled, cache_dir, log_store.as_ref())
+            .await
+            .ok();
+
         let dry_run_stages = match resolve_sync_spec(&compiled) {
             Ok(sync_spec) => {
                 let parsed_stages = stages.map(Stage::parse_list).transpose()?;
@@ -59,10 +57,40 @@ pub async fn propose_sync_all(
     Ok(proposals)
 }
 
+async fn evaluate_for_proposal(
+    compiled: &CompiledAsset,
+    cache_dir: Option<&Path>,
+    log_store: Option<&LogStore>,
+) -> Result<SyncProposalEvaluation, SyncError> {
+    let conn = compiled
+        .connection
+        .as_ref()
+        .map(|c| {
+            c.connect()
+                .map_err(|e| SyncError::Connection(e.to_string()))
+        })
+        .transpose()?;
+    let result = evaluate_and_cache(compiled, conn.as_deref(), log_store, cache_dir).await?;
+    Ok(eval_result_to_proposal(&result))
+}
+
+fn eval_result_to_proposal(result: &AssetEvalResult) -> SyncProposalEvaluation {
+    let conditions = result
+        .conditions
+        .iter()
+        .map(|c| serde_json::to_value(c).unwrap_or_default())
+        .collect();
+    SyncProposalEvaluation {
+        ready: result.ready,
+        conditions,
+        evaluation_id: result.evaluation_id.clone(),
+    }
+}
+
 /// Result of `propose_sync`: evaluation + dry-run stages for user confirmation.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncProposal {
+pub(crate) struct SyncProposal {
     pub asset: String,
     #[serde(skip)]
     pub yaml_content: String,
@@ -75,7 +103,7 @@ pub struct SyncProposal {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncProposalEvaluation {
+pub(crate) struct SyncProposalEvaluation {
     pub ready: bool,
     pub conditions: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,10 +124,8 @@ fn serialize<T: Serialize>(value: &T) -> Result<String, SyncError> {
     serde_json::to_string(value).map_err(|e| SyncError::Serialize(e.to_string()))
 }
 
-/// Executes sync from compiled asset YAML.
-///
 /// Parameters for `sync_from_compiled`.
-pub struct SyncFromCompiledParams<'a> {
+pub(crate) struct SyncFromCompiledParams<'a> {
     pub yaml: &'a str,
     pub sync_type: &'a str,
     pub stages: Option<&'a str>,
@@ -111,16 +137,17 @@ pub struct SyncFromCompiledParams<'a> {
     pub evaluation_id: Option<&'a str>,
 }
 
-/// Handles sync type/spec resolution, dry-run, dbt Cloud pre-flight check,
-/// logging, evaluation linking, and post-sync re-evaluation.
-pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<String, SyncError> {
+/// Deserializes compiled YAML, delegates to runtime, and serializes the result.
+pub(crate) async fn sync_from_compiled(
+    params: SyncFromCompiledParams<'_>,
+) -> Result<String, SyncError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(params.yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
     let st = parse_sync_type(params.sync_type)?;
-    let sync_spec = resolve_sync_spec(&compiled)?;
     let parsed_stages = params.stages.map(Stage::parse_list).transpose()?;
 
     if params.dry_run {
+        let sync_spec = resolve_sync_spec(&compiled)?;
         let result = dry_run_sync(
             &compiled.metadata.name,
             &sync_spec,
@@ -130,84 +157,17 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
         return serialize(&result);
     }
 
-    if !params.force {
-        if let Some(job_ids) = &compiled.spec.dbt_cloud_job_ids {
-            let cred_path = crate::runtime::kind::origin::dbt::cloud::extract_credentials_path(
-                &compiled.connection,
-            )
-            .ok_or_else(|| {
-                SyncError::DbtCloud(format!(
-                    "asset '{}' has dbt_cloud_job_ids but no dbt Cloud credentials in connection",
-                    compiled.metadata.name
-                ))
-            })?;
-            crate::runtime::kind::origin::dbt::cloud::preflight_check(
-                &compiled.metadata.name,
-                cred_path,
-                job_ids,
-            )
-            .await
-            .map_err(|e| SyncError::DbtCloud(e.to_string()))?;
-        }
-    }
-
     let log_store = open_log_store(params.db_path, params.logs_dir)?;
-    let result = execute_sync(
-        &compiled.metadata.name,
-        &sync_spec,
-        st,
-        parsed_stages.as_deref(),
-        log_store.as_ref(),
-    )
+    let result = run_sync_workflow(SyncWorkflowParams {
+        compiled: &compiled,
+        sync_type: st,
+        stages: parsed_stages.as_deref(),
+        force: params.force,
+        evaluation_id: params.evaluation_id,
+        log_store: log_store.as_ref(),
+        cache_dir: params.cache_dir,
+    })
     .await?;
 
-    // Link pre-sync evaluation to this execution.
-    if let (Some(store), Some(eval_id)) = (log_store.as_ref(), params.evaluation_id) {
-        if let Err(e) = store.write_sync_evaluation(&result.execution_id, eval_id) {
-            tracing::warn!(error = %e, "failed to link pre-sync evaluation to execution");
-        }
-    }
-
-    // Re-evaluate after sync (only when no stage filter).
-    if params.stages.is_none() {
-        if let Err(e) = post_sync_re_evaluate(
-            params.yaml,
-            params.cache_dir,
-            params.db_path,
-            params.logs_dir,
-            &result,
-        )
-        .await
-        {
-            tracing::warn!(error = %e, "post-sync re-evaluation failed");
-        }
-    }
-
     serialize(&result)
-}
-
-/// Re-evaluates the asset after sync and links the new evaluation to the execution.
-async fn post_sync_re_evaluate(
-    yaml: &str,
-    cache_dir: Option<&Path>,
-    db_path: Option<&Path>,
-    logs_dir: Option<&Path>,
-    sync_result: &SyncExecutionResult,
-) -> Result<(), SyncError> {
-    let eval_json =
-        crate::interface::evaluate::evaluate_from_compiled(yaml, cache_dir, db_path, logs_dir)
-            .await
-            .map_err(|e| SyncError::Parse(e.to_string()))?;
-
-    if let (Some(db), Some(logs)) = (db_path, logs_dir) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&eval_json) {
-            if let Some(eval_id) = val.get("evaluationId").and_then(|v| v.as_str()) {
-                let store = LogStore::open(db, logs)?;
-                if let Err(e) = store.write_sync_evaluation(&sync_result.execution_id, eval_id) {
-                    tracing::warn!(error = %e, "failed to link post-sync evaluation to execution");
-                }
-            }
-        }
-    }
-    Ok(())
 }

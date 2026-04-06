@@ -119,9 +119,9 @@ fn load_controller_inputs(
     config: &crate::runtime::config::NagiConfig,
     cache_dir: Option<&Path>,
 ) -> Result<Vec<controller::ControllerInput>, ServeError> {
-    let assets = crate::interface::compile::load_compiled_assets(target_dir, selectors)?;
+    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors)?;
 
-    let graph: DependencyGraph = crate::interface::compile::load_graph(target_dir)?;
+    let graph: DependencyGraph = crate::runtime::compile::load_graph(target_dir)?;
 
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let mut inputs = build_controller_inputs(&graph, &asset_map)?;
@@ -313,7 +313,7 @@ pub fn halt(
     use crate::runtime::storage::local::LocalSuspendedStore;
     use crate::runtime::storage::SuspendedStore;
 
-    let asset_names = crate::interface::compile::resolve_compiled_asset_names(target_dir, &[])?;
+    let asset_names = crate::runtime::compile::resolve_compiled_asset_names(target_dir, &[])?;
     let store = LocalSuspendedStore::new(nagi_dir.suspended_dir());
     let now = chrono::Utc::now().to_rfc3339();
 

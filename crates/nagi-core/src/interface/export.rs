@@ -8,7 +8,7 @@ use crate::runtime::export::{
 use crate::runtime::log::LogStore;
 
 /// Runs dry-run export using config-derived paths.
-pub fn dry_run_for_config(
+pub(crate) fn dry_run_for_config(
     config: &NagiConfig,
     select: Option<&str>,
 ) -> Result<Vec<DryRunResult>, ExportError> {
@@ -25,7 +25,7 @@ pub fn dry_run_for_config(
 }
 
 /// Runs full export using config-derived paths.
-pub async fn export_for_config(
+pub(crate) async fn export_for_config(
     config: &NagiConfig,
     resources_dir: &Path,
     select: Option<&str>,
@@ -57,7 +57,7 @@ pub async fn export_for_config(
 
 /// Runs export if configured and enough time has elapsed since the last export.
 /// Failures are logged as warnings and do not propagate.
-pub async fn try_export(resources_dir: &Path, project_dir: &Path) {
+pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
     let config = match crate::runtime::config::load_config(project_dir) {
         Ok(c) => c,
         Err(_) => return,

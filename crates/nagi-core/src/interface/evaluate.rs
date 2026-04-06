@@ -9,7 +9,7 @@ use crate::runtime::storage::Cache;
 /// Evaluates an asset from its compiled YAML.
 ///
 /// Handles connection resolution, logging, and cache — callers pass only paths.
-pub async fn evaluate_from_compiled(
+async fn evaluate_from_compiled(
     yaml: &str,
     cache_dir: Option<&Path>,
     db_path: Option<&Path>,
@@ -52,13 +52,13 @@ pub async fn evaluate_from_compiled(
 
 /// Evaluates all compiled assets matching the selectors.
 /// Returns a JSON array of evaluation results.
-pub async fn evaluate_all(
+pub(crate) async fn evaluate_all(
     target_dir: &Path,
     selectors: &[&str],
     cache_dir: Option<&Path>,
     dry_run: bool,
 ) -> Result<String, EvaluateError> {
-    let assets = crate::interface::compile::load_compiled_assets(target_dir, selectors)?;
+    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors)?;
 
     let values = if dry_run {
         dry_run_assets(&assets)?
@@ -112,7 +112,7 @@ async fn evaluate_assets(
 }
 
 /// Dry-run from compiled YAML.
-pub fn dry_run_from_compiled(yaml: &str) -> Result<String, EvaluateError> {
+fn dry_run_from_compiled(yaml: &str) -> Result<String, EvaluateError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
     let result = dry_run_asset(&compiled.metadata.name, &compiled.spec.on_drift);

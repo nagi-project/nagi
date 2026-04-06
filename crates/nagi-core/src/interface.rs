@@ -1,4 +1,3 @@
-pub mod compile;
 pub mod evaluate;
 pub mod export;
 pub mod init;
@@ -6,5 +5,4 @@ pub mod ls;
 #[cfg(feature = "python")]
 pub mod py;
 pub mod schema;
-pub mod select;
 pub mod sync;
