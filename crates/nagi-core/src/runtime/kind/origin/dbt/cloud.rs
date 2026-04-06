@@ -161,31 +161,27 @@ fn build_model_job_mapping(jobs: &[JobData]) -> HashMap<String, HashSet<i64>> {
 pub async fn fetch_job_model_mapping(
     credentials_path: &Path,
 ) -> Result<HashMap<String, HashSet<i64>>, DbtCloudError> {
-    let (creds, token) = read_token(credentials_path)?;
-    let url = format!(
-        "https://{}/api/v2/accounts/{}/jobs/",
-        creds.account_host, creds.account_id
-    );
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Token {}", token))
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .map_err(|e| DbtCloudError::Request(e.to_string()))?;
-    if !resp.status().is_success() {
-        return Err(DbtCloudError::Response(format!(
-            "HTTP {} from {}",
-            resp.status(),
-            url
-        )));
-    }
-    let body: JobsResponse = resp
-        .json()
-        .await
-        .map_err(|e| DbtCloudError::Response(e.to_string()))?;
-    Ok(build_model_job_mapping(&body.data))
+    let credentials_path = credentials_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let (creds, token) = read_token(&credentials_path)?;
+        let url = format!(
+            "https://{}/api/v2/accounts/{}/jobs/",
+            creds.account_host, creds.account_id
+        );
+        let mut resp = ureq::Agent::new_with_defaults()
+            .get(&url)
+            .header("Authorization", &format!("Token {token}"))
+            .header("Content-Type", "application/json")
+            .call()
+            .map_err(|e| DbtCloudError::Request(e.to_string()))?;
+        let body: JobsResponse = resp
+            .body_mut()
+            .read_json()
+            .map_err(|e| DbtCloudError::Response(e.to_string()))?;
+        Ok(build_model_job_mapping(&body.data))
+    })
+    .await
+    .expect("spawn_blocking panicked")
 }
 
 // ── Runs API ──────────────────────────────────────────────────────────────
@@ -234,29 +230,24 @@ pub async fn check_running_jobs_for_asset(
         creds.account_host, creds.account_id
     );
 
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Token {}", token))
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .map_err(|e| DbtCloudError::Request(e.to_string()))?;
+    let relevant_job_ids = relevant_job_ids.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut resp = ureq::Agent::new_with_defaults()
+            .get(&url)
+            .header("Authorization", &format!("Token {token}"))
+            .header("Content-Type", "application/json")
+            .call()
+            .map_err(|e| DbtCloudError::Request(e.to_string()))?;
 
-    if !resp.status().is_success() {
-        return Err(DbtCloudError::Response(format!(
-            "HTTP {} from {}",
-            resp.status(),
-            url
-        )));
-    }
+        let body: RunsResponse = resp
+            .body_mut()
+            .read_json()
+            .map_err(|e| DbtCloudError::Response(e.to_string()))?;
 
-    let body: RunsResponse = resp
-        .json()
-        .await
-        .map_err(|e| DbtCloudError::Response(e.to_string()))?;
-
-    Ok(filter_runs_by_job_ids(&body.data, relevant_job_ids))
+        Ok(filter_runs_by_job_ids(&body.data, &relevant_job_ids))
+    })
+    .await
+    .expect("spawn_blocking panicked")
 }
 
 fn filter_runs_by_job_ids(runs: &[RunData], job_ids: &HashSet<i64>) -> Vec<RunningJob> {
@@ -600,5 +591,49 @@ account-host: "evil.com@cloud.getdbt.com"
 "#;
         let err = parse_credentials_str(yaml).unwrap_err();
         assert!(matches!(err, DbtCloudError::InvalidAccountHost(_)));
+    }
+
+    // ── API response deserialization ────────────────────────────────────
+    //
+    // dbt Cloud API v2 OpenAPI spec:
+    //   https://github.com/dbt-labs/dbt-cloud-openapi-spec/blob/master/openapi-v2.yaml
+    //
+    // Jobs (HumanReadableJobDefinition):
+    //   id: integer, execute_steps: array of strings
+    //
+    // Runs (RunResponse):
+    //   id: integer, job_id: integer, status_humanized: string
+
+    #[test]
+    fn jobs_response_parses_with_execute_steps() {
+        let json = r#"{"data":[{"id":1,"execute_steps":["dbt run --select m"]}]}"#;
+        let resp: JobsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data.len(), 1);
+        assert_eq!(resp.data[0].id, 1);
+        assert_eq!(resp.data[0].execute_steps, vec!["dbt run --select m"]);
+    }
+
+    #[test]
+    fn jobs_response_defaults_execute_steps_when_missing() {
+        let json = r#"{"data":[{"id":1}]}"#;
+        let resp: JobsResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.data[0].execute_steps.is_empty());
+    }
+
+    #[test]
+    fn runs_response_parses_running_jobs() {
+        let json = r#"{"data":[{"id":100,"job_id":1,"status_humanized":"Running"}]}"#;
+        let resp: RunsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data.len(), 1);
+        assert_eq!(resp.data[0].job_id, 1);
+        assert_eq!(resp.data[0].status_humanized, "Running");
+    }
+
+    #[test]
+    fn runs_response_defaults_optional_fields() {
+        let json = r#"{"data":[{"id":100}]}"#;
+        let resp: RunsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data[0].job_id, 0);
+        assert_eq!(resp.data[0].status_humanized, "");
     }
 }
