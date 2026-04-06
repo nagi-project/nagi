@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::interface::compile::load_compiled_assets;
+use crate::runtime::compile::load_compiled_assets;
 use crate::runtime::compile::CompiledAsset;
 
 #[derive(Debug, Error)]
@@ -80,7 +80,7 @@ fn has_kind(kinds: &[String], kind: &str) -> bool {
 }
 
 /// Reads compiled target/ directory and returns a structured listing of all resources.
-pub fn ls(target_dir: &std::path::Path, kinds: &[&str]) -> Result<LsOutput, LsError> {
+pub(crate) fn ls(target_dir: &std::path::Path, kinds: &[&str]) -> Result<LsOutput, LsError> {
     validate_kinds(kinds)?;
 
     let normalized: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();

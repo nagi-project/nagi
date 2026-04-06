@@ -131,7 +131,7 @@ fn extract_model_names_from_command(command: &str) -> Vec<String> {
     let mut i = 0;
     while i < parts.len() {
         if (parts[i] == "--select" || parts[i] == "-s") && i + 1 < parts.len() {
-            if let Some(name) = crate::interface::select::extract_model_name(parts[i + 1]) {
+            if let Some(name) = crate::runtime::select::extract_model_name(parts[i + 1]) {
                 models.push(name);
             }
             i += 2;

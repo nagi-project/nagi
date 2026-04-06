@@ -109,10 +109,6 @@ impl NagiDir {
         self.0.join("logs")
     }
 
-    pub fn cache_dir(&self) -> PathBuf {
-        self.0.join("cache")
-    }
-
     pub fn evaluate_cache_dir(&self) -> PathBuf {
         self.0.join("cache").join("evaluate")
     }
@@ -482,7 +478,6 @@ export:
     nagi_dir_path_test! {
         nagi_dir_db_path:        db_path        => "/state/logs.db";
         nagi_dir_logs_dir:       logs_dir       => "/state/logs";
-        nagi_dir_cache_dir:      cache_dir      => "/state/cache";
         nagi_dir_locks_dir:      locks_dir      => "/state/locks";
         nagi_dir_suspended_dir:  suspended_dir  => "/state/suspended";
         nagi_dir_watermarks:     watermarks_dir => "/state/watermarks";

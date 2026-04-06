@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::interface::compile as compile_interface;
 use crate::runtime::compile::CompileError;
 use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::log::{LogError, LogStore, SyncLogEntry};
@@ -47,7 +46,7 @@ pub fn asset_status(
     logs_dir: &Path,
     suspended_dir: Option<&Path>,
 ) -> Result<StatusResult, StatusError> {
-    let asset_names = compile_interface::resolve_compiled_asset_names(target_dir, selectors)?;
+    let asset_names = crate::runtime::compile::resolve_compiled_asset_names(target_dir, selectors)?;
 
     let cache = LocalCache::new(cache_dir.map(PathBuf::from).unwrap_or_else(|| {
         crate::runtime::config::resolve_nagi_dir(Path::new(".")).evaluate_cache_dir()
