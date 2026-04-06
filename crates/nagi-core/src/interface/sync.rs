@@ -163,19 +163,24 @@ pub async fn sync_from_compiled(params: SyncFromCompiledParams<'_>) -> Result<St
 
     // Link pre-sync evaluation to this execution.
     if let (Some(store), Some(eval_id)) = (log_store.as_ref(), params.evaluation_id) {
-        let _ = store.write_sync_evaluation(&result.execution_id, eval_id);
+        if let Err(e) = store.write_sync_evaluation(&result.execution_id, eval_id) {
+            tracing::warn!(error = %e, "failed to link pre-sync evaluation to execution");
+        }
     }
 
     // Re-evaluate after sync (only when no stage filter).
     if params.stages.is_none() {
-        let _ = post_sync_re_evaluate(
+        if let Err(e) = post_sync_re_evaluate(
             params.yaml,
             params.cache_dir,
             params.db_path,
             params.logs_dir,
             &result,
         )
-        .await;
+        .await
+        {
+            tracing::warn!(error = %e, "post-sync re-evaluation failed");
+        }
     }
 
     serialize(&result)
@@ -198,7 +203,9 @@ async fn post_sync_re_evaluate(
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&eval_json) {
             if let Some(eval_id) = val.get("evaluationId").and_then(|v| v.as_str()) {
                 let store = LogStore::open(db, logs)?;
-                let _ = store.write_sync_evaluation(&sync_result.execution_id, eval_id);
+                if let Err(e) = store.write_sync_evaluation(&sync_result.execution_id, eval_id) {
+                    tracing::warn!(error = %e, "failed to link post-sync evaluation to execution");
+                }
             }
         }
     }

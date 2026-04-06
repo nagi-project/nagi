@@ -284,7 +284,9 @@ fn replace_if_holder_unchanged(
     if current_holder != expected_id {
         return Ok(false);
     }
-    let _ = block(store.delete(path));
+    if let Err(e) = block(store.delete(path)) {
+        tracing::warn!(error = %e, "failed to delete lock before re-creation");
+    }
     try_create(store, path, new_bytes)
 }
 

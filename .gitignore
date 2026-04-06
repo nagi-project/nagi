@@ -43,6 +43,7 @@ dist/
 
 # Project docs (kept locally, excluded from repo)
 project_spec.md
+spec
 spec/
 milestones.md
 
