@@ -14,11 +14,9 @@ use crate::runtime::kind::connection::dbt::AdapterConfig;
 
 use super::{require_str, Connection, ConnectionError};
 
-// ── Snowflake config ─────────────────────────────────────────────────────────
-
 /// Resolved Snowflake connection configuration.
 /// Does not hold credentials — only the path to the private key file.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct SnowflakeConfig {
     pub(super) account: String,
     pub(super) user: String,
@@ -58,8 +56,6 @@ impl SnowflakeConfig {
         })
     }
 }
-
-// ── JWT generation ───────────────────────────────────────────────────────────
 
 /// JWT lifetime in seconds. Snowflake recommends short-lived tokens (max 60 minutes).
 const JWT_LIFETIME_SECS: u64 = 60;
@@ -121,18 +117,16 @@ fn generate_jwt(
         .map_err(|e| ConnectionError::AuthFailed(format!("JWT encoding failed: {e}")))
 }
 
-// ── Snowflake REST client ────────────────────────────────────────────────────
-
 pub(super) struct SnowflakeConnection {
     config: SnowflakeConfig,
-    client: reqwest::Client,
+    agent: ureq::Agent,
 }
 
 impl SnowflakeConnection {
     pub(super) fn new(config: SnowflakeConfig) -> Self {
         Self {
             config,
-            client: reqwest::Client::new(),
+            agent: ureq::Agent::new_with_defaults(),
         }
     }
 
@@ -152,7 +146,7 @@ impl SnowflakeConnection {
         )
     }
 
-    async fn execute_statement(&self, sql: &str) -> Result<StatementResponse, ConnectionError> {
+    fn execute_statement_sync(&self, sql: &str) -> Result<StatementResponse, ConnectionError> {
         let token = self.jwt()?;
         let url = self.api_url();
 
@@ -165,28 +159,21 @@ impl SnowflakeConnection {
             role: self.config.role.as_deref(),
         };
 
-        let resp = self
-            .client
+        let mut resp = self
+            .agent
             .post(&url)
-            .bearer_auth(&token)
+            .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .header("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT")
-            .json(&body)
-            .send()
-            .await?;
+            .send_json(&body)
+            .map_err(|e| ConnectionError::Http(e.to_string()))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ConnectionError::QueryFailed(format!(
-                "Snowflake API returned {status}: {body}"
-            )));
-        }
-
-        resp.json::<StatementResponse>().await.map_err(|e| {
-            ConnectionError::QueryFailed(format!("failed to parse Snowflake response: {e}"))
-        })
+        resp.body_mut()
+            .read_json::<StatementResponse>()
+            .map_err(|e| {
+                ConnectionError::QueryFailed(format!("failed to parse Snowflake response: {e}"))
+            })
     }
 }
 
@@ -210,6 +197,29 @@ struct StatementResponse {
     code: Option<String>,
 }
 
+fn extract_scalar_from_statement(
+    resp: &StatementResponse,
+) -> Result<serde_json::Value, ConnectionError> {
+    resp.data
+        .as_ref()
+        .and_then(|rows| rows.first())
+        .and_then(|row| row.first())
+        .cloned()
+        .ok_or_else(|| ConnectionError::QueryFailed("query returned no rows".to_string()))
+}
+
+fn check_statement_success(resp: &StatementResponse) -> Result<(), ConnectionError> {
+    resp.code
+        .as_deref()
+        .filter(|code| *code != "090001")
+        .map_or(Ok(()), |code| {
+            let msg = resp.message.as_deref().unwrap_or_default();
+            Err(ConnectionError::QueryFailed(format!(
+                "Snowflake error {code}: {msg}"
+            )))
+        })
+}
+
 /// Escapes double quotes for Snowflake double-quoted identifiers.
 fn escape_identifier(s: &str) -> String {
     s.replace('"', "\"\"")
@@ -223,11 +233,14 @@ fn escape_literal(s: &str) -> String {
 #[async_trait]
 impl Connection for SnowflakeConnection {
     async fn query_scalar(&self, sql: &str) -> Result<serde_json::Value, ConnectionError> {
-        let resp = self.execute_statement(sql).await?;
-        resp.data
-            .and_then(|rows| rows.into_iter().next())
-            .and_then(|row| row.into_iter().next())
-            .ok_or_else(|| ConnectionError::QueryFailed("query returned no rows".to_string()))
+        let agent = self.agent.clone();
+        let config = self.config.clone();
+        let sql = sql.to_string();
+        let resp = super::run_blocking(move || {
+            SnowflakeConnection { config, agent }.execute_statement_sync(&sql)
+        })
+        .await?;
+        extract_scalar_from_statement(&resp)
     }
 
     fn freshness_sql(
@@ -269,28 +282,101 @@ impl Connection for SnowflakeConnection {
     }
 
     async fn execute_sql(&self, sql: &str) -> Result<(), ConnectionError> {
-        let resp = self.execute_statement(sql).await?;
-        resp.code
-            .as_deref()
-            .filter(|code| *code != "090001")
-            .map_or(Ok(()), |code| {
-                let msg = resp.message.as_deref().unwrap_or_default();
-                Err(ConnectionError::QueryFailed(format!(
-                    "Snowflake error {code}: {msg}"
-                )))
-            })
+        let agent = self.agent.clone();
+        let config = self.config.clone();
+        let sql = sql.to_string();
+        let resp = super::run_blocking(move || {
+            SnowflakeConnection { config, agent }.execute_statement_sync(&sql)
+        })
+        .await?;
+        check_statement_success(&resp)
     }
 
     async fn load_jsonl(
         &self,
-        _dataset: &str,
-        _table: &str,
-        _jsonl_path: &Path,
+        dataset: &str,
+        table: &str,
+        jsonl_path: &Path,
     ) -> Result<(), ConnectionError> {
-        Err(ConnectionError::QueryFailed(
-            "Snowflake load_jsonl is not yet supported".to_string(),
-        ))
+        let schema = if dataset.is_empty() {
+            self.config.schema.clone()
+        } else {
+            dataset.to_string()
+        };
+        let table = table.to_string();
+        let jsonl_path = jsonl_path.to_path_buf();
+        let agent = self.agent.clone();
+        let config = self.config.clone();
+
+        super::run_blocking(move || {
+            let content = std::fs::read_to_string(&jsonl_path).map_err(|e| {
+                ConnectionError::QueryFailed(format!("cannot read JSONL file: {e}"))
+            })?;
+            let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+            if lines.is_empty() {
+                return Ok(());
+            }
+
+            let conn = SnowflakeConnection { config, agent };
+            let create_sql = build_create_staging_sql(&schema, &table);
+            conn.execute_statement_sync(&create_sql)?;
+
+            for sql in build_insert_batches(&schema, &table, &lines, LOAD_BATCH_SIZE) {
+                conn.execute_statement_sync(&sql)?;
+            }
+            Ok(())
+        })
+        .await
     }
+}
+
+fn build_create_staging_sql(schema: &str, table: &str) -> String {
+    let schema = escape_identifier(schema);
+    let table = escape_identifier(table);
+    format!("CREATE OR REPLACE TABLE \"{schema}\".\"{table}\" (data VARIANT)")
+}
+
+/// Maximum rows per INSERT statement. Snowflake allows up to 200,000 rows in
+/// a single VALUES clause, but we use a smaller batch to keep SQL size reasonable.
+const LOAD_BATCH_SIZE: usize = 10_000;
+
+fn build_insert_json_sql(
+    schema: &str,
+    table: &str,
+    json_lines: &[&str],
+    overwrite: bool,
+) -> String {
+    let schema = escape_identifier(schema);
+    let table = escape_identifier(table);
+    let keyword = if overwrite {
+        "INSERT OVERWRITE INTO"
+    } else {
+        "INSERT INTO"
+    };
+    let values: Vec<String> = json_lines
+        .iter()
+        .map(|line| {
+            let escaped = escape_literal(line);
+            format!("('{escaped}')")
+        })
+        .collect();
+    format!(
+        "{keyword} \"{schema}\".\"{table}\" (data) SELECT PARSE_JSON(column1) FROM VALUES {}",
+        values.join(", ")
+    )
+}
+
+fn build_insert_batches(
+    schema: &str,
+    table: &str,
+    lines: &[&str],
+    batch_size: usize,
+) -> Vec<String> {
+    lines
+        .chunks(batch_size)
+        .enumerate()
+        .map(|(i, chunk)| build_insert_json_sql(schema, table, chunk, i == 0))
+        .collect()
 }
 
 #[cfg(test)]
@@ -591,5 +677,145 @@ my_project:
         std::fs::write(&key_path, "not a valid pem").unwrap();
         let err = generate_jwt("a", "u", key_path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, ConnectionError::AuthFailed(msg) if msg.contains("cannot parse")));
+    }
+
+    // ── load_jsonl SQL generation tests ────────────────────────────────
+
+    #[test]
+    fn build_create_staging_sql_basic() {
+        let sql = build_create_staging_sql("MY_SCHEMA", "_staging_t");
+        assert_eq!(
+            sql,
+            r#"CREATE OR REPLACE TABLE "MY_SCHEMA"."_staging_t" (data VARIANT)"#
+        );
+    }
+
+    #[test]
+    fn build_create_staging_sql_escapes_quotes() {
+        let sql = build_create_staging_sql("s", r#"tab"le"#);
+        assert!(sql.contains(r#""tab""le""#));
+    }
+
+    #[test]
+    fn build_insert_json_sql_overwrite_first_batch() {
+        let sql = build_insert_json_sql("S", "T", &[r#"{"a":1}"#], true);
+        assert!(sql.starts_with("INSERT OVERWRITE INTO"), "sql: {sql}");
+        assert!(sql.contains("SELECT PARSE_JSON(column1) FROM VALUES"));
+        assert!(sql.contains(r#"('{"a":1}')"#));
+    }
+
+    #[test]
+    fn build_insert_json_sql_append_subsequent_batch() {
+        let sql = build_insert_json_sql("S", "T", &[r#"{"a":1}"#], false);
+        assert!(sql.starts_with("INSERT INTO"), "sql: {sql}");
+        assert!(!sql.contains("OVERWRITE"), "sql: {sql}");
+    }
+
+    #[test]
+    fn build_insert_json_sql_multiple_rows() {
+        let sql = build_insert_json_sql("S", "T", &[r#"{"a":1}"#, r#"{"b":2}"#], true);
+        assert!(sql.contains("FROM VALUES"), "sql: {sql}");
+        assert!(sql.contains(r#"('{"a":1}'), ('{"b":2}')"#), "sql: {sql}");
+    }
+
+    #[test]
+    fn build_insert_json_sql_escapes_single_quotes() {
+        let sql = build_insert_json_sql("S", "T", &[r#"{"name":"it's"}"#], true);
+        assert!(sql.contains("it''s"), "sql: {sql}");
+    }
+
+    #[test]
+    fn build_insert_batches_single_batch() {
+        let lines: Vec<&str> = (0..3).map(|_| r#"{"a":1}"#).collect();
+        let sqls = build_insert_batches("S", "T", &lines, 10);
+        assert_eq!(sqls.len(), 1);
+        assert!(sqls[0].starts_with("INSERT OVERWRITE INTO"));
+    }
+
+    #[test]
+    fn build_insert_batches_splits_at_limit() {
+        let lines: Vec<&str> = (0..5).map(|_| r#"{"a":1}"#).collect();
+        let sqls = build_insert_batches("S", "T", &lines, 2);
+        assert_eq!(sqls.len(), 3);
+        assert!(sqls[0].starts_with("INSERT OVERWRITE INTO"));
+        assert!(sqls[1].starts_with("INSERT INTO"));
+        assert!(sqls[2].starts_with("INSERT INTO"));
+    }
+
+    // ── extract_scalar_from_statement ───────────────────────────────────
+
+    // Response format: https://docs.snowflake.com/en/developer-guide/sql-api/handling-responses
+    // data is an array of arrays; all values are strings.
+    // Example: { "code": "090001", "data": [["val1", "val2"]] }
+    #[test]
+    fn extract_scalar_returns_first_cell() {
+        let resp = StatementResponse {
+            data: Some(vec![vec![serde_json::json!("42")]]),
+            message: None,
+            code: None,
+        };
+        assert_eq!(
+            extract_scalar_from_statement(&resp).unwrap(),
+            serde_json::json!("42")
+        );
+    }
+
+    #[test]
+    fn extract_scalar_errors_on_empty_rows() {
+        let resp = StatementResponse {
+            data: Some(vec![]),
+            message: None,
+            code: None,
+        };
+        assert!(extract_scalar_from_statement(&resp).is_err());
+    }
+
+    #[test]
+    fn extract_scalar_errors_on_null_data() {
+        let resp = StatementResponse {
+            data: None,
+            message: None,
+            code: None,
+        };
+        assert!(extract_scalar_from_statement(&resp).is_err());
+    }
+
+    // ── check_statement_success ─────────────────────────────────────────
+    //
+    // Success code: https://docs.snowflake.com/en/developer-guide/sql-api/handling-responses
+    // code "090001" means "successfully executed".
+
+    #[test]
+    fn check_statement_success_code_090001() {
+        let resp = StatementResponse {
+            data: None,
+            message: Some("successfully executed".to_string()),
+            code: Some("090001".to_string()),
+        };
+        assert!(check_statement_success(&resp).is_ok());
+    }
+
+    #[test]
+    fn check_statement_success_no_code() {
+        let resp = StatementResponse {
+            data: None,
+            message: None,
+            code: None,
+        };
+        assert!(check_statement_success(&resp).is_ok());
+    }
+
+    // Any code other than "090001" is treated as an error.
+    // The code value here is arbitrary; the SQL API returns errors via HTTP 422,
+    // but this function guards against unexpected success-path codes.
+    #[test]
+    fn check_statement_success_error_code() {
+        let resp = StatementResponse {
+            data: None,
+            message: Some("error".to_string()),
+            code: Some("000123".to_string()),
+        };
+        let err = check_statement_success(&resp).unwrap_err();
+        assert!(matches!(err, ConnectionError::QueryFailed(msg) if msg.contains("000123")));
     }
 }

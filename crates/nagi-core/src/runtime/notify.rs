@@ -4,10 +4,8 @@ use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NotifyError {
-    #[error("http error")]
-    Http(#[from] reqwest::Error),
-    #[error("unexpected status: {0}")]
-    Status(u16),
+    #[error("http error: {0}")]
+    Http(String),
     #[error("SLACK_BOT_TOKEN environment variable not set")]
     MissingToken,
     #[error("slack api error: {0}")]

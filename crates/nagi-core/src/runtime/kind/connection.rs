@@ -28,9 +28,22 @@ pub enum ConnectionError {
     AuthFailed(String),
     #[error("query failed: {0}")]
     QueryFailed(String),
-    #[cfg(any(feature = "bigquery", feature = "snowflake"))]
     #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
+}
+
+/// Runs a synchronous closure on tokio's blocking thread pool.
+///
+/// ureq is a synchronous HTTP client. Running it on an async task would block
+/// the tokio runtime. This function moves the work to a dedicated thread pool.
+async fn run_blocking<F, T>(f: F) -> Result<T, ConnectionError>
+where
+    F: FnOnce() -> Result<T, ConnectionError> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .expect("spawn_blocking panicked")
 }
 
 /// Executes a SQL query and returns the first column of the first row as a JSON value.

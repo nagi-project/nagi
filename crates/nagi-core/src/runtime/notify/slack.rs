@@ -67,18 +67,19 @@ impl Notifier for SlackNotifier {
             thread_ts: self.get_thread_ts(event),
         };
 
-        let resp = reqwest::Client::new()
-            .post(SLACK_API_URL)
-            .bearer_auth(token)
-            .json(&body)
-            .send()
-            .await?;
+        let slack_resp: SlackResponse = tokio::task::spawn_blocking(move || {
+            let mut resp = ureq::Agent::new_with_defaults()
+                .post(SLACK_API_URL)
+                .header("Authorization", &format!("Bearer {token}"))
+                .send_json(&body)
+                .map_err(|e| NotifyError::Http(e.to_string()))?;
 
-        if !resp.status().is_success() {
-            return Err(NotifyError::Status(resp.status().as_u16()));
-        }
-
-        let slack_resp: SlackResponse = resp.json().await?;
+            resp.body_mut()
+                .read_json::<SlackResponse>()
+                .map_err(|e| NotifyError::Http(e.to_string()))
+        })
+        .await
+        .expect("spawn_blocking panicked")?;
         if !slack_resp.ok {
             let msg = slack_resp.error.unwrap_or_else(|| "unknown".to_string());
             return Err(NotifyError::Api(msg));
@@ -176,5 +177,37 @@ mod tests {
             notifier.get_thread_ts(&suspended_event("a")),
             Some("ts-a".to_string())
         );
+    }
+
+    // ── SlackResponse deserialization ───────────────────────────────────
+    //
+    // Response format: https://api.slack.com/methods/chat.postMessage
+    // Success: { "ok": true, "ts": "1503435956.000247", "channel": "C123" }
+    // Error:   { "ok": false, "error": "channel_not_found" }
+
+    #[test]
+    fn slack_response_ok_with_ts() {
+        let json = r#"{"ok":true,"ts":"1234.5678"}"#;
+        let resp: SlackResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.ok);
+        assert_eq!(resp.ts, Some("1234.5678".to_string()));
+        assert_eq!(resp.error, None);
+    }
+
+    #[test]
+    fn slack_response_error() {
+        let json = r#"{"ok":false,"error":"channel_not_found"}"#;
+        let resp: SlackResponse = serde_json::from_str(json).unwrap();
+        assert!(!resp.ok);
+        assert_eq!(resp.error, Some("channel_not_found".to_string()));
+    }
+
+    #[test]
+    fn slack_response_defaults_optional_fields() {
+        let json = r#"{"ok":true}"#;
+        let resp: SlackResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.ok);
+        assert_eq!(resp.ts, None);
+        assert_eq!(resp.error, None);
     }
 }
