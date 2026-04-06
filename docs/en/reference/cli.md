@@ -187,3 +187,17 @@ By default, only read-only tools (`nagi_status`, `nagi_evaluate`) are exposed.
 | `name+N` | The specified Asset and N levels of downstream Assets |
 | `tag:finance` | Select by tag |
 | `+tag:finance` | Select by tag, including upstream Assets |
+| `tag:finance,tag:daily` | Intersection — Assets matching all criteria (AND) |
+
+Multiple `--select` arguments are combined as union (OR). Comma-separated patterns within a single argument are intersected (AND).
+
+```bash
+# OR: Assets matching either selector
+nagi evaluate --select daily-sales --select access-stats
+
+# AND: Assets with both tags
+nagi evaluate --select "tag:finance,tag:daily"
+
+# Combined: (tag:finance AND tag:daily) OR access-stats
+nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+```

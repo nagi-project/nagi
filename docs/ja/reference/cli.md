@@ -187,3 +187,17 @@ nagi mcp [OPTIONS]
 | `name+N` | 指定した Asset と下流 N 段 |
 | `tag:finance` | タグで選択 |
 | `+tag:finance` | タグで選択し、上流を含む |
+| `tag:finance,tag:daily` | 積集合 — すべての条件に一致する Asset（AND） |
+
+複数の `--select` 引数は和集合（OR）で結合されます。単一引数内のカンマ区切りパターンは積集合（AND）で結合されます。
+
+```bash
+# OR: いずれかのセレクターに一致する Asset
+nagi evaluate --select daily-sales --select access-stats
+
+# AND: 両方のタグを持つ Asset
+nagi evaluate --select "tag:finance,tag:daily"
+
+# 組み合わせ: (tag:finance AND tag:daily) OR access-stats
+nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+```
