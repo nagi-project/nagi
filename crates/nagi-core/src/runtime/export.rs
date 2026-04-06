@@ -250,7 +250,9 @@ pub async fn export_table(
         },
     )?;
 
-    let _ = std::fs::remove_file(&jsonl_path);
+    if let Err(e) = std::fs::remove_file(&jsonl_path) {
+        tracing::warn!(path = %jsonl_path.display(), error = %e, "failed to remove temporary JSONL file");
+    }
 
     Ok(ExportResult {
         table: table.table_name().to_string(),
