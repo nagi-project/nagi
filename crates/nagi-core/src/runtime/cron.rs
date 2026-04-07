@@ -22,13 +22,6 @@ impl JsonSchema for CronSchedule {
     }
 }
 
-impl CronSchedule {
-    #[cfg(test)]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// Validates a 5-field cron expression (minute hour day month weekday).
 fn validate_cron(expr: &str) -> Result<(), String> {
     const FIELD_RANGES: [(u32, u32); 5] = [
@@ -132,6 +125,12 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    impl CronSchedule {
+        pub fn as_str(&self) -> &str {
+            &self.0
+        }
+    }
 
     #[derive(Deserialize, Serialize)]
     struct Wrapper {

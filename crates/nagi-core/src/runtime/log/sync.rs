@@ -41,6 +41,49 @@ pub struct SyncLogEntry {
     pub date: String,
 }
 
+use crate::runtime::sync::StageResult;
+
+fn write_stage(
+    tx: &rusqlite::Transaction<'_>,
+    logs_dir: &std::path::Path,
+    execution_id: &str,
+    asset_name: &str,
+    sync_type: &str,
+    stage_result: &StageResult,
+) -> Result<SyncLogFilePaths, LogError> {
+    let date = parse_date(&stage_result.started_at)?;
+    let paths = file::write_stage_logs(
+        logs_dir,
+        asset_name,
+        &stage_result.started_at,
+        date,
+        stage_result.stage,
+        &stage_result.stdout,
+        &stage_result.stderr,
+    )?;
+
+    tx.execute(
+        "INSERT INTO sync_logs
+         (execution_id, stage, asset_name, sync_type,
+          started_at, finished_at, exit_code,
+          stdout_path, stderr_path, date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            execution_id,
+            stage_result.stage.to_string(),
+            asset_name,
+            sync_type,
+            stage_result.started_at,
+            stage_result.finished_at,
+            stage_result.exit_code,
+            paths.stdout.to_string_lossy(),
+            paths.stderr.to_string_lossy(),
+            date,
+        ],
+    )?;
+    Ok(paths)
+}
+
 impl LogStore {
     /// Records a sync execution result into sync_logs and writes stdout/stderr
     /// to log files. Returns the paths of written log files.
@@ -48,42 +91,19 @@ impl LogStore {
         &self,
         result: &SyncExecutionResult,
     ) -> Result<Vec<SyncLogFilePaths>, LogError> {
-        // Defense against path traversal: validate asset_name before using in file paths.
         sanitize_path_component(&result.asset_name)?;
 
         let tx = self.conn.unchecked_transaction()?;
+        let sync_type = result.sync_type.to_string();
         let mut all_paths = Vec::new();
-
         for stage_result in &result.stages {
-            let date = parse_date(&stage_result.started_at)?;
-            let paths = file::write_stage_logs(
+            let paths = write_stage(
+                &tx,
                 &self.logs_dir,
+                &result.execution_id,
                 &result.asset_name,
-                &stage_result.started_at,
-                date,
-                stage_result.stage,
-                &stage_result.stdout,
-                &stage_result.stderr,
-            )?;
-
-            tx.execute(
-                "INSERT INTO sync_logs
-                 (execution_id, stage, asset_name, sync_type,
-                  started_at, finished_at, exit_code,
-                  stdout_path, stderr_path, date)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                rusqlite::params![
-                    result.execution_id,
-                    stage_result.stage.to_string(),
-                    result.asset_name,
-                    result.sync_type.to_string(),
-                    stage_result.started_at,
-                    stage_result.finished_at,
-                    stage_result.exit_code,
-                    paths.stdout.to_string_lossy(),
-                    paths.stderr.to_string_lossy(),
-                    date,
-                ],
+                &sync_type,
+                stage_result,
             )?;
             all_paths.push(paths);
         }

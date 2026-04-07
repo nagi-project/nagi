@@ -86,14 +86,6 @@ impl DbtProfilesFile {
         Ok(Self { profiles })
     }
 
-    /// Returns the profile names in sorted order.
-    #[cfg(test)]
-    pub fn profile_names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self.profiles.keys().map(|s| s.as_str()).collect();
-        names.sort();
-        names
-    }
-
     /// Returns profile information as (name, default_target, targets) tuples, sorted by name.
     pub fn profiles_info(&self) -> Vec<(&str, &str, Vec<&str>)> {
         let mut info: Vec<_> = self
@@ -142,6 +134,14 @@ fn default_profiles_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl DbtProfilesFile {
+        fn profile_names(&self) -> Vec<&str> {
+            let mut names: Vec<&str> = self.profiles.keys().map(|s| s.as_str()).collect();
+            names.sort();
+            names
+        }
+    }
 
     const PROFILES_YAML: &str = r#"
 my_project:

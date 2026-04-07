@@ -28,7 +28,7 @@ impl ConditionsSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::kind::parse_kind;
+    use crate::runtime::kind::tests::parse_kind;
 
     #[test]
     fn parse_conditions_with_freshness() {

@@ -120,35 +120,32 @@ fn resolve_selector(
 // Traversal depth: None = no traversal, Some(None) = unlimited, Some(Some(n)) = n levels.
 type Depth = Option<Option<usize>>;
 
-fn parse_selector(selector: &str) -> Result<(Depth, Depth, &str), SelectError> {
-    // Strip upstream prefix: `+name` or `2+name`
-    let (upstream_depth, rest) = if let Some(pos) = selector.find('+') {
-        let prefix = &selector[..pos];
-        if prefix.is_empty() {
-            (Some(None), &selector[pos + 1..]) // unlimited
-        } else if prefix.chars().all(|c| c.is_ascii_digit()) {
-            let n: usize = prefix.parse().unwrap_or(0);
-            (Some(Some(n)), &selector[pos + 1..])
-        } else {
-            (None, selector)
-        }
+/// Parses a depth marker (the text on one side of `+`).
+/// Empty string means unlimited, digits mean a specific level, anything else means no traversal.
+fn parse_depth_marker(marker: &str) -> Option<Depth> {
+    if marker.is_empty() {
+        Some(Some(None))
+    } else if marker.chars().all(|c| c.is_ascii_digit()) {
+        let n: usize = marker.parse().unwrap_or(0);
+        Some(Some(Some(n)))
     } else {
-        (None, selector)
+        None
+    }
+}
+
+fn parse_selector(selector: &str) -> Result<(Depth, Depth, &str), SelectError> {
+    let (upstream_depth, rest) = match selector.find('+') {
+        Some(pos) => parse_depth_marker(&selector[..pos])
+            .map(|d| (d, &selector[pos + 1..]))
+            .unwrap_or((None, selector)),
+        None => (None, selector),
     };
 
-    // Strip downstream suffix: `name+` or `name+1`
-    let (downstream_depth, pattern) = if let Some(pos) = rest.rfind('+') {
-        let suffix = &rest[pos + 1..];
-        if suffix.is_empty() {
-            (Some(None), &rest[..pos]) // unlimited
-        } else if suffix.chars().all(|c| c.is_ascii_digit()) {
-            let n: usize = suffix.parse().unwrap_or(0);
-            (Some(Some(n)), &rest[..pos])
-        } else {
-            (None, rest)
-        }
-    } else {
-        (None, rest)
+    let (downstream_depth, pattern) = match rest.rfind('+') {
+        Some(pos) => parse_depth_marker(&rest[pos + 1..])
+            .map(|d| (d, &rest[..pos]))
+            .unwrap_or((None, rest)),
+        None => (None, rest),
     };
 
     if pattern.is_empty() {
@@ -267,12 +264,13 @@ fn traverse(
         if depth >= limit {
             continue;
         }
-        if let Some(neighbors) = adj.get(&current) {
-            for neighbor in neighbors {
-                if visited.insert(neighbor.clone()) {
-                    queue.push_back((neighbor.clone(), depth + 1));
-                }
-            }
+        let new_neighbors = adj
+            .get(&current)
+            .into_iter()
+            .flatten()
+            .filter(|n| visited.insert((*n).clone()));
+        for neighbor in new_neighbors {
+            queue.push_back((neighbor.clone(), depth + 1));
         }
     }
 }
@@ -594,5 +592,30 @@ mod tests {
         extract_downstream_n: "daily-sales+1" => Some("daily-sales".to_string());
         extract_tag_returns_none: "tag:finance" => None;
         extract_upstream_tag_returns_none: "+tag:finance" => None;
+    }
+
+    #[test]
+    fn parse_depth_marker_empty_is_unlimited() {
+        assert_eq!(parse_depth_marker(""), Some(Some(None)));
+    }
+
+    #[test]
+    fn parse_depth_marker_digits_is_bounded() {
+        assert_eq!(parse_depth_marker("3"), Some(Some(Some(3))));
+    }
+
+    #[test]
+    fn parse_depth_marker_zero() {
+        assert_eq!(parse_depth_marker("0"), Some(Some(Some(0))));
+    }
+
+    #[test]
+    fn parse_depth_marker_non_digit_is_none() {
+        assert_eq!(parse_depth_marker("abc"), None);
+    }
+
+    #[test]
+    fn parse_depth_marker_mixed_is_none() {
+        assert_eq!(parse_depth_marker("2a"), None);
     }
 }

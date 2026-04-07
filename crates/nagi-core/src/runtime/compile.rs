@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::runtime::kind::asset::{
     self as asset, validate_no_duplicate_condition_names, AssetSpec, DesiredCondition,
 };
-use crate::runtime::kind::sync::SyncSpec;
+use crate::runtime::kind::sync::{SyncSpec, SyncStep};
 use crate::runtime::kind::{self, KindError, Metadata, NagiKind};
 
 #[derive(Debug, Error)]
@@ -185,6 +185,17 @@ struct CategorizedResources {
     assets: Vec<(Metadata, AssetSpec)>,
 }
 
+fn check_dup(
+    seen: &mut HashSet<(String, String)>,
+    kind: String,
+    name: String,
+) -> Result<(), CompileError> {
+    if !seen.insert((kind.clone(), name.clone())) {
+        return Err(CompileError::DuplicateName { kind, name });
+    }
+    Ok(())
+}
+
 fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileError> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut result = CategorizedResources {
@@ -195,16 +206,6 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
     };
     // Track Asset names separately for overlay merge (max 2 allowed).
     let mut asset_indices: HashMap<String, usize> = HashMap::new();
-
-    let check_dup = |seen: &mut HashSet<(String, String)>,
-                     kind: String,
-                     name: String|
-     -> Result<(), CompileError> {
-        if !seen.insert((kind.clone(), name.clone())) {
-            return Err(CompileError::DuplicateName { kind, name });
-        }
-        Ok(())
-    };
 
     for resource in resources {
         let kind = resource.kind().to_string();
@@ -259,28 +260,39 @@ fn require_sync_ref(syncs: &HashMap<String, SyncSpec>, name: &str) -> Result<(),
 ///   (e.g. `model`). Falls back to `asset.name` when unset.
 ///   Use for external tool arguments (e.g. `dbt run --select`).
 /// - `{{ sync.<key> }}` — value from the `onDrift[].with` map.
+fn expand_step(
+    step: &SyncStep,
+    asset_name: &str,
+    model_name: &str,
+    with: &HashMap<String, String>,
+) -> SyncStep {
+    SyncStep {
+        step_type: step.step_type.clone(),
+        args: step
+            .args
+            .iter()
+            .map(|arg| expand_template_string(arg, asset_name, model_name, with))
+            .collect(),
+        env: step.env.clone(),
+    }
+}
+
 fn expand_sync_templates(
     sync_spec: &SyncSpec,
     asset_name: &str,
     model_name: &str,
     with: &HashMap<String, String>,
 ) -> SyncSpec {
-    let expand_step =
-        |step: &crate::runtime::kind::sync::SyncStep| -> crate::runtime::kind::sync::SyncStep {
-            crate::runtime::kind::sync::SyncStep {
-                step_type: step.step_type.clone(),
-                args: step
-                    .args
-                    .iter()
-                    .map(|arg| expand_template_string(arg, asset_name, model_name, with))
-                    .collect(),
-                env: step.env.clone(),
-            }
-        };
     SyncSpec {
-        pre: sync_spec.pre.as_ref().map(&expand_step),
-        run: expand_step(&sync_spec.run),
-        post: sync_spec.post.as_ref().map(&expand_step),
+        pre: sync_spec
+            .pre
+            .as_ref()
+            .map(|s| expand_step(s, asset_name, model_name, with)),
+        run: expand_step(&sync_spec.run, asset_name, model_name, with),
+        post: sync_spec
+            .post
+            .as_ref()
+            .map(|s| expand_step(s, asset_name, model_name, with)),
     }
 }
 
@@ -1914,5 +1926,75 @@ spec:
         assert!(target_dir.join("graph.json").exists());
         assert!(target_dir.join("assets/my-dbt.customers.yaml").exists());
         assert!(target_dir.join("assets/my-dbt.stg_customers.yaml").exists());
+    }
+
+    // ── check_dup ───────────────────────────────────────────────────────
+
+    #[test]
+    fn check_dup_ok_for_new_entry() {
+        let mut seen = HashSet::new();
+        assert!(check_dup(&mut seen, "Asset".into(), "foo".into()).is_ok());
+        assert!(seen.contains(&("Asset".into(), "foo".into())));
+    }
+
+    #[test]
+    fn check_dup_different_kinds_same_name() {
+        let mut seen = HashSet::new();
+        check_dup(&mut seen, "Asset".into(), "foo".into()).unwrap();
+        assert!(check_dup(&mut seen, "Sync".into(), "foo".into()).is_ok());
+    }
+
+    #[test]
+    fn check_dup_returns_error_on_duplicate() {
+        let mut seen = HashSet::new();
+        check_dup(&mut seen, "Asset".into(), "foo".into()).unwrap();
+        let err = check_dup(&mut seen, "Asset".into(), "foo".into()).unwrap_err();
+        assert!(
+            matches!(err, CompileError::DuplicateName { kind, name } if kind == "Asset" && name == "foo")
+        );
+    }
+
+    // ── expand_step ─────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_step_replaces_templates_in_args() {
+        let step = SyncStep {
+            step_type: crate::runtime::kind::sync::StepType::Command,
+            args: vec![
+                "dbt".into(),
+                "run".into(),
+                "--select".into(),
+                "{{ asset.name }}".into(),
+            ],
+            env: HashMap::new(),
+        };
+        let result = expand_step(&step, "origin.model", "model", &HashMap::new());
+        assert_eq!(result.args, vec!["dbt", "run", "--select", "origin.model"]);
+    }
+
+    #[test]
+    fn expand_step_preserves_env() {
+        let mut env = HashMap::new();
+        env.insert("KEY".into(), "VALUE".into());
+        let step = SyncStep {
+            step_type: crate::runtime::kind::sync::StepType::Command,
+            args: vec!["echo".into()],
+            env: env.clone(),
+        };
+        let result = expand_step(&step, "a", "b", &HashMap::new());
+        assert_eq!(result.env, env);
+    }
+
+    #[test]
+    fn expand_step_replaces_with_variables() {
+        let step = SyncStep {
+            step_type: crate::runtime::kind::sync::StepType::Command,
+            args: vec!["{{ sync.target }}".into()],
+            env: HashMap::new(),
+        };
+        let mut with = HashMap::new();
+        with.insert("target".into(), "prod".into());
+        let result = expand_step(&step, "a", "b", &with);
+        assert_eq!(result.args, vec!["prod"]);
     }
 }

@@ -167,20 +167,7 @@ impl ResolvedConnection {
                 target,
                 profiles_dir,
                 ..
-            } => {
-                let f = match profiles_dir {
-                    Some(dir) => {
-                        let path = std::path::Path::new(dir).join("profiles.yml");
-                        dbt::DbtProfilesFile::load(&path)
-                    }
-                    None => dbt::DbtProfilesFile::load_default(),
-                }
-                .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
-                let output = f
-                    .resolve(profile, target.as_deref())
-                    .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
-                create_connection(output)
-            }
+            } => connect_dbt(profile, target.as_deref(), profiles_dir.as_deref()),
             #[cfg(feature = "bigquery")]
             ResolvedConnection::BigQuery {
                 project,
@@ -190,17 +177,14 @@ impl ResolvedConnection {
                 keyfile,
                 timeout_seconds,
                 ..
-            } => {
-                let conn = bigquery::BigQueryConnection::from_resolved(
-                    project,
-                    dataset,
-                    execution_project,
-                    method.as_deref(),
-                    keyfile,
-                    *timeout_seconds,
-                )?;
-                Ok(Box::new(conn))
-            }
+            } => connect_bigquery(
+                project,
+                dataset,
+                execution_project,
+                method.as_deref(),
+                keyfile,
+                *timeout_seconds,
+            ),
             #[cfg(not(feature = "bigquery"))]
             ResolvedConnection::BigQuery { .. } => Err(ConnectionError::UnsupportedAdapter(
                 "bigquery (feature disabled)".to_string(),
@@ -218,24 +202,82 @@ impl ResolvedConnection {
                 role,
                 private_key_path,
                 ..
-            } => {
-                let config = snowflake::SnowflakeConfig {
-                    account: account.clone(),
-                    user: user.clone(),
-                    database: database.clone(),
-                    schema: schema.clone(),
-                    warehouse: warehouse.clone(),
-                    role: role.clone(),
-                    private_key_path: private_key_path.clone(),
-                };
-                Ok(Box::new(snowflake::SnowflakeConnection::new(config)))
-            }
+            } => connect_snowflake(
+                account,
+                user,
+                database,
+                schema,
+                warehouse,
+                role,
+                private_key_path,
+            ),
             #[cfg(not(feature = "snowflake"))]
             ResolvedConnection::Snowflake { .. } => Err(ConnectionError::UnsupportedAdapter(
                 "snowflake (feature disabled)".to_string(),
             )),
         }
     }
+}
+
+#[cfg(feature = "bigquery")]
+fn connect_bigquery(
+    project: &str,
+    dataset: &str,
+    execution_project: &Option<String>,
+    method: Option<&str>,
+    keyfile: &Option<String>,
+    timeout_seconds: Option<u32>,
+) -> Result<Box<dyn Connection>, ConnectionError> {
+    let conn = bigquery::BigQueryConnection::from_resolved(
+        project,
+        dataset,
+        execution_project,
+        method,
+        keyfile,
+        timeout_seconds,
+    )?;
+    Ok(Box::new(conn))
+}
+
+fn connect_dbt(
+    profile: &str,
+    target: Option<&str>,
+    profiles_dir: Option<&str>,
+) -> Result<Box<dyn Connection>, ConnectionError> {
+    let f = match profiles_dir {
+        Some(dir) => {
+            let path = std::path::Path::new(dir).join("profiles.yml");
+            dbt::DbtProfilesFile::load(&path)
+        }
+        None => dbt::DbtProfilesFile::load_default(),
+    }
+    .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
+    let output = f
+        .resolve(profile, target)
+        .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
+    create_connection(output)
+}
+
+#[cfg(feature = "snowflake")]
+fn connect_snowflake(
+    account: &str,
+    user: &str,
+    database: &str,
+    schema: &str,
+    warehouse: &str,
+    role: &Option<String>,
+    private_key_path: &str,
+) -> Result<Box<dyn Connection>, ConnectionError> {
+    let config = snowflake::SnowflakeConfig {
+        account: account.to_string(),
+        user: user.to_string(),
+        database: database.to_string(),
+        schema: schema.to_string(),
+        warehouse: warehouse.to_string(),
+        role: role.clone(),
+        private_key_path: private_key_path.to_string(),
+    };
+    Ok(Box::new(snowflake::SnowflakeConnection::new(config)))
 }
 
 /// Resolves a named `ConnectionSpec` into a `ResolvedConnection`.

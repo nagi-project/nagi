@@ -80,30 +80,22 @@ fn resolve_cached_conditions(
 
     let now = Utc::now();
     let asset_ttl = compiled.spec.evaluate_cache_ttl.as_ref();
-    let mut valid = HashMap::new();
 
-    for entry in &compiled.spec.on_drift {
-        for cond in &entry.conditions {
-            let effective_ttl = cond.evaluate_cache_ttl().or(asset_ttl).map(|d| d.as_std());
-            let Some(ttl) = effective_ttl else {
-                continue;
-            };
-            let Some(cached) = cached_map.get(cond.name()) else {
-                continue;
-            };
-            let Ok(cached_at) = DateTime::parse_from_rfc3339(&cached.cached_at) else {
-                continue;
-            };
+    compiled
+        .spec
+        .on_drift
+        .iter()
+        .flat_map(|entry| entry.conditions.iter())
+        .filter_map(|cond| {
+            let ttl = cond.evaluate_cache_ttl().or(asset_ttl)?.as_std();
+            let cached = cached_map.get(cond.name())?;
+            let cached_at = DateTime::parse_from_rfc3339(&cached.cached_at).ok()?;
             let elapsed = now.signed_duration_since(cached_at);
-            if elapsed >= chrono::Duration::zero()
-                && elapsed < chrono::Duration::from_std(ttl).unwrap_or(chrono::TimeDelta::MAX)
-            {
-                valid.insert(cond.name().to_string(), cached.result.clone());
-            }
-        }
-    }
-
-    valid
+            let max = chrono::Duration::from_std(ttl).unwrap_or(chrono::TimeDelta::MAX);
+            (elapsed >= chrono::Duration::zero() && elapsed < max)
+                .then(|| (cond.name().to_string(), cached.result.clone()))
+        })
+        .collect()
 }
 
 /// Writes all condition results from the evaluation to the condition cache.
@@ -193,6 +185,42 @@ pub async fn spawn_sync(
     (asset_name, result)
 }
 
+fn resolve_sync_spec(yaml: &str) -> Result<(CompiledAsset, usize), SyncError> {
+    let compiled: CompiledAsset =
+        serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
+    if compiled.spec.on_drift.is_empty() {
+        return Err(SyncError::NoSyncSpec {
+            asset_name: compiled.metadata.name.clone(),
+        });
+    }
+    Ok((compiled, 0))
+}
+
+fn skipped_result(
+    execution_id: String,
+    asset_name: &str,
+) -> crate::runtime::sync::SyncExecutionResult {
+    crate::runtime::sync::SyncExecutionResult {
+        execution_id,
+        asset_name: asset_name.to_string(),
+        sync_type: crate::runtime::sync::SyncType::Sync,
+        stages: vec![],
+        success: true,
+    }
+}
+
+async fn notify_lock_skipped(notifier: &Option<Arc<dyn Notifier>>, asset_name: &str) {
+    if let Some(n) = notifier {
+        let event = NotifyEvent::SyncLockSkipped {
+            asset_name: asset_name.to_string(),
+            sync_ref: asset_name.to_string(),
+        };
+        if let Err(e) = n.notify(&event).await {
+            tracing::warn!(error = %e, "notification failed");
+        }
+    }
+}
+
 async fn resolve_and_sync(
     asset_name: &str,
     yaml: &str,
@@ -200,18 +228,8 @@ async fn resolve_and_sync(
     lock_config: LockConfig,
     notifier: Option<Arc<dyn Notifier>>,
 ) -> Result<crate::runtime::sync::SyncExecutionResult, SyncError> {
-    let compiled: CompiledAsset =
-        serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
-
-    // Use the first on_drift entry's sync for serve (first-match).
-    let first_entry = compiled
-        .spec
-        .on_drift
-        .first()
-        .ok_or_else(|| SyncError::NoSyncSpec {
-            asset_name: compiled.metadata.name.clone(),
-        })?;
-    let sync_spec = &first_entry.sync;
+    let (compiled, entry_idx) = resolve_sync_spec(yaml)?;
+    let sync_spec = &compiled.spec.on_drift[entry_idx].sync;
 
     let execution_id = crate::runtime::sync::generate_uuid();
     let ttl = std::time::Duration::from_secs(lock_config.ttl_seconds);
@@ -226,22 +244,8 @@ async fn resolve_and_sync(
     )
     .await?
     {
-        if let Some(n) = &notifier {
-            let event = NotifyEvent::SyncLockSkipped {
-                asset_name: asset_name.to_string(),
-                sync_ref: asset_name.to_string(),
-            };
-            if let Err(e) = n.notify(&event).await {
-                tracing::warn!(error = %e, "notification failed");
-            }
-        }
-        return Ok(crate::runtime::sync::SyncExecutionResult {
-            execution_id,
-            asset_name: asset_name.to_string(),
-            sync_type: crate::runtime::sync::SyncType::Sync,
-            stages: vec![],
-            success: true,
-        });
+        notify_lock_skipped(&notifier, asset_name).await;
+        return Ok(skipped_result(execution_id, asset_name));
     }
 
     let result = crate::runtime::sync::execute_sync_core(
@@ -271,32 +275,44 @@ async fn acquire_with_retry(
     execution_id: &str,
 ) -> Result<bool, SyncError> {
     for attempt in 0..config.retry_max_attempts {
-        match lock
+        let acquired = lock
             .acquire(sync_ref, ttl, execution_id)
-            .map_err(storage_to_sync_error)?
-        {
-            true => return Ok(true),
-            false => {
-                let now = chrono::Utc::now().to_rfc3339();
-                tracing::info!(
-                    sync_ref = %sync_ref,
-                    asset = %asset_name,
-                    attempt = attempt + 1,
-                    max_attempts = config.retry_max_attempts,
-                    "lock held, waiting"
-                );
-                write_lock_log(execution_id, asset_name, attempt + 1, "waiting", &now);
-                if attempt + 1 < config.retry_max_attempts {
-                    tokio::time::sleep(std::time::Duration::from_secs(
-                        config.retry_interval_seconds,
-                    ))
-                    .await;
-                }
-            }
+            .map_err(storage_to_sync_error)?;
+        if acquired {
+            return Ok(true);
+        }
+        log_lock_wait(sync_ref, asset_name, execution_id, attempt + 1, config);
+        if attempt + 1 < config.retry_max_attempts {
+            tokio::time::sleep(std::time::Duration::from_secs(
+                config.retry_interval_seconds,
+            ))
+            .await;
         }
     }
 
-    // All retries exhausted — log the skip.
+    log_lock_exhausted(sync_ref, asset_name, execution_id, config);
+    Ok(false)
+}
+
+fn log_lock_wait(
+    sync_ref: &str,
+    asset_name: &str,
+    execution_id: &str,
+    attempt: u32,
+    config: &LockConfig,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    tracing::info!(
+        sync_ref = %sync_ref,
+        asset = %asset_name,
+        attempt = attempt,
+        max_attempts = config.retry_max_attempts,
+        "lock held, waiting"
+    );
+    write_lock_log(execution_id, asset_name, attempt, "waiting", &now);
+}
+
+fn log_lock_exhausted(sync_ref: &str, asset_name: &str, execution_id: &str, config: &LockConfig) {
     tracing::warn!(
         asset = %asset_name,
         sync_ref = %sync_ref,
@@ -311,7 +327,6 @@ async fn acquire_with_retry(
         "skipped",
         &now,
     );
-    Ok(false)
 }
 
 fn write_lock_log(
@@ -677,5 +692,56 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert!(map.contains_key("a"));
         assert!(map.contains_key("b"));
+    }
+
+    #[test]
+    fn resolve_sync_spec_ok_with_on_drift() {
+        let yaml = r#"
+apiVersion: nagi/v1alpha1
+metadata:
+  name: test-asset
+spec:
+  onDrift:
+    - conditions: []
+      conditionsRef: test-cond
+      sync:
+        run:
+          type: Command
+          args: ["echo", "ok"]
+      syncRefName: test-sync
+  autoSync: true
+"#;
+        let (compiled, idx) = resolve_sync_spec(yaml).unwrap();
+        assert_eq!(compiled.metadata.name, "test-asset");
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn resolve_sync_spec_err_without_on_drift() {
+        let yaml = r#"
+apiVersion: nagi/v1alpha1
+metadata:
+  name: test-asset
+spec:
+  onDrift: []
+  autoSync: true
+"#;
+        let err = resolve_sync_spec(yaml).unwrap_err();
+        assert!(matches!(err, SyncError::NoSyncSpec { .. }));
+    }
+
+    #[test]
+    fn resolve_sync_spec_err_on_invalid_yaml() {
+        let err = resolve_sync_spec("{{invalid").unwrap_err();
+        assert!(matches!(err, SyncError::Parse(_)));
+    }
+
+    #[test]
+    fn skipped_result_has_empty_stages() {
+        let result = skipped_result("exec-1".to_string(), "my-asset");
+        assert_eq!(result.execution_id, "exec-1");
+        assert_eq!(result.asset_name, "my-asset");
+        assert!(result.stages.is_empty());
+        assert!(result.success);
     }
 }

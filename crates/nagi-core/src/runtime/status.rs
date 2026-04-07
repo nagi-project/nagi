@@ -38,6 +38,39 @@ pub struct StatusResult {
 }
 
 /// Collects convergence status for compiled assets: cached evaluation + latest sync log + suspended state.
+fn query_last_sync(
+    store: &Option<LogStore>,
+    name: &str,
+) -> Result<Option<Vec<SyncLogEntry>>, StatusError> {
+    let Some(s) = store else { return Ok(None) };
+    let entries = s.latest_sync_log(name)?;
+    Ok(if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    })
+}
+
+fn collect_asset_status(
+    name: String,
+    cache: &LocalCache,
+    store: &Option<LogStore>,
+    suspended_store: &Option<LocalSuspendedStore>,
+) -> Result<AssetStatus, StatusError> {
+    let evaluation = cache.read(&name)?;
+    let last_sync = query_last_sync(store, &name)?;
+    let suspended = match suspended_store {
+        Some(ss) => ss.read(&name)?,
+        None => None,
+    };
+    Ok(AssetStatus {
+        asset: name,
+        evaluation,
+        last_sync,
+        suspended,
+    })
+}
+
 pub fn asset_status(
     target_dir: &Path,
     selectors: &[&str],
@@ -53,43 +86,17 @@ pub fn asset_status(
     let cache = LocalCache::new(cache_dir.map(PathBuf::from).unwrap_or_else(|| {
         crate::runtime::config::resolve_nagi_dir(Path::new(".")).evaluate_cache_dir()
     }));
-
     let store = if db_path.exists() {
         Some(LogStore::open(db_path, logs_dir)?)
     } else {
         None
     };
-
     let suspended_store = suspended_dir.map(|d| LocalSuspendedStore::new(d.to_path_buf()));
 
-    let mut assets = Vec::with_capacity(asset_names.len());
-    for name in asset_names {
-        let evaluation = cache.read(&name)?;
-
-        let last_sync = match &store {
-            Some(s) => {
-                let entries = s.latest_sync_log(&name)?;
-                if entries.is_empty() {
-                    None
-                } else {
-                    Some(entries)
-                }
-            }
-            None => None,
-        };
-
-        let suspended = match &suspended_store {
-            Some(ss) => ss.read(&name)?,
-            None => None,
-        };
-
-        assets.push(AssetStatus {
-            asset: name,
-            evaluation,
-            last_sync,
-            suspended,
-        });
-    }
+    let assets = asset_names
+        .into_iter()
+        .map(|name| collect_asset_status(name, &cache, &store, &suspended_store))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(StatusResult { assets })
 }
