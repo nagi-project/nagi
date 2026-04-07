@@ -50,13 +50,13 @@ spec:
       sync: build-clean-data
 ```
 
-```bash
-nagi compile    # Validate and resolve resource definitions
-nagi evaluate   # Evaluate conditions → reports "clean-data" as Drifted
-nagi sync       # Run sync → creates clean_data.txt → re-evaluates as Ready
-mv clean_data.txt dirty_data.txt
-nagi evaluate   # Drifted again
-nagi sync       # Restores clean_data.txt → Ready
+```console
+$ nagi compile    # Validate and resolve resource definitions
+$ nagi evaluate   # Evaluate conditions → reports "clean-data" as Drifted
+$ nagi sync       # Run sync → creates clean_data.txt → re-evaluates as Ready
+$ mv clean_data.txt dirty_data.txt
+$ nagi evaluate   # Drifted again
+$ nagi sync       # Restores clean_data.txt → Ready
 ```
 
 `nagi serve` runs this evaluate-and-sync cycle continuously.
