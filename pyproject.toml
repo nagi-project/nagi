@@ -76,7 +76,7 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "ANN"]
 
 [[tool.ty.overrides]]
-include = ["python/nagi_cli/commands/*.py", "python/nagi_cli/mcp.py", "python/tests/*.py", "python/tests/integration/*.py", "python/tests/nagi_cli/*.py", "python/tests/nagi_cli/commands/*.py", "python/tests/scenario/*.py"]
+include = ["python/nagi_cli/*.py", "python/nagi_cli/commands/*.py", "python/tests/*.py", "python/tests/integration/*.py", "python/tests/nagi_cli/*.py", "python/tests/nagi_cli/commands/*.py", "python/tests/scenario/*.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

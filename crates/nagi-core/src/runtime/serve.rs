@@ -74,6 +74,7 @@ pub async fn serve(
     resources_dir: &Path,
     target_dir: &Path,
     selectors: &[&str],
+    excludes: &[&str],
     cache_dir: Option<&Path>,
     project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
@@ -89,7 +90,7 @@ pub async fn serve(
         "compiled"
     );
 
-    let inputs = load_controller_inputs(target_dir, selectors, &config, cache_dir)?;
+    let inputs = load_controller_inputs(target_dir, selectors, excludes, &config, cache_dir)?;
     let (shutdown_tx, handles) = spawn_controllers(inputs, &config, project_dir)?;
 
     tracing::info!(
@@ -116,10 +117,11 @@ pub async fn serve(
 fn load_controller_inputs(
     target_dir: &Path,
     selectors: &[&str],
+    excludes: &[&str],
     config: &crate::runtime::config::NagiConfig,
     cache_dir: Option<&Path>,
 ) -> Result<Vec<controller::ControllerInput>, ServeError> {
-    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors)?;
+    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors, excludes)?;
 
     let graph: DependencyGraph = crate::runtime::compile::load_graph(target_dir)?;
 
@@ -313,7 +315,7 @@ pub fn halt(
     use crate::runtime::storage::local::LocalSuspendedStore;
     use crate::runtime::storage::SuspendedStore;
 
-    let asset_names = crate::runtime::compile::resolve_compiled_asset_names(target_dir, &[])?;
+    let asset_names = crate::runtime::compile::resolve_compiled_asset_names(target_dir, &[], &[])?;
     let store = LocalSuspendedStore::new(nagi_dir.suspended_dir());
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -394,7 +396,7 @@ mod tests {
         setup_target(&target, &["a", "b"], &[]);
 
         let config = crate::runtime::config::NagiConfig::default();
-        let inputs = load_controller_inputs(&target, &[], &config, None).unwrap();
+        let inputs = load_controller_inputs(&target, &[], &[], &config, None).unwrap();
         // Two independent assets → two components
         assert_eq!(inputs.len(), 2);
         assert!(inputs[0].cache_dir.is_some());
@@ -410,7 +412,7 @@ mod tests {
             max_controllers: Some(2),
             ..Default::default()
         };
-        let err = load_controller_inputs(&target, &[], &config, None).unwrap_err();
+        let err = load_controller_inputs(&target, &[], &[], &config, None).unwrap_err();
         assert!(err.to_string().contains("3 connected components"));
     }
 
@@ -422,7 +424,8 @@ mod tests {
 
         let config = crate::runtime::config::NagiConfig::default();
         let custom = dir.path().join("custom-cache");
-        let inputs = load_controller_inputs(&target, &[], &config, Some(custom.as_path())).unwrap();
+        let inputs =
+            load_controller_inputs(&target, &[], &[], &config, Some(custom.as_path())).unwrap();
         assert_eq!(inputs[0].cache_dir, Some(custom));
     }
 }

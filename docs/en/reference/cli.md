@@ -6,7 +6,7 @@ See [Get Started](../overview/get-started.md#install) for installation instructi
 
 ## Output
 
-All command output is in JSON format.
+Command output defaults to JSON. Use `--output text` for human-readable table output (`evaluate`, `status`, `ls`).
 
 ## Subcommands
 
@@ -23,6 +23,12 @@ All command output is in JSON format.
 | `serve halt` | Halt all Assets at once |
 | `export` | Export execution logs to a data warehouse |
 | `mcp` | Start the MCP server on stdio |
+
+## Global options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--log-level` | `warn` | Set log level (`error`, `warn`, `info`, `debug`, `trace`). Overrides `NAGI_LOG_LEVEL` env var |
 
 ## init
 
@@ -50,7 +56,7 @@ nagi compile [OPTIONS]
 
 ## ls
 
-Lists all compiled resources as JSON.
+Lists all compiled resources.
 
 ```bash
 nagi ls [OPTIONS]
@@ -59,6 +65,8 @@ nagi ls [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--target-dir` | `target` | Compiled directory |
+| `--output` | `json` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
 
 ## evaluate
 
@@ -71,9 +79,12 @@ nagi evaluate [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the Assets to evaluate |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the desired state to be evaluated (does not execute queries or commands) |
+| `--output` | `json` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
 
 ## sync
 
@@ -86,11 +97,13 @@ nagi sync [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the target Assets |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--stage` | — | Stages to execute (comma-separated: `pre`, `run`, `post`). When specified, skips evaluation after Sync completion |
 | `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the commands to be executed (no side effects) |
 | `--force` | — | Skip the dbt Cloud running-job check |
+| `--auto-approve` | — | Skip interactive confirmation and execute all proposals |
 
 ## status
 
@@ -103,8 +116,11 @@ nagi status [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the target Assets |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
+| `--output` | `json` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
 
 ## serve
 
@@ -117,6 +133,7 @@ nagi serve [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the target Assets |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--resources-dir` | `resources` | Resources directory |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
@@ -187,3 +204,29 @@ By default, only read-only tools (`nagi_status`, `nagi_evaluate`) are exposed.
 | `name+N` | The specified Asset and N levels of downstream Assets |
 | `tag:finance` | Select by tag |
 | `+tag:finance` | Select by tag, including upstream Assets |
+| `tag:finance,tag:daily` | Intersection — Assets matching all criteria (AND) |
+
+Multiple `--select` arguments are combined as union (OR). Comma-separated patterns within a single argument are intersected (AND).
+
+```bash
+# OR: Assets matching either selector
+nagi evaluate --select daily-sales --select access-stats
+
+# AND: Assets with both tags
+nagi evaluate --select "tag:finance,tag:daily"
+
+# Combined: (tag:finance AND tag:daily) OR access-stats
+nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+```
+
+## --exclude syntax
+
+`--exclude` uses the same selector syntax as `--select`. Assets matching any `--exclude` selector are removed from the result after `--select` is applied.
+
+```bash
+# Evaluate all assets except monthly-report
+nagi evaluate --exclude monthly-report
+
+# Evaluate finance assets, excluding those tagged daily
+nagi evaluate --select "tag:finance" --exclude "tag:daily"
+```

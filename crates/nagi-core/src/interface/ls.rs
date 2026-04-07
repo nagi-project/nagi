@@ -85,7 +85,7 @@ pub(crate) fn ls(target_dir: &std::path::Path, kinds: &[&str]) -> Result<LsOutpu
 
     let normalized: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();
 
-    let loaded = load_compiled_assets(target_dir, &[])?;
+    let loaded = load_compiled_assets(target_dir, &[], &[])?;
     let compiled_assets = parse_compiled_assets(&loaded)?;
 
     let assets = if has_kind(&normalized, "asset") {
@@ -216,7 +216,7 @@ mod tests {
 
     fn setup_compiled_assets(yaml: &str) -> Vec<(String, CompiledAsset)> {
         let (_dir, target) = setup_target(yaml);
-        let loaded = load_compiled_assets(&target, &[]).unwrap();
+        let loaded = load_compiled_assets(&target, &[], &[]).unwrap();
         parse_compiled_assets(&loaded).unwrap()
     }
 

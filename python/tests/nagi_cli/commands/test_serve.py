@@ -20,7 +20,14 @@ class TestServeMain:
         self, mock_serve: MagicMock, runner: CliRunner
     ) -> None:
         runner.invoke(serve, ["--resources-dir", "a", "--target-dir", "t"])
-        mock_serve.assert_called_once_with("a", "t", [], None, ".")
+        mock_serve.assert_called_once_with(
+            resources_dir="a",
+            target_dir="t",
+            selectors=[],
+            excludes=[],
+            cache_dir=None,
+            project_dir=".",
+        )
 
     @patch("nagi_cli.commands.serve._serve", side_effect=RuntimeError("fail"))
     def test_serve_error_returns_exit_code_1(

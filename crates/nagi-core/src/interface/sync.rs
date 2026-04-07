@@ -10,35 +10,44 @@ use crate::runtime::sync::{
     DryRunStage, Stage, SyncError, SyncType, SyncWorkflowParams,
 };
 
+pub(crate) struct ProposeSyncParams<'a> {
+    pub target_dir: &'a Path,
+    pub selectors: &'a [&'a str],
+    pub excludes: &'a [&'a str],
+    pub sync_type: &'a str,
+    pub stages: Option<&'a str>,
+    pub cache_dir: Option<&'a Path>,
+    pub db_path: Option<&'a Path>,
+    pub logs_dir: Option<&'a Path>,
+}
+
 /// Builds sync proposals for compiled assets matching the selectors.
 ///
 /// Evaluation or dry-run failures are not fatal — each proposal will omit
 /// whichever part failed.
 pub(crate) async fn propose_sync(
-    target_dir: &Path,
-    selectors: &[&str],
-    sync_type: &str,
-    stages: Option<&str>,
-    cache_dir: Option<&Path>,
-    db_path: Option<&Path>,
-    logs_dir: Option<&Path>,
+    params: ProposeSyncParams<'_>,
 ) -> Result<Vec<SyncProposal>, SyncError> {
-    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors)?;
-    let st = parse_sync_type(sync_type)?;
-    let log_store = open_log_store(db_path, logs_dir)?;
+    let assets = crate::runtime::compile::load_compiled_assets(
+        params.target_dir,
+        params.selectors,
+        params.excludes,
+    )?;
+    let st = parse_sync_type(params.sync_type)?;
+    let log_store = open_log_store(params.db_path, params.logs_dir)?;
     let mut proposals = Vec::with_capacity(assets.len());
 
     for (name, yaml) in &assets {
         let compiled: CompiledAsset =
             serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
 
-        let evaluation = evaluate_for_proposal(&compiled, cache_dir, log_store.as_ref())
+        let evaluation = evaluate_for_proposal(&compiled, params.cache_dir, log_store.as_ref())
             .await
             .ok();
 
         let dry_run_stages = match resolve_sync_spec(&compiled) {
             Ok(sync_spec) => {
-                let parsed_stages = stages.map(Stage::parse_list).transpose()?;
+                let parsed_stages = params.stages.map(Stage::parse_list).transpose()?;
                 let dr = dry_run_sync(name, &sync_spec, st, parsed_stages.as_deref());
                 Some(dr.stages)
             }

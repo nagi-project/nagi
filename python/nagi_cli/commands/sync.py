@@ -21,6 +21,12 @@ def _make_sync_command(sync_type: str) -> click.Command:
         help="Asset selector expression (dbt-compatible). Can be repeated.",
     )
     @click.option(
+        "--exclude",
+        "excludes",
+        multiple=True,
+        help="Exclude assets matching this selector. Can be repeated.",
+    )
+    @click.option(
         "--target-dir",
         default="target",
         show_default=True,
@@ -49,17 +55,32 @@ def _make_sync_command(sync_type: str) -> click.Command:
         default=False,
         help="Skip pre-flight checks (e.g. dbt Cloud running jobs).",
     )
+    @click.option(
+        "--auto-approve",
+        is_flag=True,
+        default=False,
+        help="Skip interactive confirmation and execute all proposals.",
+    )
     def cmd(
         selectors: tuple[str, ...],
+        excludes: tuple[str, ...],
         target_dir: str,
         stages: str | None,
         cache_dir: str | None,
         dry_run: bool,
         force: bool,
+        auto_approve: bool,
     ) -> None:
         try:
             proposals = json.loads(
-                propose_sync(target_dir, list(selectors), sync_type, stages, cache_dir)
+                propose_sync(
+                    target_dir=target_dir,
+                    selectors=list(selectors),
+                    sync_type=sync_type,
+                    excludes=list(excludes),
+                    stages=stages,
+                    cache_dir=cache_dir,
+                )
             )
         except (RuntimeError, json.JSONDecodeError) as e:
             click.echo(json.dumps({"error": str(e)}))
@@ -79,7 +100,7 @@ def _make_sync_command(sync_type: str) -> click.Command:
                 continue
 
             click.echo(json.dumps({"proposal": proposal}))
-            if not click.confirm("Run sync?", default=True):
+            if not auto_approve and not click.confirm("Run sync?", default=True):
                 click.echo(json.dumps({"skipped": proposal["asset"]}))
                 continue
 

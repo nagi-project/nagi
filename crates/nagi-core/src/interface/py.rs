@@ -38,10 +38,11 @@ fn profiles_to_json(f: &DbtProfilesFile) -> PyResult<String> {
 /// Evaluates all compiled assets matching selectors.
 /// Returns JSON array of evaluation results.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None, dry_run=false))]
+#[pyo3(signature = (target_dir, selectors, excludes=vec![], cache_dir=None, dry_run=false))]
 fn evaluate_all(
     target_dir: &str,
     selectors: Vec<String>,
+    excludes: Vec<String>,
     cache_dir: Option<&str>,
     dry_run: bool,
 ) -> PyResult<String> {
@@ -51,9 +52,11 @@ fn evaluate_all(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::interface::evaluate::evaluate_all(
         std::path::Path::new(target_dir),
         &selector_refs,
+        &exclude_refs,
         Some(resolved_cache.as_path()),
         dry_run,
     ))
@@ -113,25 +116,30 @@ fn list_resources(target_dir: &str, kinds: Vec<String>) -> PyResult<String> {
 /// Returns JSON array of proposals. Each proposal contains an opaque `_index`
 /// field used by `execute_sync_proposal`.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, sync_type, stages=None, cache_dir=None))]
+#[pyo3(signature = (target_dir, selectors, sync_type, excludes=vec![], stages=None, cache_dir=None))]
 fn propose_sync(
     target_dir: &str,
     selectors: Vec<String>,
     sync_type: &str,
+    excludes: Vec<String>,
     stages: Option<&str>,
     cache_dir: Option<&str>,
 ) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     let proposals = rt
         .block_on(crate::interface::sync::propose_sync(
-            std::path::Path::new(target_dir),
-            &selector_refs,
-            sync_type,
-            stages,
-            cache_dir.map(std::path::Path::new),
-            None,
-            None,
+            crate::interface::sync::ProposeSyncParams {
+                target_dir: std::path::Path::new(target_dir),
+                selectors: &selector_refs,
+                excludes: &exclude_refs,
+                sync_type,
+                stages,
+                cache_dir: cache_dir.map(std::path::Path::new),
+                db_path: None,
+                logs_dir: None,
+            },
         ))
         .map_err(to_py_err)?;
 
@@ -188,10 +196,11 @@ fn execute_sync_proposal(
 
 /// Returns convergence status (cached evaluation + latest sync log + suspended state) as JSON.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None, db_path=None, logs_dir=None, suspended_dir=None))]
+#[pyo3(signature = (target_dir, selectors, excludes=vec![], cache_dir=None, db_path=None, logs_dir=None, suspended_dir=None))]
 fn asset_status(
     target_dir: &str,
     selectors: Vec<String>,
+    excludes: Vec<String>,
     cache_dir: Option<&str>,
     db_path: Option<&str>,
     logs_dir: Option<&str>,
@@ -206,9 +215,11 @@ fn asset_status(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| config.nagi_dir.logs_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     let result = crate::runtime::status::asset_status(
         std::path::Path::new(target_dir),
         &selector_refs,
+        &exclude_refs,
         Some(
             cache_dir
                 .map(std::path::PathBuf::from)
@@ -299,20 +310,23 @@ fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> PyRe
 /// Compiles resources and starts the reconciliation loop.
 /// Blocks until Ctrl-C is received.
 #[pyfunction]
-#[pyo3(signature = (resources_dir, target_dir, selectors, cache_dir=None, project_dir=None))]
+#[pyo3(signature = (resources_dir, target_dir, selectors, excludes=vec![], cache_dir=None, project_dir=None))]
 fn serve(
     resources_dir: &str,
     target_dir: &str,
     selectors: Vec<String>,
+    excludes: Vec<String>,
     cache_dir: Option<&str>,
     project_dir: Option<&str>,
 ) -> PyResult<()> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::runtime::serve::serve(
         std::path::Path::new(resources_dir),
         std::path::Path::new(target_dir),
         &selector_refs,
+        &exclude_refs,
         cache_dir.map(std::path::Path::new),
         project_dir.map(std::path::Path::new),
     ))
@@ -356,9 +370,46 @@ fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<String> 
     serde_json::to_string(&json).map_err(to_py_err)
 }
 
+/// Sets the log level for the tracing subscriber.
+/// Must be called before any other nagi function for the level to take effect.
+#[pyfunction]
+fn set_log_level(level: &str) {
+    crate::runtime::log::subscriber::set_log_level(level);
+}
+
+/// Initializes the tracing subscriber with default settings.
+/// Uses NAGI_LOG_LEVEL env var if set, otherwise defaults to warn.
+#[pyfunction]
+fn init_log() {
+    crate::runtime::log::subscriber::init();
+}
+
+// ── Format ──────────────────────────────────────────────────────────────────
+
+/// Formats JSON output as text table for evaluate results.
+#[pyfunction]
+fn format_evaluate_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::json_to_text(json_str, crate::interface::format::EVALUATE_COLUMNS)
+        .map_err(to_py_err)
+}
+
+/// Formats JSON output as text table for status results.
+#[pyfunction]
+fn format_status_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::json_to_text(json_str, crate::interface::format::STATUS_COLUMNS)
+        .map_err(to_py_err)
+}
+
+/// Formats JSON output as text table for ls results.
+#[pyfunction]
+fn format_ls_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::ls_to_text(json_str).map_err(to_py_err)
+}
+
 /// Registers all PyO3 functions into the module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    crate::runtime::log::subscriber::init();
+    m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
+    m.add_function(wrap_pyfunction!(init_log, m)?)?;
     m.add_function(wrap_pyfunction!(load_dbt_profiles, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_all, m)?)?;
     m.add_function(wrap_pyfunction!(compile_assets, m)?)?;
@@ -376,5 +427,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(serve_resume, m)?)?;
     m.add_function(wrap_pyfunction!(serve_halt, m)?)?;
     m.add_function(wrap_pyfunction!(list_resources, m)?)?;
+    m.add_function(wrap_pyfunction!(format_evaluate_text, m)?)?;
+    m.add_function(wrap_pyfunction!(format_status_text, m)?)?;
+    m.add_function(wrap_pyfunction!(format_ls_text, m)?)?;
     Ok(())
 }

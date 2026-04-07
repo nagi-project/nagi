@@ -6,7 +6,7 @@
 
 ## Output
 
-すべてのコマンドの出力形式は JSON です。
+コマンドの出力形式はデフォルトで JSON です。`--output text` で人間可読なテーブル形式に切り替えられます（`evaluate`, `status`, `ls`）。
 
 ## Subcommands
 
@@ -23,6 +23,12 @@
 | `serve halt` | 全 Asset を一括停止する |
 | `export` | 実行ログをデータウェアハウス にエクスポートする |
 | `mcp` | MCP サーバーを stdio で起動する |
+
+## Global options
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--log-level` | `warn` | ログレベルを設定（`error`, `warn`, `info`, `debug`, `trace`）。`NAGI_LOG_LEVEL` 環境変数を上書き |
 
 ## init
 
@@ -50,7 +56,7 @@ nagi compile [OPTIONS]
 
 ## ls
 
-コンパイル済みの全リソースを JSON で一覧表示します。
+コンパイル済みの全リソースを一覧表示します。
 
 ```bash
 nagi ls [OPTIONS]
@@ -59,6 +65,8 @@ nagi ls [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
+| `--output` | `json` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
 ## evaluate
 
@@ -71,9 +79,12 @@ nagi evaluate [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 評価対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 評価対象の期待状態を表示（クエリやコマンドは実行しない） |
+| `--output` | `json` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
 ## sync
 
@@ -86,11 +97,13 @@ nagi sync [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--stage` | — | 実行するステージ（カンマ区切り: `pre`, `run`, `post`）。指定時は完了後の evaluate を行わない |
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 実行されるコマンドを表示（副作用なし） |
 | `--force` | — | dbt Cloud の実行中ジョブチェックをスキップする |
+| `--auto-approve` | — | 対話的な確認をスキップし、すべての提案を実行する |
 
 ## status
 
@@ -103,8 +116,11 @@ nagi status [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
+| `--output` | `json` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
 ## serve
 
@@ -117,6 +133,7 @@ nagi serve [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--resources-dir` | `resources` | リソースディレクトリ |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
@@ -187,3 +204,29 @@ nagi mcp [OPTIONS]
 | `name+N` | 指定した Asset と下流 N 段 |
 | `tag:finance` | タグで選択 |
 | `+tag:finance` | タグで選択し、上流を含む |
+| `tag:finance,tag:daily` | 積集合 — すべての条件に一致する Asset（AND） |
+
+複数の `--select` 引数は和集合（OR）で結合されます。単一引数内のカンマ区切りパターンは積集合（AND）で結合されます。
+
+```bash
+# OR: いずれかのセレクターに一致する Asset
+nagi evaluate --select daily-sales --select access-stats
+
+# AND: 両方のタグを持つ Asset
+nagi evaluate --select "tag:finance,tag:daily"
+
+# 組み合わせ: (tag:finance AND tag:daily) OR access-stats
+nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+```
+
+## --exclude syntax
+
+`--exclude` は `--select` と同じセレクター構文を使用します。`--select` の適用後に、`--exclude` に一致する Asset が結果から除外されます。
+
+```bash
+# monthly-report 以外のすべての Asset を評価
+nagi evaluate --exclude monthly-report
+
+# finance タグの Asset から daily タグの Asset を除外して評価
+nagi evaluate --select "tag:finance" --exclude "tag:daily"
+```
