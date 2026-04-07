@@ -1,8 +1,7 @@
 import click
 
 from nagi_cli._nagi_core import evaluate_all, format_evaluate_text, try_export
-
-OUTPUT_FORMATS = ("json", "text")
+from nagi_cli.output import OUTPUT_FORMATS, echo_output
 
 
 @click.command()
@@ -43,6 +42,12 @@ OUTPUT_FORMATS = ("json", "text")
     show_default=True,
     help="Output format.",
 )
+@click.option(
+    "--no-pager",
+    is_flag=True,
+    default=False,
+    help="Disable pager for terminal output.",
+)
 def evaluate(
     selectors: tuple[str, ...],
     excludes: tuple[str, ...],
@@ -50,6 +55,7 @@ def evaluate(
     cache_dir: str | None,
     dry_run: bool,
     output_format: str,
+    no_pager: bool,
 ) -> None:
     """Evaluate desired conditions for assets from compiled target output."""
     try:
@@ -67,9 +73,10 @@ def evaluate(
         raise SystemExit(1)
 
     if output_format == "text":
-        click.echo(format_evaluate_text(result_json))
+        output = format_evaluate_text(result_json)
     else:
-        click.echo(result_json)
+        output = result_json
+    echo_output(output, no_pager=no_pager)
 
     if not dry_run:
         try_export()

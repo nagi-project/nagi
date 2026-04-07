@@ -3,8 +3,7 @@ import json
 import click
 
 from nagi_cli._nagi_core import format_ls_text, list_resources
-
-OUTPUT_FORMATS = ("json", "text")
+from nagi_cli.output import OUTPUT_FORMATS, echo_output
 
 
 @click.command("ls")
@@ -28,7 +27,18 @@ OUTPUT_FORMATS = ("json", "text")
     show_default=True,
     help="Output format.",
 )
-def ls(target_dir: str, kinds: tuple[str, ...], output_format: str) -> None:
+@click.option(
+    "--no-pager",
+    is_flag=True,
+    default=False,
+    help="Disable pager for terminal output.",
+)
+def ls(
+    target_dir: str,
+    kinds: tuple[str, ...],
+    output_format: str,
+    no_pager: bool,
+) -> None:
     """List all compiled resources."""
     try:
         result_json = list_resources(target_dir, list(kinds))
@@ -36,7 +46,5 @@ def ls(target_dir: str, kinds: tuple[str, ...], output_format: str) -> None:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    if output_format == "text":
-        click.echo(format_ls_text(result_json))
-    else:
-        click.echo(result_json)
+    output = format_ls_text(result_json) if output_format == "text" else result_json
+    echo_output(output, no_pager=no_pager)

@@ -66,6 +66,7 @@ nagi ls [OPTIONS]
 | --- | --- | --- |
 | `--target-dir` | `target` | Compiled directory |
 | `--output` | `json` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
 
 ## evaluate
 
@@ -83,6 +84,7 @@ nagi evaluate [OPTIONS]
 | `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the desired state to be evaluated (does not execute queries or commands) |
 | `--output` | `json` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
 
 ## sync
 
@@ -118,6 +120,7 @@ nagi status [OPTIONS]
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
 | `--output` | `json` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
 
 ## serve
 

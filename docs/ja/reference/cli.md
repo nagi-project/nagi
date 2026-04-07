@@ -66,6 +66,7 @@ nagi ls [OPTIONS]
 | --- | --- | --- |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--output` | `json` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
 ## evaluate
 
@@ -83,6 +84,7 @@ nagi evaluate [OPTIONS]
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 評価対象の期待状態を表示（クエリやコマンドは実行しない） |
 | `--output` | `json` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
 ## sync
 
@@ -118,6 +120,7 @@ nagi status [OPTIONS]
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--output` | `json` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
 ## serve
 
