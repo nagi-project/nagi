@@ -55,10 +55,11 @@ async fn evaluate_from_compiled(
 pub(crate) async fn evaluate_all(
     target_dir: &Path,
     selectors: &[&str],
+    excludes: &[&str],
     cache_dir: Option<&Path>,
     dry_run: bool,
 ) -> Result<String, EvaluateError> {
-    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors)?;
+    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors, excludes)?;
 
     let values = if dry_run {
         dry_run_assets(&assets)?

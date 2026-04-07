@@ -21,6 +21,12 @@ def _make_sync_command(sync_type: str) -> click.Command:
         help="Asset selector expression (dbt-compatible). Can be repeated.",
     )
     @click.option(
+        "--exclude",
+        "excludes",
+        multiple=True,
+        help="Exclude assets matching this selector. Can be repeated.",
+    )
+    @click.option(
         "--target-dir",
         default="target",
         show_default=True,
@@ -51,6 +57,7 @@ def _make_sync_command(sync_type: str) -> click.Command:
     )
     def cmd(
         selectors: tuple[str, ...],
+        excludes: tuple[str, ...],
         target_dir: str,
         stages: str | None,
         cache_dir: str | None,
@@ -59,7 +66,14 @@ def _make_sync_command(sync_type: str) -> click.Command:
     ) -> None:
         try:
             proposals = json.loads(
-                propose_sync(target_dir, list(selectors), sync_type, stages, cache_dir)
+                propose_sync(
+                    target_dir=target_dir,
+                    selectors=list(selectors),
+                    sync_type=sync_type,
+                    excludes=list(excludes),
+                    stages=stages,
+                    cache_dir=cache_dir,
+                )
             )
         except (RuntimeError, json.JSONDecodeError) as e:
             click.echo(json.dumps({"error": str(e)}))

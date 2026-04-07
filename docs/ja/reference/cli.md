@@ -71,6 +71,7 @@ nagi evaluate [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 評価対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 評価対象の期待状態を表示（クエリやコマンドは実行しない） |
@@ -86,6 +87,7 @@ nagi sync [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--stage` | — | 実行するステージ（カンマ区切り: `pre`, `run`, `post`）。指定時は完了後の evaluate を行わない |
 | `--cache-dir` | — | キャッシュディレクトリ |
@@ -103,6 +105,7 @@ nagi status [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
 
@@ -117,6 +120,7 @@ nagi serve [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--select` | — | 対象の Asset を指定 |
+| `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--resources-dir` | `resources` | リソースディレクトリ |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
@@ -200,4 +204,16 @@ nagi evaluate --select "tag:finance,tag:daily"
 
 # 組み合わせ: (tag:finance AND tag:daily) OR access-stats
 nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+```
+
+## --exclude syntax
+
+`--exclude` は `--select` と同じセレクター構文を使用します。`--select` の適用後に、`--exclude` に一致する Asset が結果から除外されます。
+
+```bash
+# monthly-report 以外のすべての Asset を評価
+nagi evaluate --exclude monthly-report
+
+# finance タグの Asset から daily タグの Asset を除外して評価
+nagi evaluate --select "tag:finance" --exclude "tag:daily"
 ```

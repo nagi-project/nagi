@@ -15,6 +15,12 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
     help="Asset selector expression (dbt-compatible). Can be repeated.",
 )
 @click.option(
+    "--exclude",
+    "excludes",
+    multiple=True,
+    help="Exclude assets matching this selector. Can be repeated.",
+)
+@click.option(
     "--resources-dir",
     default="resources",
     show_default=True,
@@ -41,6 +47,7 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
 def serve(
     ctx: click.Context,
     selectors: tuple[str, ...],
+    excludes: tuple[str, ...],
     resources_dir: str,
     target_dir: str,
     cache_dir: str | None,
@@ -50,7 +57,14 @@ def serve(
     if ctx.invoked_subcommand is not None:
         return
     try:
-        _serve(resources_dir, target_dir, list(selectors), cache_dir, project_dir)
+        _serve(
+            resources_dir=resources_dir,
+            target_dir=target_dir,
+            selectors=list(selectors),
+            excludes=list(excludes),
+            cache_dir=cache_dir,
+            project_dir=project_dir,
+        )
     except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)

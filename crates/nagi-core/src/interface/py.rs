@@ -38,10 +38,11 @@ fn profiles_to_json(f: &DbtProfilesFile) -> PyResult<String> {
 /// Evaluates all compiled assets matching selectors.
 /// Returns JSON array of evaluation results.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None, dry_run=false))]
+#[pyo3(signature = (target_dir, selectors, excludes=vec![], cache_dir=None, dry_run=false))]
 fn evaluate_all(
     target_dir: &str,
     selectors: Vec<String>,
+    excludes: Vec<String>,
     cache_dir: Option<&str>,
     dry_run: bool,
 ) -> PyResult<String> {
@@ -51,9 +52,11 @@ fn evaluate_all(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::interface::evaluate::evaluate_all(
         std::path::Path::new(target_dir),
         &selector_refs,
+        &exclude_refs,
         Some(resolved_cache.as_path()),
         dry_run,
     ))
@@ -113,25 +116,30 @@ fn list_resources(target_dir: &str, kinds: Vec<String>) -> PyResult<String> {
 /// Returns JSON array of proposals. Each proposal contains an opaque `_index`
 /// field used by `execute_sync_proposal`.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, sync_type, stages=None, cache_dir=None))]
+#[pyo3(signature = (target_dir, selectors, sync_type, excludes=vec![], stages=None, cache_dir=None))]
 fn propose_sync(
     target_dir: &str,
     selectors: Vec<String>,
     sync_type: &str,
+    excludes: Vec<String>,
     stages: Option<&str>,
     cache_dir: Option<&str>,
 ) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     let proposals = rt
         .block_on(crate::interface::sync::propose_sync(
-            std::path::Path::new(target_dir),
-            &selector_refs,
-            sync_type,
-            stages,
-            cache_dir.map(std::path::Path::new),
-            None,
-            None,
+            crate::interface::sync::ProposeSyncParams {
+                target_dir: std::path::Path::new(target_dir),
+                selectors: &selector_refs,
+                excludes: &exclude_refs,
+                sync_type,
+                stages,
+                cache_dir: cache_dir.map(std::path::Path::new),
+                db_path: None,
+                logs_dir: None,
+            },
         ))
         .map_err(to_py_err)?;
 
@@ -188,10 +196,11 @@ fn execute_sync_proposal(
 
 /// Returns convergence status (cached evaluation + latest sync log + suspended state) as JSON.
 #[pyfunction]
-#[pyo3(signature = (target_dir, selectors, cache_dir=None, db_path=None, logs_dir=None, suspended_dir=None))]
+#[pyo3(signature = (target_dir, selectors, excludes=vec![], cache_dir=None, db_path=None, logs_dir=None, suspended_dir=None))]
 fn asset_status(
     target_dir: &str,
     selectors: Vec<String>,
+    excludes: Vec<String>,
     cache_dir: Option<&str>,
     db_path: Option<&str>,
     logs_dir: Option<&str>,
@@ -206,9 +215,11 @@ fn asset_status(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| config.nagi_dir.logs_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     let result = crate::runtime::status::asset_status(
         std::path::Path::new(target_dir),
         &selector_refs,
+        &exclude_refs,
         Some(
             cache_dir
                 .map(std::path::PathBuf::from)
@@ -299,20 +310,23 @@ fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> PyRe
 /// Compiles resources and starts the reconciliation loop.
 /// Blocks until Ctrl-C is received.
 #[pyfunction]
-#[pyo3(signature = (resources_dir, target_dir, selectors, cache_dir=None, project_dir=None))]
+#[pyo3(signature = (resources_dir, target_dir, selectors, excludes=vec![], cache_dir=None, project_dir=None))]
 fn serve(
     resources_dir: &str,
     target_dir: &str,
     selectors: Vec<String>,
+    excludes: Vec<String>,
     cache_dir: Option<&str>,
     project_dir: Option<&str>,
 ) -> PyResult<()> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
+    let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::runtime::serve::serve(
         std::path::Path::new(resources_dir),
         std::path::Path::new(target_dir),
         &selector_refs,
+        &exclude_refs,
         cache_dir.map(std::path::Path::new),
         project_dir.map(std::path::Path::new),
     ))

@@ -156,10 +156,11 @@ class TestSyncOptions:
                 ["--target-dir", str(target_dir)] + extra_args,
             )
         assert result.exit_code == 0
-        args = mock_propose.call_args[0]
-        assert list(args[1]) == expected_selectors
-        assert args[2] == "sync"
-        assert args[3] == expected_stages
+        kwargs = mock_propose.call_args.kwargs
+        assert list(kwargs["selectors"]) == expected_selectors
+        assert kwargs["sync_type"] == "sync"
+        assert list(kwargs["excludes"]) == []
+        assert kwargs["stages"] == expected_stages
 
 
 class TestSyncFailure:

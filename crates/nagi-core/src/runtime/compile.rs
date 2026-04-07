@@ -695,17 +695,19 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
 fn resolve_asset_names(
     graph_json: &str,
     selectors: &[&str],
+    excludes: &[&str],
     assets_path: &Path,
 ) -> Result<Vec<String>, CompileError> {
-    if !selectors.is_empty() {
+    if !selectors.is_empty() || !excludes.is_empty() {
         let graph: DependencyGraph = serde_json::from_str(graph_json)
             .map_err(|e| CompileError::ManifestParse(e.to_string()))?;
-        let selected = crate::runtime::select::select_assets(&graph, selectors).map_err(|e| {
-            CompileError::UnresolvedRef {
-                kind: "asset".to_string(),
-                name: e.to_string(),
-            }
-        })?;
+        let selected =
+            crate::runtime::select::select_assets(&graph, selectors, excludes).map_err(|e| {
+                CompileError::UnresolvedRef {
+                    kind: "asset".to_string(),
+                    name: e.to_string(),
+                }
+            })?;
         return Ok(selected);
     }
     let mut names: Vec<String> = std::fs::read_dir(assets_path)
@@ -737,11 +739,12 @@ pub(crate) fn load_graph(target_dir: &Path) -> Result<DependencyGraph, CompileEr
 pub(crate) fn resolve_compiled_asset_names(
     target_dir: &Path,
     selectors: &[&str],
+    excludes: &[&str],
 ) -> Result<Vec<String>, CompileError> {
     let assets_path = target_dir.join("assets");
     let graph_path = target_dir.join("graph.json");
     let graph_json = std::fs::read_to_string(&graph_path).map_err(CompileError::Io)?;
-    resolve_asset_names(&graph_json, selectors, &assets_path)
+    resolve_asset_names(&graph_json, selectors, excludes, &assets_path)
 }
 
 /// Resolves asset names from selectors or directory listing, then reads each
@@ -749,8 +752,9 @@ pub(crate) fn resolve_compiled_asset_names(
 pub(crate) fn load_compiled_assets(
     target_dir: &Path,
     selectors: &[&str],
+    excludes: &[&str],
 ) -> Result<Vec<(String, String)>, CompileError> {
-    let names = resolve_compiled_asset_names(target_dir, selectors)?;
+    let names = resolve_compiled_asset_names(target_dir, selectors, excludes)?;
     let assets_path = target_dir.join("assets");
     let mut result = Vec::with_capacity(names.len());
     for name in names {

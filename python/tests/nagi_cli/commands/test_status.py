@@ -83,9 +83,10 @@ class TestStatusSuccess:
             )
         assert result.exit_code == 0
         mock.assert_called_once()
-        args = mock.call_args[0]
-        assert list(args[1]) == expected_selectors
-        assert args[2] == expected_cache_dir
+        kwargs = mock.call_args.kwargs
+        assert list(kwargs["selectors"]) == expected_selectors
+        assert list(kwargs["excludes"]) == []
+        assert kwargs["cache_dir"] == expected_cache_dir
 
     def test_outputs_result_json(self, tmp_path: Path) -> None:
         target_dir = _compile_resources(tmp_path)

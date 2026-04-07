@@ -41,12 +41,14 @@ pub struct StatusResult {
 pub fn asset_status(
     target_dir: &Path,
     selectors: &[&str],
+    excludes: &[&str],
     cache_dir: Option<&Path>,
     db_path: &Path,
     logs_dir: &Path,
     suspended_dir: Option<&Path>,
 ) -> Result<StatusResult, StatusError> {
-    let asset_names = crate::runtime::compile::resolve_compiled_asset_names(target_dir, selectors)?;
+    let asset_names =
+        crate::runtime::compile::resolve_compiled_asset_names(target_dir, selectors, excludes)?;
 
     let cache = LocalCache::new(cache_dir.map(PathBuf::from).unwrap_or_else(|| {
         crate::runtime::config::resolve_nagi_dir(Path::new(".")).evaluate_cache_dir()
@@ -158,7 +160,7 @@ mod tests {
         let db_path = dir.path().join("logs.db");
         let logs_dir = dir.path().join("logs");
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
+        let result = asset_status(dir.path(), &[], &[], None, &db_path, &logs_dir, None).unwrap();
         assert!(result.assets.is_empty());
     }
 
@@ -174,8 +176,16 @@ mod tests {
         let db_path = dir.path().join("nonexistent.db");
         let logs_dir = dir.path().join("logs");
 
-        let result =
-            asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir, None).unwrap();
+        let result = asset_status(
+            dir.path(),
+            &[],
+            &[],
+            Some(&cache_dir),
+            &db_path,
+            &logs_dir,
+            None,
+        )
+        .unwrap();
         assert_eq!(result.assets.len(), 1);
         assert_eq!(result.assets[0].asset, "asset-a");
         assert!(result.assets[0].evaluation.is_some());
@@ -195,7 +205,7 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
+        let result = asset_status(dir.path(), &[], &[], None, &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].evaluation.is_none());
         assert!(result.assets[0].last_sync.is_some());
@@ -219,8 +229,16 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let result =
-            asset_status(dir.path(), &[], Some(&cache_dir), &db_path, &logs_dir, None).unwrap();
+        let result = asset_status(
+            dir.path(),
+            &[],
+            &[],
+            Some(&cache_dir),
+            &db_path,
+            &logs_dir,
+            None,
+        )
+        .unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].evaluation.is_some());
         assert!(result.assets[0].last_sync.is_some());
@@ -234,7 +252,7 @@ mod tests {
         let db_path = dir.path().join("nonexistent.db");
         let logs_dir = dir.path().join("logs");
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
+        let result = asset_status(dir.path(), &[], &[], None, &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].last_sync.is_none());
     }
@@ -260,6 +278,7 @@ mod tests {
         let result = asset_status(
             dir.path(),
             &[],
+            &[],
             None,
             &db_path,
             &logs_dir,
@@ -282,7 +301,7 @@ mod tests {
         let db_path = dir.path().join("nonexistent.db");
         let logs_dir = dir.path().join("logs");
 
-        let result = asset_status(dir.path(), &[], None, &db_path, &logs_dir, None).unwrap();
+        let result = asset_status(dir.path(), &[], &[], None, &db_path, &logs_dir, None).unwrap();
         assert_eq!(result.assets.len(), 1);
         assert!(result.assets[0].suspended.is_none());
     }

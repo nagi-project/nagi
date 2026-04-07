@@ -26,20 +26,46 @@ pub enum SelectError {
 /// - `+tag:value` — tag match + all ancestors
 ///
 /// Multiple selectors separated by spaces are combined as union (OR).
+/// Assets matching any exclude selector are removed from the result.
 pub fn select_assets(
     graph: &DependencyGraph,
     selectors: &[&str],
+    excludes: &[&str],
 ) -> Result<Vec<String>, SelectError> {
-    let mut result: HashSet<String> = HashSet::new();
-
-    for selector in selectors {
-        let selected = resolve_selector(graph, selector)?;
-        result.extend(selected);
-    }
+    let mut result = union_selectors(graph, selectors)?;
+    exclude_selectors(graph, &mut result, excludes)?;
 
     let mut sorted: Vec<String> = result.into_iter().collect();
     sorted.sort();
     Ok(sorted)
+}
+
+/// When selectors is empty, returns all nodes in the graph.
+fn union_selectors(
+    graph: &DependencyGraph,
+    selectors: &[&str],
+) -> Result<HashSet<String>, SelectError> {
+    if selectors.is_empty() {
+        return Ok(graph.nodes.iter().map(|n| n.name.clone()).collect());
+    }
+    let mut result: HashSet<String> = HashSet::new();
+    for selector in selectors {
+        result.extend(resolve_selector(graph, selector)?);
+    }
+    Ok(result)
+}
+
+fn exclude_selectors(
+    graph: &DependencyGraph,
+    result: &mut HashSet<String>,
+    excludes: &[&str],
+) -> Result<(), SelectError> {
+    for exclude in excludes {
+        for name in resolve_selector(graph, exclude)? {
+            result.remove(&name);
+        }
+    }
+    Ok(())
 }
 
 fn resolve_selector(
@@ -309,7 +335,7 @@ mod tests {
             $(
                 #[test]
                 fn $name() {
-                    let result = select_assets(&test_graph(), &$selectors).unwrap();
+                    let result = select_assets(&test_graph(), &$selectors, &[]).unwrap();
                     assert_eq!(result, $expected);
                 }
             )*
@@ -339,13 +365,32 @@ mod tests {
         and_union_combined: ["tag:finance,tag:daily", "access-stats"] => vec!["access-stats", "daily-sales"];
     }
 
+    macro_rules! exclude_ok {
+        ($($name:ident: selectors=$selectors:expr, excludes=$excludes:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let result = select_assets(&test_graph(), &$selectors, &$excludes).unwrap();
+                    assert_eq!(result, $expected);
+                }
+            )*
+        };
+    }
+
+    exclude_ok! {
+        exclude_single: selectors=["tag:finance"], excludes=["monthly-report"] => vec!["daily-sales"];
+        exclude_by_tag: selectors=["tag:finance"], excludes=["tag:daily"] => vec!["monthly-report"];
+        exclude_all: selectors=["tag:finance"], excludes=["tag:finance"] => Vec::<String>::new();
+        exclude_with_upstream: selectors=["+monthly-report"], excludes=["raw-sales"] => vec!["daily-sales", "monthly-report"];
+    }
+
     macro_rules! select_not_found {
         ($($name:ident: $selectors:expr;)*) => {
             $(
                 #[test]
                 fn $name() {
                     assert!(matches!(
-                        select_assets(&test_graph(), &$selectors).unwrap_err(),
+                        select_assets(&test_graph(), &$selectors, &[]).unwrap_err(),
                         SelectError::NotFound { .. }
                     ));
                 }
@@ -364,7 +409,7 @@ mod tests {
                 #[test]
                 fn $name() {
                     assert!(matches!(
-                        select_assets(&test_graph(), &$selectors).unwrap_err(),
+                        select_assets(&test_graph(), &$selectors, &[]).unwrap_err(),
                         SelectError::InvalidSelector { .. }
                     ));
                 }
@@ -378,6 +423,63 @@ mod tests {
         empty_tag_value: ["tag:"];
         double_plus: ["++"];
         empty_comma_part: ["tag:finance,"];
+    }
+
+    // ── union_selectors ──────────────────────────────────────────────────
+
+    #[test]
+    fn union_selectors_single() {
+        let result = union_selectors(&test_graph(), &["daily-sales"]).unwrap();
+        assert_eq!(result, HashSet::from(["daily-sales".to_string()]));
+    }
+
+    #[test]
+    fn union_selectors_multiple() {
+        let result = union_selectors(&test_graph(), &["daily-sales", "access-stats"]).unwrap();
+        assert_eq!(
+            result,
+            HashSet::from(["daily-sales".to_string(), "access-stats".to_string()])
+        );
+    }
+
+    #[test]
+    fn union_selectors_empty_returns_all_nodes() {
+        let result = union_selectors(&test_graph(), &[]).unwrap();
+        assert_eq!(result.len(), 5);
+    }
+
+    // ── exclude_selectors ───────────────────────────────────────────────
+
+    #[test]
+    fn exclude_selectors_removes_matching() {
+        let mut set = HashSet::from([
+            "daily-sales".to_string(),
+            "monthly-report".to_string(),
+            "access-stats".to_string(),
+        ]);
+        exclude_selectors(&test_graph(), &mut set, &["monthly-report"]).unwrap();
+        assert_eq!(
+            set,
+            HashSet::from(["daily-sales".to_string(), "access-stats".to_string()])
+        );
+    }
+
+    #[test]
+    fn exclude_selectors_by_tag() {
+        let mut set = HashSet::from([
+            "daily-sales".to_string(),
+            "monthly-report".to_string(),
+            "access-stats".to_string(),
+        ]);
+        exclude_selectors(&test_graph(), &mut set, &["tag:finance"]).unwrap();
+        assert_eq!(set, HashSet::from(["access-stats".to_string()]));
+    }
+
+    #[test]
+    fn exclude_selectors_empty_is_noop() {
+        let mut set = HashSet::from(["daily-sales".to_string()]);
+        exclude_selectors(&test_graph(), &mut set, &[]).unwrap();
+        assert_eq!(set, HashSet::from(["daily-sales".to_string()]));
     }
 
     // --- build_adjacency unit tests ---

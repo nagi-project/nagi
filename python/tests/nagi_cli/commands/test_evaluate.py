@@ -114,7 +114,7 @@ class TestEvaluateDryRun:
             )
         assert result.exit_code == 0
         args = mock.call_args
-        assert args[0][3] is True  # dry_run=True
+        assert mock.call_args.kwargs["dry_run"] is True
 
     def test_dry_run_outputs_asset_list(self, tmp_path: Path) -> None:
         target_dir = _compile_resources(tmp_path)

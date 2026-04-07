@@ -71,6 +71,7 @@ nagi evaluate [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the Assets to evaluate |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the desired state to be evaluated (does not execute queries or commands) |
@@ -86,6 +87,7 @@ nagi sync [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the target Assets |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--stage` | — | Stages to execute (comma-separated: `pre`, `run`, `post`). When specified, skips evaluation after Sync completion |
 | `--cache-dir` | — | Cache directory |
@@ -103,6 +105,7 @@ nagi status [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the target Assets |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
 
@@ -117,6 +120,7 @@ nagi serve [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--select` | — | Specify the target Assets |
+| `--exclude` | — | Exclude assets matching this selector |
 | `--resources-dir` | `resources` | Resources directory |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
@@ -200,4 +204,16 @@ nagi evaluate --select "tag:finance,tag:daily"
 
 # Combined: (tag:finance AND tag:daily) OR access-stats
 nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+```
+
+## --exclude syntax
+
+`--exclude` uses the same selector syntax as `--select`. Assets matching any `--exclude` selector are removed from the result after `--select` is applied.
+
+```bash
+# Evaluate all assets except monthly-report
+nagi evaluate --exclude monthly-report
+
+# Evaluate finance assets, excluding those tagged daily
+nagi evaluate --select "tag:finance" --exclude "tag:daily"
 ```

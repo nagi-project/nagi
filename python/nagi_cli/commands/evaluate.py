@@ -11,6 +11,12 @@ from nagi_cli._nagi_core import evaluate_all, try_export
     help="Asset selector expression (dbt-compatible). Can be repeated.",
 )
 @click.option(
+    "--exclude",
+    "excludes",
+    multiple=True,
+    help="Exclude assets matching this selector. Can be repeated.",
+)
+@click.option(
     "--target-dir",
     default="target",
     show_default=True,
@@ -29,13 +35,20 @@ from nagi_cli._nagi_core import evaluate_all, try_export
 )
 def evaluate(
     selectors: tuple[str, ...],
+    excludes: tuple[str, ...],
     target_dir: str,
     cache_dir: str | None,
     dry_run: bool,
 ) -> None:
     """Evaluate desired conditions for assets from compiled target output."""
     try:
-        result_json = evaluate_all(target_dir, list(selectors), cache_dir, dry_run)
+        result_json = evaluate_all(
+            target_dir=target_dir,
+            selectors=list(selectors),
+            excludes=list(excludes),
+            cache_dir=cache_dir,
+            dry_run=dry_run,
+        )
     except RuntimeError as e:
         import json
 
