@@ -24,6 +24,12 @@ All command output is in JSON format.
 | `export` | Export execution logs to a data warehouse |
 | `mcp` | Start the MCP server on stdio |
 
+## Global options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--log-level` | `warn` | Set log level (`error`, `warn`, `info`, `debug`, `trace`). Overrides `NAGI_LOG_LEVEL` env var |
+
 ## init
 
 Prepares the environment so that `compile` can run.

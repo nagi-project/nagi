@@ -370,9 +370,24 @@ fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<String> 
     serde_json::to_string(&json).map_err(to_py_err)
 }
 
+/// Sets the log level for the tracing subscriber.
+/// Must be called before any other nagi function for the level to take effect.
+#[pyfunction]
+fn set_log_level(level: &str) {
+    crate::runtime::log::subscriber::set_log_level(level);
+}
+
+/// Initializes the tracing subscriber with default settings.
+/// Uses NAGI_LOG_LEVEL env var if set, otherwise defaults to warn.
+#[pyfunction]
+fn init_log() {
+    crate::runtime::log::subscriber::init();
+}
+
 /// Registers all PyO3 functions into the module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    crate::runtime::log::subscriber::init();
+    m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
+    m.add_function(wrap_pyfunction!(init_log, m)?)?;
     m.add_function(wrap_pyfunction!(load_dbt_profiles, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_all, m)?)?;
     m.add_function(wrap_pyfunction!(compile_assets, m)?)?;

@@ -24,6 +24,12 @@
 | `export` | 実行ログをデータウェアハウス にエクスポートする |
 | `mcp` | MCP サーバーを stdio で起動する |
 
+## Global options
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--log-level` | `warn` | ログレベルを設定（`error`, `warn`, `info`, `debug`, `trace`）。`NAGI_LOG_LEVEL` 環境変数を上書き |
+
 ## init
 
 環境を準備し、`compile` が実行できる状態にします。

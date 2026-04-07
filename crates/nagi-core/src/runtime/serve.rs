@@ -424,7 +424,8 @@ mod tests {
 
         let config = crate::runtime::config::NagiConfig::default();
         let custom = dir.path().join("custom-cache");
-        let inputs = load_controller_inputs(&target, &[], &[], &config, Some(custom.as_path())).unwrap();
+        let inputs =
+            load_controller_inputs(&target, &[], &[], &config, Some(custom.as_path())).unwrap();
         assert_eq!(inputs[0].cache_dir, Some(custom));
     }
 }

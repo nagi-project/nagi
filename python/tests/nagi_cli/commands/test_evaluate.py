@@ -91,8 +91,7 @@ class TestEvaluateSuccess:
             )
         assert result.exit_code == 0
         mock.assert_called_once()
-        args = mock.call_args
-        assert list(args[0][1]) == [ASSET_NAME]
+        assert list(mock.call_args.kwargs["selectors"]) == [ASSET_NAME]
 
 
 class TestEvaluateDryRun:
@@ -113,7 +112,6 @@ class TestEvaluateDryRun:
                 ],
             )
         assert result.exit_code == 0
-        args = mock.call_args
         assert mock.call_args.kwargs["dry_run"] is True
 
     def test_dry_run_outputs_asset_list(self, tmp_path: Path) -> None:
