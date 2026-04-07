@@ -1,6 +1,8 @@
 import click
 
-from nagi_cli._nagi_core import evaluate_all, try_export
+from nagi_cli._nagi_core import evaluate_all, format_evaluate_text, try_export
+
+OUTPUT_FORMATS = ("json", "text")
 
 
 @click.command()
@@ -25,7 +27,7 @@ from nagi_cli._nagi_core import evaluate_all, try_export
 @click.option(
     "--cache-dir",
     default=None,
-    help="Cache directory (defaults to &lt;nagiDir&gt;/cache/)",
+    help="Cache directory (defaults to <nagiDir>/cache/)",
 )
 @click.option(
     "--dry-run",
@@ -33,12 +35,21 @@ from nagi_cli._nagi_core import evaluate_all, try_export
     default=False,
     help="Show which assets would be evaluated without executing.",
 )
+@click.option(
+    "--output",
+    "output_format",
+    type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
+    default="json",
+    show_default=True,
+    help="Output format.",
+)
 def evaluate(
     selectors: tuple[str, ...],
     excludes: tuple[str, ...],
     target_dir: str,
     cache_dir: str | None,
     dry_run: bool,
+    output_format: str,
 ) -> None:
     """Evaluate desired conditions for assets from compiled target output."""
     try:
@@ -55,7 +66,10 @@ def evaluate(
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    click.echo(result_json)
+    if output_format == "text":
+        click.echo(format_evaluate_text(result_json))
+    else:
+        click.echo(result_json)
 
     if not dry_run:
         try_export()

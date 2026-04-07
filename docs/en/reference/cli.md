@@ -6,7 +6,7 @@ See [Get Started](../overview/get-started.md#install) for installation instructi
 
 ## Output
 
-All command output is in JSON format.
+Command output defaults to JSON. Use `--output text` for human-readable table output (`evaluate`, `status`, `ls`).
 
 ## Subcommands
 
@@ -56,7 +56,7 @@ nagi compile [OPTIONS]
 
 ## ls
 
-Lists all compiled resources as JSON.
+Lists all compiled resources.
 
 ```bash
 nagi ls [OPTIONS]
@@ -65,6 +65,7 @@ nagi ls [OPTIONS]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--target-dir` | `target` | Compiled directory |
+| `--output` | `json` | Output format (`json`, `text`) |
 
 ## evaluate
 
@@ -81,6 +82,7 @@ nagi evaluate [OPTIONS]
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the desired state to be evaluated (does not execute queries or commands) |
+| `--output` | `json` | Output format (`json`, `text`) |
 
 ## sync
 
@@ -115,6 +117,7 @@ nagi status [OPTIONS]
 | `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--cache-dir` | — | Cache directory |
+| `--output` | `json` | Output format (`json`, `text`) |
 
 ## serve
 

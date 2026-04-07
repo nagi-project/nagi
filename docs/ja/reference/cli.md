@@ -6,7 +6,7 @@
 
 ## Output
 
-すべてのコマンドの出力形式は JSON です。
+コマンドの出力形式はデフォルトで JSON です。`--output text` で人間可読なテーブル形式に切り替えられます（`evaluate`, `status`, `ls`）。
 
 ## Subcommands
 
@@ -56,7 +56,7 @@ nagi compile [OPTIONS]
 
 ## ls
 
-コンパイル済みの全リソースを JSON で一覧表示します。
+コンパイル済みの全リソースを一覧表示します。
 
 ```bash
 nagi ls [OPTIONS]
@@ -65,6 +65,7 @@ nagi ls [OPTIONS]
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
+| `--output` | `json` | 出力形式（`json`, `text`） |
 
 ## evaluate
 
@@ -81,6 +82,7 @@ nagi evaluate [OPTIONS]
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 評価対象の期待状態を表示（クエリやコマンドは実行しない） |
+| `--output` | `json` | 出力形式（`json`, `text`） |
 
 ## sync
 
@@ -115,6 +117,7 @@ nagi status [OPTIONS]
 | `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--cache-dir` | — | キャッシュディレクトリ |
+| `--output` | `json` | 出力形式（`json`, `text`） |
 
 ## serve
 

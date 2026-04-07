@@ -2,7 +2,9 @@ import json
 
 import click
 
-from nagi_cli._nagi_core import list_resources
+from nagi_cli._nagi_core import format_ls_text, list_resources
+
+OUTPUT_FORMATS = ("json", "text")
 
 
 @click.command("ls")
@@ -18,12 +20,23 @@ from nagi_cli._nagi_core import list_resources
     multiple=True,
     help="Filter by resource kind (e.g. Asset, Connection).",
 )
-def ls(target_dir: str, kinds: tuple[str, ...]) -> None:
-    """List all compiled resources as JSON."""
+@click.option(
+    "--output",
+    "output_format",
+    type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
+    default="json",
+    show_default=True,
+    help="Output format.",
+)
+def ls(target_dir: str, kinds: tuple[str, ...], output_format: str) -> None:
+    """List all compiled resources."""
     try:
         result_json = list_resources(target_dir, list(kinds))
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    click.echo(result_json)
+    if output_format == "text":
+        click.echo(format_ls_text(result_json))
+    else:
+        click.echo(result_json)

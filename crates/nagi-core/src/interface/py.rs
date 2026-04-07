@@ -384,6 +384,28 @@ fn init_log() {
     crate::runtime::log::subscriber::init();
 }
 
+// ── Format ──────────────────────────────────────────────────────────────────
+
+/// Formats JSON output as text table for evaluate results.
+#[pyfunction]
+fn format_evaluate_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::json_to_text(json_str, crate::interface::format::EVALUATE_COLUMNS)
+        .map_err(to_py_err)
+}
+
+/// Formats JSON output as text table for status results.
+#[pyfunction]
+fn format_status_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::json_to_text(json_str, crate::interface::format::STATUS_COLUMNS)
+        .map_err(to_py_err)
+}
+
+/// Formats JSON output as text table for ls results.
+#[pyfunction]
+fn format_ls_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::ls_to_text(json_str).map_err(to_py_err)
+}
+
 /// Registers all PyO3 functions into the module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
@@ -405,5 +427,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(serve_resume, m)?)?;
     m.add_function(wrap_pyfunction!(serve_halt, m)?)?;
     m.add_function(wrap_pyfunction!(list_resources, m)?)?;
+    m.add_function(wrap_pyfunction!(format_evaluate_text, m)?)?;
+    m.add_function(wrap_pyfunction!(format_status_text, m)?)?;
+    m.add_function(wrap_pyfunction!(format_ls_text, m)?)?;
     Ok(())
 }
