@@ -99,6 +99,7 @@ nagi sync [OPTIONS]
 | `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the commands to be executed (no side effects) |
 | `--force` | — | Skip the dbt Cloud running-job check |
+| `--auto-approve` | — | Skip interactive confirmation and execute all proposals |
 
 ## status
 

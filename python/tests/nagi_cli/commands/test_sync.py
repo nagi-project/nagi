@@ -89,6 +89,31 @@ class TestSyncExecution:
         args = mock_exec.call_args[0]
         assert args[1] == "sync"
 
+    def test_auto_approve_skips_confirmation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        target_dir = _compile_resources(tmp_path)
+
+        runner = CliRunner()
+        with (
+            patch(
+                "nagi_cli.commands.sync.propose_sync",
+                return_value=MOCK_PROPOSALS,
+            ),
+            patch(
+                "nagi_cli.commands.sync.execute_sync_proposal",
+                return_value=MOCK_EXEC_RESULT,
+            ) as mock_exec,
+        ):
+            result = runner.invoke(
+                sync,
+                ["--target-dir", str(target_dir), "--auto-approve"],
+            )
+        assert result.exit_code == 0
+        mock_exec.assert_called_once()
+        assert "Run sync?" not in result.output
+
     def test_declined_sync_is_skipped(self, tmp_path: Path) -> None:
         target_dir = _compile_resources(tmp_path)
 

@@ -99,6 +99,7 @@ nagi sync [OPTIONS]
 | `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 実行されるコマンドを表示（副作用なし） |
 | `--force` | — | dbt Cloud の実行中ジョブチェックをスキップする |
+| `--auto-approve` | — | 対話的な確認をスキップし、すべての提案を実行する |
 
 ## status
 
