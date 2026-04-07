@@ -2,6 +2,12 @@
 
 Nagi monitors your data, detects drift from the desired state, and automatically runs the operation you defined to fix it.
 
+## Why Nagi
+
+Orchestrators, data tests, and observability tools each catch part of the problem — but when data drifts, recovery still falls on a human.
+
+Nagi closes that gap. Declare the desired state, pair it with a convergence operation, and Nagi continuously evaluates and auto-converges. No manual triage, no forgotten re-runs.
+
 ## Install
 
 ```bash
@@ -44,13 +50,13 @@ spec:
       sync: build-clean-data
 ```
 
-```bash
-nagi compile    # Validate and resolve resource definitions
-nagi evaluate   # Evaluate conditions → reports "clean-data" as Drifted
-nagi sync       # Run sync → creates clean_data.txt → re-evaluates as Ready
-mv clean_data.txt dirty_data.txt
-nagi evaluate   # Drifted again
-nagi sync       # Restores clean_data.txt → Ready
+```console
+$ nagi compile    # Validate and resolve resource definitions
+$ nagi evaluate   # Evaluate conditions → reports "clean-data" as Drifted
+$ nagi sync       # Run sync → creates clean_data.txt → re-evaluates as Ready
+$ mv clean_data.txt dirty_data.txt
+$ nagi evaluate   # Drifted again
+$ nagi sync       # Restores clean_data.txt → Ready
 ```
 
 `nagi serve` runs this evaluate-and-sync cycle continuously.
