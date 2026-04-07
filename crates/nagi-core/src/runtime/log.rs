@@ -176,7 +176,6 @@ impl LogStore {
         Ok(self.conn.prepare(sql)?)
     }
 
-    /// Opens an in-memory database (for testing).
     #[cfg(test)]
     pub fn open_in_memory(logs_dir: &Path) -> Result<Self, LogError> {
         let conn = Connection::open_in_memory()?;
@@ -187,7 +186,6 @@ impl LogStore {
         })
     }
 
-    /// Executes a batch of SQL statements (for testing).
     #[cfg(test)]
     pub fn execute_batch(&self, sql: &str) -> Result<(), LogError> {
         Ok(self.conn.execute_batch(sql)?)

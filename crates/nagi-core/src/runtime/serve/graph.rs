@@ -2,56 +2,77 @@ use std::collections::HashMap;
 
 use crate::runtime::compile::{DependencyGraph, GraphEdge};
 
-/// Detects connected components in the dependency graph using Union-Find.
-/// Returns groups of Asset names (Source nodes are excluded from output).
-pub fn connected_components(graph: &DependencyGraph) -> Vec<Vec<String>> {
-    let mut name_to_id: HashMap<&str, usize> = HashMap::new();
-    for (i, node) in graph.nodes.iter().enumerate() {
-        name_to_id.insert(&node.name, i);
+/// Disjoint-set (Union-Find) with path-splitting for near-O(1) find/union.
+/// Used to group graph nodes into connected components.
+struct UnionFind {
+    parent: Vec<usize>,
+}
+
+impl UnionFind {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n).collect(),
+        }
     }
 
-    let n = graph.nodes.len();
-    let mut parent: Vec<usize> = (0..n).collect();
-
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
+    fn find(&mut self, mut x: usize) -> usize {
+        while self.parent[x] != x {
+            self.parent[x] = self.parent[self.parent[x]];
+            x = self.parent[x];
         }
         x
     }
 
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let ra = find(parent, a);
-        let rb = find(parent, b);
+    fn union(&mut self, a: usize, b: usize) {
+        let ra = self.find(a);
+        let rb = self.find(b);
         if ra != rb {
-            parent[rb] = ra;
+            self.parent[rb] = ra;
         }
     }
+}
+
+fn build_name_index(graph: &DependencyGraph) -> HashMap<&str, usize> {
+    graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| (node.name.as_str(), i))
+        .collect()
+}
+
+fn group_assets_by_root(graph: &DependencyGraph, uf: &mut UnionFind) -> Vec<Vec<String>> {
+    let mut groups: HashMap<usize, Vec<String>> = HashMap::new();
+    for (i, node) in graph.nodes.iter().enumerate() {
+        if node.kind == "Asset" {
+            let root = uf.find(i);
+            groups.entry(root).or_default().push(node.name.clone());
+        }
+    }
+    let mut result: Vec<Vec<String>> = groups.into_values().collect();
+    for group in &mut result {
+        group.sort();
+    }
+    result.sort_by(|a, b| a[0].cmp(&b[0]));
+    result
+}
+
+/// Detects connected components in the dependency graph using Union-Find.
+/// Returns groups of Asset names (Source nodes are excluded from output).
+pub fn connected_components(graph: &DependencyGraph) -> Vec<Vec<String>> {
+    let name_to_id = build_name_index(graph);
+    let mut uf = UnionFind::new(graph.nodes.len());
 
     for edge in &graph.edges {
         if let (Some(&a), Some(&b)) = (
             name_to_id.get(edge.from.as_str()),
             name_to_id.get(edge.to.as_str()),
         ) {
-            union(&mut parent, a, b);
+            uf.union(a, b);
         }
     }
 
-    let mut groups: HashMap<usize, Vec<String>> = HashMap::new();
-    for (i, node) in graph.nodes.iter().enumerate() {
-        if node.kind == "Asset" {
-            let root = find(&mut parent, i);
-            groups.entry(root).or_default().push(node.name.clone());
-        }
-    }
-
-    let mut result: Vec<Vec<String>> = groups.into_values().collect();
-    result.sort_by(|a, b| a[0].cmp(&b[0]));
-    for group in &mut result {
-        group.sort();
-    }
-    result
+    group_assets_by_root(graph, &mut uf)
 }
 
 pub struct EdgeMaps {
@@ -171,5 +192,41 @@ mod tests {
         let maps = build_edge_maps(&[]);
         assert!(maps.downstream.is_empty());
         assert!(maps.upstream.is_empty());
+    }
+
+    #[test]
+    fn union_find_initially_disjoint() {
+        let mut uf = UnionFind::new(3);
+        assert_ne!(uf.find(0), uf.find(1));
+        assert_ne!(uf.find(1), uf.find(2));
+    }
+
+    #[test]
+    fn union_find_merges_sets() {
+        let mut uf = UnionFind::new(4);
+        uf.union(0, 1);
+        uf.union(2, 3);
+        assert_eq!(uf.find(0), uf.find(1));
+        assert_eq!(uf.find(2), uf.find(3));
+        assert_ne!(uf.find(0), uf.find(2));
+    }
+
+    #[test]
+    fn union_find_transitive() {
+        let mut uf = UnionFind::new(3);
+        uf.union(0, 1);
+        uf.union(1, 2);
+        assert_eq!(uf.find(0), uf.find(2));
+    }
+
+    #[test]
+    fn build_name_index_maps_nodes_to_positions() {
+        let graph = DependencyGraph {
+            nodes: vec![asset_node("x"), asset_node("y")],
+            edges: vec![],
+        };
+        let idx = build_name_index(&graph);
+        assert_eq!(idx["x"], 0);
+        assert_eq!(idx["y"], 1);
     }
 }

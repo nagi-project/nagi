@@ -89,6 +89,42 @@ pub struct DbtCliContext<'a> {
 /// Converts a parsed dbt manifest into Nagi resources.
 ///
 /// Asset names are prefixed with the Origin name: `{origin_name}.{model_name}`.
+fn build_dbt_extra_args(project_dir: &str, cli_ctx: &DbtCliContext<'_>) -> Vec<String> {
+    let mut args: Vec<String> = vec!["--project-dir".to_string(), project_dir.to_string()];
+    if let Some(d) = cli_ctx.profiles_dir {
+        args.push("--profiles-dir".to_string());
+        args.push(d.to_string());
+    }
+    if let Some(p) = cli_ctx.profile {
+        args.push("--profile".to_string());
+        args.push(p.to_string());
+    }
+    if let Some(t) = cli_ctx.target {
+        args.push("--target".to_string());
+        args.push(t.to_string());
+    }
+    args
+}
+
+fn resolve_effective_sync(
+    default_sync: &Option<DefaultSync>,
+    origin_name: &str,
+    dbt_extra_args: &[String],
+    resources: &mut Vec<NagiKind>,
+) -> DefaultSync {
+    match default_sync {
+        Some(ds) => ds.clone(),
+        None => {
+            let run_sync_name = format!("{origin_name}-dbt-run");
+            resources.push(make_dbt_run_sync(&run_sync_name, dbt_extra_args));
+            DefaultSync {
+                sync: run_sync_name,
+                with: HashMap::new(),
+            }
+        }
+    }
+}
+
 pub fn manifest_to_resources(
     manifest: &DbtManifest,
     origin: &OriginSpec,
@@ -103,20 +139,7 @@ pub fn manifest_to_resources(
         ..
     } = origin;
 
-    // Build extra args for dbt commands (--project-dir, --profiles-dir, --profile, --target).
-    let mut dbt_extra_args: Vec<String> = vec!["--project-dir".to_string(), project_dir.clone()];
-    if let Some(d) = cli_ctx.profiles_dir {
-        dbt_extra_args.push("--profiles-dir".to_string());
-        dbt_extra_args.push(d.to_string());
-    }
-    if let Some(p) = cli_ctx.profile {
-        dbt_extra_args.push("--profile".to_string());
-        dbt_extra_args.push(p.to_string());
-    }
-    if let Some(t) = cli_ctx.target {
-        dbt_extra_args.push("--target".to_string());
-        dbt_extra_args.push(t.to_string());
-    }
+    let dbt_extra_args = build_dbt_extra_args(project_dir, cli_ctx);
 
     let (dbt_source_map, dbt_source_names, dbt_source_tags) =
         collect_dbt_source_names(manifest, origin_name);
@@ -125,46 +148,32 @@ pub fn manifest_to_resources(
     let model_tests = collect_tests(manifest, &model_names);
 
     let auto_sync_val = auto_sync.unwrap_or(true);
-    let source_ctx = DbtBuildContext {
+    let ctx = DbtBuildContext {
         connection,
         auto_sync: auto_sync_val,
         dbt_extra_args: &dbt_extra_args,
     };
+
     let (mut resources, needs_skip_sync) = build_dbt_source_assets(
         &dbt_source_names,
         &dbt_source_map,
         &dbt_source_tests,
         &dbt_source_tags,
-        &source_ctx,
+        &ctx,
     );
     if needs_skip_sync {
         resources.push(make_skip_sync());
     }
 
-    // When defaultSync is not set, auto-generate the {origin}-dbt-run Sync.
-    let run_sync_name = format!("{origin_name}-dbt-run");
-    let effective_sync = match default_sync {
-        Some(ds) => ds.clone(),
-        None => {
-            resources.push(make_dbt_run_sync(&run_sync_name, &dbt_extra_args));
-            DefaultSync {
-                sync: run_sync_name,
-                with: HashMap::new(),
-            }
-        }
-    };
+    let effective_sync =
+        resolve_effective_sync(default_sync, origin_name, &dbt_extra_args, &mut resources);
 
-    let model_ctx = DbtBuildContext {
-        connection,
-        auto_sync: auto_sync_val,
-        dbt_extra_args: &dbt_extra_args,
-    };
     let model_assets = build_dbt_model_assets(
         &model_nodes,
         &model_tests,
         &dbt_source_map,
         &model_names,
-        &model_ctx,
+        &ctx,
         &effective_sync,
     );
     resources.extend(model_assets);
@@ -221,6 +230,71 @@ fn make_skip_sync() -> NagiKind {
 
 // ── Asset builders ────────────────────────────────────────────────────
 
+/// Common parameters for building dbt-generated assets.
+struct DbtBuildContext<'a> {
+    connection: &'a str,
+    auto_sync: bool,
+    dbt_extra_args: &'a [String],
+}
+
+/// Parameters for building a single dbt-generated Asset.
+struct DbtAssetParams<'a> {
+    name: &'a str,
+    tags: Vec<String>,
+    upstreams: Vec<String>,
+    model_name: Option<String>,
+    default_sync: &'a DefaultSync,
+    tests: Option<&'a Vec<&'a DbtNode>>,
+}
+
+/// Builds a single Asset and its optional Conditions resource.
+fn build_asset_with_conditions(
+    params: &DbtAssetParams<'_>,
+    ctx: &DbtBuildContext<'_>,
+) -> (NagiKind, Option<NagiKind>) {
+    let (on_drift, conditions_resource) = build_on_drift(
+        params.tests.filter(|t| !t.is_empty()),
+        params.name,
+        params.default_sync,
+        ctx.dbt_extra_args,
+    );
+
+    let asset = NagiKind::Asset {
+        api_version: API_VERSION.to_string(),
+        metadata: Metadata {
+            name: params.name.to_string(),
+        },
+        spec: AssetSpec {
+            tags: params.tags.clone(),
+            connection: Some(ctx.connection.to_string()),
+            upstreams: params.upstreams.clone(),
+            on_drift,
+            auto_sync: ctx.auto_sync,
+            evaluate_cache_ttl: None,
+            model_name: params.model_name.clone(),
+        },
+    };
+
+    (asset, conditions_resource)
+}
+
+/// Re-keys tests from dbt unique_id to nagi Asset name.
+fn rekey_tests_by_name<'a>(
+    tests: &'a HashMap<String, Vec<&'a DbtNode>>,
+    id_to_name: &'a HashMap<String, String>,
+) -> HashMap<&'a str, Vec<&'a DbtNode>> {
+    let mut by_name: HashMap<&str, Vec<&DbtNode>> = HashMap::new();
+    for (uid, test_nodes) in tests {
+        if let Some(nagi_name) = id_to_name.get(uid) {
+            by_name
+                .entry(nagi_name.as_str())
+                .or_default()
+                .extend(test_nodes.iter().copied());
+        }
+    }
+    by_name
+}
+
 /// Builds Assets and Conditions for dbt sources (external tables).
 /// Returns the resources and whether `nagi-skip-sync` is needed.
 fn build_dbt_source_assets(
@@ -232,63 +306,32 @@ fn build_dbt_source_assets(
 ) -> (Vec<NagiKind>, bool) {
     let mut resources: Vec<NagiKind> = Vec::new();
     let mut skip_sync_needed = false;
-
-    // Re-key tests by nagi Asset name for O(1) lookup.
-    let mut tests_by_name: HashMap<&str, Vec<&DbtNode>> = HashMap::new();
-    for (uid, tests) in dbt_source_tests {
-        if let Some(nagi_name) = dbt_source_map.get(uid) {
-            tests_by_name
-                .entry(nagi_name.as_str())
-                .or_default()
-                .extend(tests.iter().copied());
-        }
-    }
+    let tests_by_name = rekey_tests_by_name(dbt_source_tests, dbt_source_map);
+    let skip_sync = DefaultSync {
+        sync: SKIP_SYNC_NAME.to_string(),
+        with: HashMap::new(),
+    };
 
     for name in names {
         let tests_for_this = tests_by_name.get(name.as_str());
-        let has_tests = tests_for_this.is_some_and(|t| !t.is_empty());
-
-        if has_tests {
+        if tests_for_this.is_some_and(|t| !t.is_empty()) {
             skip_sync_needed = true;
         }
-        let skip_sync = DefaultSync {
-            sync: SKIP_SYNC_NAME.to_string(),
-            with: HashMap::new(),
-        };
-        let (on_drift, conditions_resource) = build_on_drift(
-            tests_for_this.filter(|t| !t.is_empty()),
+
+        let params = DbtAssetParams {
             name,
-            &skip_sync,
-            ctx.dbt_extra_args,
-        );
-
-        if let Some(cond) = conditions_resource {
-            resources.push(cond);
-        }
-
-        resources.push(NagiKind::Asset {
-            api_version: API_VERSION.to_string(),
-            metadata: Metadata { name: name.clone() },
-            spec: AssetSpec {
-                tags: dbt_source_tags.get(name).cloned().unwrap_or_default(),
-                connection: Some(ctx.connection.to_string()),
-                upstreams: vec![],
-                on_drift,
-                auto_sync: ctx.auto_sync,
-                evaluate_cache_ttl: None,
-                model_name: None,
-            },
-        });
+            tags: dbt_source_tags.get(name).cloned().unwrap_or_default(),
+            upstreams: vec![],
+            model_name: None,
+            default_sync: &skip_sync,
+            tests: tests_for_this,
+        };
+        let (asset, conditions) = build_asset_with_conditions(&params, ctx);
+        resources.extend(conditions);
+        resources.push(asset);
     }
 
     (resources, skip_sync_needed)
-}
-
-/// Common parameters for building dbt-generated assets.
-struct DbtBuildContext<'a> {
-    connection: &'a str,
-    auto_sync: bool,
-    dbt_extra_args: &'a [String],
 }
 
 /// Builds Assets and Conditions for dbt models.
@@ -309,32 +352,17 @@ fn build_dbt_model_assets(
             .unwrap_or(&model.name);
         let upstreams = resolve_upstreams(&model.depends_on.nodes, dbt_source_map, model_names);
 
-        let (on_drift, conditions_resource) = build_on_drift(
-            model_tests.get(&model.unique_id),
-            prefixed_name,
+        let params = DbtAssetParams {
+            name: prefixed_name,
+            tags: model.tags.clone(),
+            upstreams,
+            model_name: Some(model.name.clone()),
             default_sync,
-            ctx.dbt_extra_args,
-        );
-
-        if let Some(cond) = conditions_resource {
-            resources.push(cond);
-        }
-
-        resources.push(NagiKind::Asset {
-            api_version: API_VERSION.to_string(),
-            metadata: Metadata {
-                name: prefixed_name.to_string(),
-            },
-            spec: AssetSpec {
-                tags: model.tags.clone(),
-                connection: Some(ctx.connection.to_string()),
-                upstreams,
-                on_drift,
-                auto_sync: ctx.auto_sync,
-                evaluate_cache_ttl: None,
-                model_name: Some(model.name.clone()),
-            },
-        });
+            tests: model_tests.get(&model.unique_id),
+        };
+        let (asset, conditions) = build_asset_with_conditions(&params, ctx);
+        resources.extend(conditions);
+        resources.push(asset);
     }
 
     resources
@@ -394,17 +422,21 @@ fn collect_tests<'a>(
     manifest: &'a DbtManifest,
     valid_ids: &HashMap<String, String>,
 ) -> HashMap<String, Vec<&'a DbtNode>> {
-    let mut tests: HashMap<String, Vec<&DbtNode>> = HashMap::new();
-    for node in manifest.nodes.values() {
-        if node.resource_type == "test" {
-            for dep in &node.depends_on.nodes {
-                if valid_ids.contains_key(dep) {
-                    tests.entry(dep.clone()).or_default().push(node);
-                }
-            }
-        }
-    }
-    tests
+    manifest
+        .nodes
+        .values()
+        .filter(|n| n.resource_type == "test")
+        .flat_map(|node| {
+            node.depends_on
+                .nodes
+                .iter()
+                .filter(|d| valid_ids.contains_key(*d))
+                .map(move |dep| (dep.clone(), node))
+        })
+        .fold(HashMap::new(), |mut acc, (dep, node)| {
+            acc.entry(dep).or_insert_with(Vec::new).push(node);
+            acc
+        })
 }
 
 /// Resolves dbt dependency ids into upstream Asset names.
@@ -1399,5 +1431,82 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn build_dbt_extra_args_project_dir_only() {
+        let ctx = DbtCliContext::default();
+        let args = build_dbt_extra_args("/project", &ctx);
+        assert_eq!(args, vec!["--project-dir", "/project"]);
+    }
+
+    #[test]
+    fn build_dbt_extra_args_all_options() {
+        let ctx = DbtCliContext {
+            profiles_dir: Some("/profiles"),
+            profile: Some("my_profile"),
+            target: Some("prod"),
+        };
+        let args = build_dbt_extra_args("/project", &ctx);
+        assert_eq!(
+            args,
+            vec![
+                "--project-dir",
+                "/project",
+                "--profiles-dir",
+                "/profiles",
+                "--profile",
+                "my_profile",
+                "--target",
+                "prod"
+            ]
+        );
+    }
+
+    #[test]
+    fn rekey_tests_by_name_maps_uid_to_nagi_name() {
+        let test_node = DbtNode {
+            unique_id: "test.t1".to_string(),
+            name: "t1".to_string(),
+            resource_type: "test".to_string(),
+            depends_on: DbtDependsOn { nodes: vec![] },
+            tags: vec![],
+            test_metadata: None,
+            _package_name: String::new(),
+            database: None,
+            schema: None,
+            alias: None,
+        };
+        let tests: HashMap<String, Vec<&DbtNode>> =
+            HashMap::from([("model.m1".to_string(), vec![&test_node])]);
+        let id_to_name: HashMap<String, String> =
+            HashMap::from([("model.m1".to_string(), "origin.m1".to_string())]);
+
+        let result = rekey_tests_by_name(&tests, &id_to_name);
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key("origin.m1"));
+        assert_eq!(result["origin.m1"].len(), 1);
+    }
+
+    #[test]
+    fn rekey_tests_by_name_skips_unknown_ids() {
+        let test_node = DbtNode {
+            unique_id: "test.t1".to_string(),
+            name: "t1".to_string(),
+            resource_type: "test".to_string(),
+            depends_on: DbtDependsOn { nodes: vec![] },
+            tags: vec![],
+            test_metadata: None,
+            _package_name: String::new(),
+            database: None,
+            schema: None,
+            alias: None,
+        };
+        let tests: HashMap<String, Vec<&DbtNode>> =
+            HashMap::from([("model.unknown".to_string(), vec![&test_node])]);
+        let id_to_name: HashMap<String, String> = HashMap::new();
+
+        let result = rekey_tests_by_name(&tests, &id_to_name);
+        assert!(result.is_empty());
     }
 }

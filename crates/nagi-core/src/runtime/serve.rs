@@ -128,16 +128,7 @@ fn load_controller_inputs(
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let mut inputs = build_controller_inputs(&graph, &asset_map)?;
 
-    if let Some(max) = config.max_controllers {
-        if inputs.len() > max {
-            return Err(ServeError::Parse(format!(
-                "dependency graph has {} connected components, but maxControllers is set to {}. \
-                 Reduce the number of independent asset groups or increase maxControllers in nagi.yaml.",
-                inputs.len(),
-                max
-            )));
-        }
-    }
+    validate_controller_count(inputs.len(), config.max_controllers)?;
 
     let resolved_cache = Some(
         cache_dir
@@ -337,6 +328,21 @@ pub fn halt(
     Ok(halted)
 }
 
+fn validate_controller_count(
+    count: usize,
+    max_controllers: Option<usize>,
+) -> Result<(), ServeError> {
+    if let Some(max) = max_controllers {
+        if count > max {
+            return Err(ServeError::Parse(format!(
+                "dependency graph has {count} connected components, but maxControllers is set to {max}. \
+                 Reduce the number of independent asset groups or increase maxControllers in nagi.yaml."
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +433,26 @@ mod tests {
         let inputs =
             load_controller_inputs(&target, &[], &[], &config, Some(custom.as_path())).unwrap();
         assert_eq!(inputs[0].cache_dir, Some(custom));
+    }
+
+    #[test]
+    fn validate_controller_count_ok_when_no_limit() {
+        assert!(validate_controller_count(100, None).is_ok());
+    }
+
+    #[test]
+    fn validate_controller_count_ok_within_limit() {
+        assert!(validate_controller_count(3, Some(5)).is_ok());
+    }
+
+    #[test]
+    fn validate_controller_count_ok_at_limit() {
+        assert!(validate_controller_count(5, Some(5)).is_ok());
+    }
+
+    #[test]
+    fn validate_controller_count_err_over_limit() {
+        let err = validate_controller_count(6, Some(5)).unwrap_err();
+        assert!(matches!(err, ServeError::Parse(_)));
     }
 }

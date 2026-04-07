@@ -138,13 +138,6 @@ impl NagiKind {
     }
 }
 
-#[cfg(test)]
-pub fn parse_kind(yaml: &str) -> Result<NagiKind, KindError> {
-    let kind: NagiKind = serde_yaml::from_str(yaml)?;
-    kind.validate()?;
-    Ok(kind)
-}
-
 /// Parses multiple resources from a single YAML string. Supports `---` document separators.
 pub fn parse_kinds(yaml: &str) -> Result<Vec<NagiKind>, KindError> {
     let mut kinds = Vec::new();
@@ -159,6 +152,12 @@ pub fn parse_kinds(yaml: &str) -> Result<Vec<NagiKind>, KindError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    pub fn parse_kind(yaml: &str) -> Result<NagiKind, KindError> {
+        let kind: NagiKind = serde_yaml::from_str(yaml)?;
+        kind.validate()?;
+        Ok(kind)
+    }
 
     #[test]
     fn parse_connection_resource() {

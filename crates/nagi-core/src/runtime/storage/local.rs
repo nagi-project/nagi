@@ -328,83 +328,79 @@ impl SyncLock for LocalSyncLock {
 }
 
 #[cfg(test)]
-impl LocalCache {
-    fn list(&self) -> Result<Vec<AssetEvalResult>, StorageError> {
-        if !self.cache_dir.exists() {
-            return Ok(Vec::new());
-        }
-        let mut results = Vec::new();
-        for entry in std::fs::read_dir(&self.cache_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let content = std::fs::read_to_string(&path)?;
-                let result: AssetEvalResult = serde_json::from_str(&content)?;
-                results.push(result);
-            }
-        }
-        results.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
-        Ok(results)
-    }
-}
-
-#[cfg(test)]
-impl LocalSuspendedStore {
-    fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError> {
-        let entries = match std::fs::read_dir(&self.dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
-        };
-        let mut result = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                let data = std::fs::read_to_string(&path)?;
-                if let Ok(info) = serde_json::from_str::<SuspendedInfo>(&data) {
-                    result.push(info);
-                }
-            }
-        }
-        result.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
-        Ok(result)
-    }
-}
-
-#[cfg(test)]
-impl LocalConditionCache {
-    fn read_condition(
-        &self,
-        asset_name: &str,
-        condition_name: &str,
-    ) -> Result<Option<ConditionCacheEntry>, StorageError> {
-        let path = self.condition_path(asset_name, condition_name)?;
-        match std::fs::read_to_string(path) {
-            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
-
-#[cfg(test)]
-impl LocalReadinessStore {
-    fn read(&self, asset_name: &str) -> Result<Option<bool>, StorageError> {
-        let path = self.asset_path(asset_name)?;
-        match std::fs::read_to_string(path) {
-            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use crate::runtime::evaluate::{ConditionResult, ConditionStatus};
 
     use super::*;
+
+    impl LocalCache {
+        fn list(&self) -> Result<Vec<AssetEvalResult>, StorageError> {
+            if !self.cache_dir.exists() {
+                return Ok(Vec::new());
+            }
+            let mut results = Vec::new();
+            for entry in std::fs::read_dir(&self.cache_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    let content = std::fs::read_to_string(&path)?;
+                    let result: AssetEvalResult = serde_json::from_str(&content)?;
+                    results.push(result);
+                }
+            }
+            results.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
+            Ok(results)
+        }
+    }
+
+    impl LocalSuspendedStore {
+        fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError> {
+            let entries = match std::fs::read_dir(&self.dir) {
+                Ok(entries) => entries,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(e) => return Err(e.into()),
+            };
+            let mut result = Vec::new();
+            for entry in entries {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                    let data = std::fs::read_to_string(&path)?;
+                    if let Ok(info) = serde_json::from_str::<SuspendedInfo>(&data) {
+                        result.push(info);
+                    }
+                }
+            }
+            result.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
+            Ok(result)
+        }
+    }
+
+    impl LocalConditionCache {
+        fn read_condition(
+            &self,
+            asset_name: &str,
+            condition_name: &str,
+        ) -> Result<Option<ConditionCacheEntry>, StorageError> {
+            let path = self.condition_path(asset_name, condition_name)?;
+            match std::fs::read_to_string(path) {
+                Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.into()),
+            }
+        }
+    }
+
+    impl LocalReadinessStore {
+        fn read(&self, asset_name: &str) -> Result<Option<bool>, StorageError> {
+            let path = self.asset_path(asset_name)?;
+            match std::fs::read_to_string(path) {
+                Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.into()),
+            }
+        }
+    }
 
     fn sample_result(name: &str, ready: bool) -> AssetEvalResult {
         AssetEvalResult {

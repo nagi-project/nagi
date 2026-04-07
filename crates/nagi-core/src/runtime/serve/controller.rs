@@ -307,20 +307,7 @@ pub(super) async fn run_controller(
         Result<crate::runtime::sync::SyncExecutionResult, SyncError>,
     )> = JoinSet::new();
 
-    // Restore persisted readiness from the previous run.
-    match readiness_store.read_all() {
-        Ok(persisted) => {
-            if !persisted.is_empty() {
-                let ready_count = persisted.values().filter(|&&r| r).count();
-                state.restore_readiness(persisted);
-                tracing::info!(count = ready_count, "restored readiness from previous run");
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to restore readiness, starting fresh");
-        }
-    }
-
+    restore_readiness(&mut state, &*readiness_store);
     state.register_assets(&assets);
 
     let yaml_map: HashMap<&str, &str> = assets
@@ -328,7 +315,6 @@ pub(super) async fn run_controller(
         .map(|a| (a.name.as_str(), a.yaml.as_str()))
         .collect();
 
-    // Build per-connection semaphores for concurrency control.
     let conn_semaphores = build_connection_semaphores(&yaml_map);
 
     loop {
@@ -379,13 +365,36 @@ pub(super) async fn run_controller(
 
     drop(evaluate_tasks);
     drain_sync_tasks(&mut sync_tasks).await;
+    persist_readiness(&state, &*readiness_store);
 
-    // Persist readiness for the next startup.
+    Ok(())
+}
+
+fn restore_readiness(
+    state: &mut ServeState,
+    readiness_store: &dyn crate::runtime::storage::ReadinessStore,
+) {
+    match readiness_store.read_all() {
+        Ok(persisted) => {
+            if !persisted.is_empty() {
+                let ready_count = persisted.values().filter(|&&r| r).count();
+                state.restore_readiness(persisted);
+                tracing::info!(count = ready_count, "restored readiness from previous run");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to restore readiness, starting fresh");
+        }
+    }
+}
+
+fn persist_readiness(
+    state: &ServeState,
+    readiness_store: &dyn crate::runtime::storage::ReadinessStore,
+) {
     if let Err(e) = readiness_store.write_all(&state.readiness.ready) {
         tracing::warn!(error = %e, "failed to persist readiness");
     }
-
-    Ok(())
 }
 
 /// Input for one Controller: assets with their YAML and intervals, plus edges.
@@ -403,32 +412,33 @@ type ConnectionSemaphores = HashMap<String, Arc<tokio::sync::Semaphore>>;
 /// Parses compiled asset YAMLs and builds per-connection semaphores.
 /// Connections with `max_concurrency` limits get a bounded semaphore.
 /// Assets without a connection or with unlimited connections get no entry.
-fn build_connection_semaphores(yaml_map: &HashMap<&str, &str>) -> ConnectionSemaphores {
+fn resolve_connection_limit(
+    conn: &crate::runtime::kind::connection::ResolvedConnection,
+) -> Option<usize> {
     use crate::runtime::kind::connection::ResolvedConnection;
+    match conn {
+        ResolvedConnection::DuckDb { .. } => Some(1),
+        ResolvedConnection::Dbt { .. } => conn.connect().ok().and_then(|c| c.max_concurrency()),
+        _ => None,
+    }
+}
 
+fn build_connection_semaphores(yaml_map: &HashMap<&str, &str>) -> ConnectionSemaphores {
     let mut conn_limits: HashMap<String, usize> = HashMap::new();
     let mut asset_to_conn: HashMap<String, String> = HashMap::new();
 
-    for (&asset_name, &yaml) in yaml_map {
-        if let Ok(compiled) = serde_yaml::from_str::<CompiledAsset>(yaml) {
-            if let Some(ref conn) = compiled.connection {
-                let conn_name = conn.name().to_string();
-                // Determine concurrency limit from the connection type.
-                // For dbt connections, resolve the adapter to check if
-                // the underlying database has concurrency constraints.
-                let limit = match conn {
-                    ResolvedConnection::DuckDb { .. } => Some(1),
-                    ResolvedConnection::Dbt { .. } => {
-                        conn.connect().ok().and_then(|c| c.max_concurrency())
-                    }
-                    _ => None,
-                };
-                if let Some(n) = limit {
-                    conn_limits.entry(conn_name.clone()).or_insert(n);
-                }
-                asset_to_conn.insert(asset_name.to_string(), conn_name);
-            }
+    let assets_with_conn = yaml_map.iter().filter_map(|(&name, &yaml)| {
+        let compiled = serde_yaml::from_str::<CompiledAsset>(yaml).ok()?;
+        let conn = compiled.connection?;
+        Some((name.to_string(), conn))
+    });
+
+    for (asset_name, conn) in assets_with_conn {
+        let conn_name = conn.name().to_string();
+        if let Some(n) = resolve_connection_limit(&conn) {
+            conn_limits.entry(conn_name.clone()).or_insert(n);
         }
+        asset_to_conn.insert(asset_name, conn_name);
     }
 
     let semaphores: HashMap<String, Arc<tokio::sync::Semaphore>> = conn_limits
@@ -436,13 +446,13 @@ fn build_connection_semaphores(yaml_map: &HashMap<&str, &str>) -> ConnectionSema
         .map(|(name, limit)| (name, Arc::new(tokio::sync::Semaphore::new(limit))))
         .collect();
 
-    let mut result = HashMap::new();
-    for (asset_name, conn_name) in asset_to_conn {
-        if let Some(sem) = semaphores.get(&conn_name) {
-            result.insert(asset_name, Arc::clone(sem));
-        }
-    }
-    result
+    asset_to_conn
+        .into_iter()
+        .filter_map(|(asset_name, conn_name)| {
+            let sem = semaphores.get(&conn_name)?;
+            Some((asset_name, Arc::clone(sem)))
+        })
+        .collect()
 }
 
 /// Builds per-component [`ControllerInput`]s from the graph and compiled assets.
@@ -457,28 +467,9 @@ pub(super) fn build_controller_inputs(
         // Set of asset names in this component, used to filter edges below.
         let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
 
-        // Parse each compiled YAML to extract interval and sync config.
         let assets: Vec<_> = component
             .iter()
-            .filter_map(|name| {
-                let yaml = asset_map.get(name)?;
-                let compiled: CompiledAsset = match serde_yaml::from_str(yaml) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!(asset = %name, error = %e, "skipping asset");
-                        return None;
-                    }
-                };
-                let min_interval = compute_min_interval(&compiled.spec.on_drift);
-                let first_on_drift = compiled.spec.on_drift.first();
-                Some(AssetEntry {
-                    name: name.clone(),
-                    yaml: yaml.clone(),
-                    min_interval,
-                    auto_sync: compiled.spec.auto_sync,
-                    has_sync: first_on_drift.is_some(),
-                })
-            })
+            .filter_map(|name| parse_asset_entry(name, asset_map))
             .collect();
 
         if assets.is_empty() {
@@ -504,6 +495,25 @@ pub(super) fn build_controller_inputs(
     }
 
     Ok(inputs)
+}
+
+fn parse_asset_entry(name: &str, asset_map: &HashMap<String, String>) -> Option<AssetEntry> {
+    let yaml = asset_map.get(name)?;
+    let compiled: CompiledAsset = match serde_yaml::from_str(yaml) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(asset = %name, error = %e, "skipping asset");
+            return None;
+        }
+    };
+    let min_interval = compute_min_interval(&compiled.spec.on_drift);
+    Some(AssetEntry {
+        name: name.to_string(),
+        yaml: yaml.clone(),
+        min_interval,
+        auto_sync: compiled.spec.auto_sync,
+        has_sync: !compiled.spec.on_drift.is_empty(),
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
