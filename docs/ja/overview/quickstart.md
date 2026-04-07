@@ -33,6 +33,7 @@ metadata:
   name: greeting-check
 spec:
   - name: file-exists
+    interval: 30s
     type: Command
     run: [test, -f, greeting.txt]
 ---
@@ -113,7 +114,7 @@ nagi evaluate
 ```json
 [
   {
-    "assetName": "greeting",
+    "assetName": "farewell",
     "ready": false,
     "conditions": [
       {
@@ -124,7 +125,7 @@ nagi evaluate
     ]
   },
   {
-    "assetName": "farewell",
+    "assetName": "greeting",
     "ready": false,
     "conditions": [
       {
@@ -143,7 +144,7 @@ nagi evaluate
 nagi sync
 ```
 
-プランが表示され、承認すると `greeting.txt` と `farewell.txt` が作成されます。Sync 完了後に自動で evaluate が行われます。
+プランが表示され、承認すると `greeting.txt` と `farewell.txt` が作成されます。
 
 ### Step 4: Verify
 

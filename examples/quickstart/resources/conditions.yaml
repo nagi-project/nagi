@@ -4,6 +4,7 @@ metadata:
   name: greeting-check
 spec:
   - name: file-exists
+    interval: 30s
     type: Command
     run: [test, -f, greeting.txt]
 ---
