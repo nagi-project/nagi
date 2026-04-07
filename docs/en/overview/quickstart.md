@@ -33,6 +33,7 @@ metadata:
   name: greeting-check
 spec:
   - name: file-exists
+    interval: 30s
     type: Command
     run: [test, -f, greeting.txt]
 ---
@@ -113,7 +114,7 @@ Since the files do not exist yet, both Assets evaluate to Drifted.
 ```json
 [
   {
-    "assetName": "greeting",
+    "assetName": "farewell",
     "ready": false,
     "conditions": [
       {
@@ -124,7 +125,7 @@ Since the files do not exist yet, both Assets evaluate to Drifted.
     ]
   },
   {
-    "assetName": "farewell",
+    "assetName": "greeting",
     "ready": false,
     "conditions": [
       {
@@ -143,7 +144,7 @@ Since the files do not exist yet, both Assets evaluate to Drifted.
 nagi sync
 ```
 
-Nagi displays a plan. After you approve, it creates `greeting.txt` and `farewell.txt`. After Sync completes, Nagi automatically runs Evaluate.
+Nagi displays a plan. After you approve, it creates `greeting.txt` and `farewell.txt`.
 
 ### Step 4: Verify
 
