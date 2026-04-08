@@ -33,9 +33,12 @@ pub enum KindError {
 /// Common metadata shared by all resource kinds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Metadata {
+    /// Unique name of the resource.
     pub name: String,
+    /// Key-value pairs for filtering with `--select label:key` or `--select label:key=value`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub labels: BTreeMap<String, String>,
+    /// Non-identifying metadata for descriptions, owner contacts, or other arbitrary information.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub annotations: BTreeMap<String, String>,
 }

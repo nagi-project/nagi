@@ -202,9 +202,10 @@ By default, only read-only tools (`nagi_status`, `nagi_evaluate`) are exposed.
 | `+name+` | The specified Asset and all upstream and downstream Assets |
 | `N+name` | The specified Asset and N levels of upstream Assets |
 | `name+N` | The specified Asset and N levels of downstream Assets |
-| `tag:finance` | Select by tag |
-| `+tag:finance` | Select by tag, including upstream Assets |
-| `tag:finance,tag:daily` | Intersection — Assets matching all criteria (AND) |
+| `label:key` | Select by label existence |
+| `label:key=value` | Select by label key-value match |
+| `+label:key` | Select by label, including upstream Assets |
+| `label:key1,label:key2` | Intersection — Assets matching all criteria (AND) |
 
 Multiple `--select` arguments are combined as union (OR). Comma-separated patterns within a single argument are intersected (AND).
 
@@ -212,11 +213,14 @@ Multiple `--select` arguments are combined as union (OR). Comma-separated patter
 # OR: Assets matching either selector
 nagi evaluate --select daily-sales --select access-stats
 
-# AND: Assets with both tags
-nagi evaluate --select "tag:finance,tag:daily"
+# AND: Assets with both labels
+nagi evaluate --select "label:dbt/finance,label:dbt/daily"
 
-# Combined: (tag:finance AND tag:daily) OR access-stats
-nagi evaluate --select "tag:finance,tag:daily" --select access-stats
+# Combined: (label:dbt/finance AND label:dbt/daily) OR access-stats
+nagi evaluate --select "label:dbt/finance,label:dbt/daily" --select access-stats
+
+# Select by label key-value pair
+nagi evaluate --select "label:team=data-eng"
 ```
 
 ## --exclude syntax
@@ -227,6 +231,6 @@ nagi evaluate --select "tag:finance,tag:daily" --select access-stats
 # Evaluate all assets except monthly-report
 nagi evaluate --exclude monthly-report
 
-# Evaluate finance assets, excluding those tagged daily
-nagi evaluate --select "tag:finance" --exclude "tag:daily"
+# Evaluate finance-labeled assets, excluding daily-labeled ones
+nagi evaluate --select "label:dbt/finance" --exclude "label:dbt/daily"
 ```

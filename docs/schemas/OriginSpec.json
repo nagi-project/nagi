@@ -49,7 +49,7 @@
             }
           ],
           "default": null,
-          "description": "User-defined Sync to override the auto-generated `nagi-dbt-run`."
+          "description": "User-defined Sync to override the auto-generated Sync\n(e.g. `my-project-dbt-run` for Origin named `my-project`)."
         },
         "projectDir": {
           "description": "Local path to the dbt project directory (relative or absolute).",
