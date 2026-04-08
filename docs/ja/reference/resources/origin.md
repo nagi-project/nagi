@@ -72,6 +72,6 @@ spec:
 | `connection` | string | Yes | - | Connection resource name for auto-generated Assets. |
 | `projectDir` | string | Yes | - | Local path to the dbt project directory (relative or absolute). |
 | `autoSync` | boolean | — | - | Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`). |
-| `defaultSync` | DefaultSync | — | - | User-defined Sync to override the auto-generated `{origin}-dbt-run`. |
+| `defaultSync` | DefaultSync | — | - | User-defined Sync to override the auto-generated Sync (e.g. `my-project-dbt-run` for Origin named `my-project`). |
 
 <!-- schema:auto-generated:end:OriginSpec -->

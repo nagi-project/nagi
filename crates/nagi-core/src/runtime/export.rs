@@ -393,9 +393,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
 
     let conditions = NagiKind::Conditions {
         api_version: kind::API_VERSION.to_string(),
-        metadata: kind::Metadata {
-            name: conditions_name.to_string(),
-        },
+        metadata: kind::Metadata::new(conditions_name),
         spec: kind::ConditionsSpec(vec![kind::asset::DesiredCondition::Command {
             name: "unexported-rows".to_string(),
             run: vec![
@@ -414,9 +412,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
 
     let sync_resource = NagiKind::Sync {
         api_version: kind::API_VERSION.to_string(),
-        metadata: kind::Metadata {
-            name: sync_name.to_string(),
-        },
+        metadata: kind::Metadata::new(sync_name),
         spec: kind::SyncSpec {
             pre: None,
             run: kind::sync::SyncStep {
@@ -439,9 +435,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
         let table_name = table.table_name();
         let asset = NagiKind::Asset {
             api_version: kind::API_VERSION.to_string(),
-            metadata: kind::Metadata {
-                name: format!("nagi-export-{table_name}"),
-            },
+            metadata: kind::Metadata::new(format!("nagi-export-{table_name}")),
             spec: kind::AssetSpec {
                 connection: None,
                 upstreams: vec![],
@@ -455,7 +449,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
                     merge_position: kind::asset::MergePosition::BeforeOrigin,
                 }],
                 auto_sync: true,
-                tags: vec![],
+
                 evaluate_cache_ttl: None,
                 model_name: None,
             },

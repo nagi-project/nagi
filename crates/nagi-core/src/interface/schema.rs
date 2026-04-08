@@ -5,7 +5,7 @@ use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::kind::asset::OnDriftEntry;
 use crate::runtime::kind::sync::SyncStep;
 use crate::runtime::kind::{
-    AssetSpec, ConditionsSpec, ConnectionSpec, NagiKind, OriginSpec, SyncSpec,
+    AssetSpec, ConditionsSpec, ConnectionSpec, Metadata, NagiKind, OriginSpec, SyncSpec,
 };
 use crate::runtime::log::{EvaluateLogEntry, SyncLogEntry};
 use crate::runtime::serve::SuspendedInfo;
@@ -47,6 +47,10 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
         (
             "OnDriftEntry",
             serde_json::to_value(schema_for!(OnDriftEntry)).unwrap(),
+        ),
+        (
+            "Metadata",
+            serde_json::to_value(schema_for!(Metadata)).unwrap(),
         ),
         (
             "NagiConfig",
@@ -113,6 +117,7 @@ mod tests {
             "OriginSpec.json",
             "SyncStep.json",
             "OnDriftEntry.json",
+            "Metadata.json",
             "NagiConfig.json",
             "AssetEvalResult.json",
             "LockInfo.json",

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -194,9 +194,7 @@ fn make_dbt_run_sync(name: &str, dbt_extra_args: &[String]) -> NagiKind {
     args.extend_from_slice(dbt_extra_args);
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
-        metadata: Metadata {
-            name: name.to_string(),
-        },
+        metadata: Metadata::new(name),
         spec: SyncSpec {
             pre: None,
             run: SyncStep {
@@ -213,9 +211,7 @@ fn make_dbt_run_sync(name: &str, dbt_extra_args: &[String]) -> NagiKind {
 fn make_skip_sync() -> NagiKind {
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
-        metadata: Metadata {
-            name: SKIP_SYNC_NAME.to_string(),
-        },
+        metadata: Metadata::new(SKIP_SYNC_NAME),
         spec: SyncSpec {
             pre: None,
             run: SyncStep {
@@ -237,10 +233,17 @@ struct DbtBuildContext<'a> {
     dbt_extra_args: &'a [String],
 }
 
+/// Converts dbt tags to Kubernetes-style labels with `dbt/` prefix.
+fn dbt_tags_to_labels(tags: &[String]) -> BTreeMap<String, String> {
+    tags.iter()
+        .map(|tag| (format!("dbt/{tag}"), String::new()))
+        .collect()
+}
+
 /// Parameters for building a single dbt-generated Asset.
 struct DbtAssetParams<'a> {
     name: &'a str,
-    tags: Vec<String>,
+    labels: BTreeMap<String, String>,
     upstreams: Vec<String>,
     model_name: Option<String>,
     default_sync: &'a DefaultSync,
@@ -261,11 +264,8 @@ fn build_asset_with_conditions(
 
     let asset = NagiKind::Asset {
         api_version: API_VERSION.to_string(),
-        metadata: Metadata {
-            name: params.name.to_string(),
-        },
+        metadata: Metadata::with_labels(params.name, params.labels.clone()),
         spec: AssetSpec {
-            tags: params.tags.clone(),
             connection: Some(ctx.connection.to_string()),
             upstreams: params.upstreams.clone(),
             on_drift,
@@ -320,7 +320,12 @@ fn build_dbt_source_assets(
 
         let params = DbtAssetParams {
             name,
-            tags: dbt_source_tags.get(name).cloned().unwrap_or_default(),
+            labels: dbt_tags_to_labels(
+                dbt_source_tags
+                    .get(name)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]),
+            ),
             upstreams: vec![],
             model_name: None,
             default_sync: &skip_sync,
@@ -354,7 +359,7 @@ fn build_dbt_model_assets(
 
         let params = DbtAssetParams {
             name: prefixed_name,
-            tags: model.tags.clone(),
+            labels: dbt_tags_to_labels(&model.tags),
             upstreams,
             model_name: Some(model.name.clone()),
             default_sync,
@@ -474,9 +479,7 @@ fn build_on_drift(
     let group_name = format!("dbt-tests-{model_name}");
     let conditions_resource = NagiKind::Conditions {
         api_version: API_VERSION.to_string(),
-        metadata: Metadata {
-            name: group_name.clone(),
-        },
+        metadata: Metadata::new(group_name.clone()),
         spec: crate::runtime::kind::condition::ConditionsSpec(conditions),
     };
 
@@ -776,9 +779,9 @@ mod tests {
             .iter()
             .find(|r| r.metadata().name == "jaffle.orders")
             .unwrap();
-        if let NagiKind::Asset { spec, .. } = orders {
-            assert!(spec.tags.contains(&"finance".to_string()));
-            assert!(spec.tags.contains(&"daily".to_string()));
+        if let NagiKind::Asset { metadata, .. } = orders {
+            assert!(metadata.labels.contains_key("dbt/finance"));
+            assert!(metadata.labels.contains_key("dbt/daily"));
         } else {
             panic!("orders should be an Asset");
         }
@@ -798,8 +801,8 @@ mod tests {
             .iter()
             .find(|r| r.metadata().name == "jaffle.raw.orders")
             .unwrap();
-        if let NagiKind::Asset { spec, .. } = raw_orders {
-            assert_eq!(spec.tags, vec!["external"]);
+        if let NagiKind::Asset { metadata, .. } = raw_orders {
+            assert!(metadata.labels.contains_key("dbt/external"));
         } else {
             panic!("raw.orders should be an Asset");
         }
@@ -808,8 +811,8 @@ mod tests {
             .iter()
             .find(|r| r.metadata().name == "jaffle.raw.customers")
             .unwrap();
-        if let NagiKind::Asset { spec, .. } = raw_customers {
-            assert!(spec.tags.is_empty());
+        if let NagiKind::Asset { metadata, .. } = raw_customers {
+            assert!(metadata.labels.is_empty());
         } else {
             panic!("raw.customers should be an Asset");
         }

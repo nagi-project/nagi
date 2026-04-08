@@ -28,7 +28,9 @@ class TestEvaluateDbtOrigin:
             pytest.param(
                 "analytics.customers", "analytics.customers", id="single-asset"
             ),
-            pytest.param("tag:finance", "analytics.order_summary", id="tag-selector"),
+            pytest.param(
+                "label:dbt/finance", "analytics.order_summary", id="label-selector"
+            ),
         ],
     )
     def test_evaluate_select(

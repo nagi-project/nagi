@@ -7,8 +7,10 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
-  tags: [finance, daily]
   connection: my-bigquery
   upstreams:
     - raw-sales
@@ -37,7 +39,6 @@ spec:
 | `connection` | string | — | - | Name of the Connection resource for DB access. |
 | `evaluateCacheTtl` | Duration | — | - | Default evaluate cache TTL for all conditions in this Asset. Conditions can override this with their own `evaluateCacheTtl`. |
 | `onDrift` | list[OnDriftEntry] | — | [] | Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready. |
-| `tags` | list[string] | — | [] | Tags for filtering with `--select tag:X`. |
 | `upstreams` | list[string] | — | [] | Names of upstream Asset resources. |
 
 <!-- schema:auto-generated:end:AssetSpec -->

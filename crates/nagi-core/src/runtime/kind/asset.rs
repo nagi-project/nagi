@@ -25,9 +25,6 @@ pub enum MergePosition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSpec {
-    /// Tags for filtering with `--select tag:X`.
-    #[serde(default)]
-    pub tags: Vec<String>,
     /// Name of the Connection resource for DB access.
     #[serde(default)]
     pub connection: Option<String>,
@@ -350,7 +347,6 @@ autoSync: false
     #[test]
     fn validate_accepts_empty_on_drift() {
         let spec = AssetSpec {
-            tags: vec![],
             connection: None,
             upstreams: vec![],
             on_drift: vec![],
@@ -364,7 +360,6 @@ autoSync: false
     #[test]
     fn validate_accepts_valid_spec() {
         let spec = AssetSpec {
-            tags: vec![],
             connection: None,
             upstreams: vec![],
             on_drift: vec![OnDriftEntry {
@@ -383,7 +378,6 @@ autoSync: false
     #[test]
     fn validate_rejects_empty_conditions_ref() {
         let spec = AssetSpec {
-            tags: vec![],
             connection: None,
             upstreams: vec![],
             on_drift: vec![OnDriftEntry {
@@ -403,7 +397,6 @@ autoSync: false
     #[test]
     fn validate_rejects_empty_sync_ref() {
         let spec = AssetSpec {
-            tags: vec![],
             connection: None,
             upstreams: vec![],
             on_drift: vec![OnDriftEntry {

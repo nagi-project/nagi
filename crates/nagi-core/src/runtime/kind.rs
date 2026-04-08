@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -31,7 +33,32 @@ pub enum KindError {
 /// Common metadata shared by all resource kinds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Metadata {
+    /// Unique name of the resource.
     pub name: String,
+    /// Key-value pairs for filtering with `--select label:key` or `--select label:key=value`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+    /// Non-identifying metadata for descriptions, owner contacts, or other arbitrary information.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub annotations: BTreeMap<String, String>,
+}
+
+impl Metadata {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            labels: BTreeMap::new(),
+            annotations: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_labels(name: impl Into<String>, labels: BTreeMap<String, String>) -> Self {
+        Self {
+            name: name.into(),
+            labels,
+            annotations: BTreeMap::new(),
+        }
+    }
 }
 
 /// A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention.
@@ -278,11 +305,8 @@ spec: {{}}
         // Backslash tested via direct construction to avoid YAML escape issues.
         let resource = NagiKind::Asset {
             api_version: API_VERSION.to_string(),
-            metadata: Metadata {
-                name: "foo\\bar".to_string(),
-            },
+            metadata: Metadata::new("foo\\bar"),
             spec: AssetSpec {
-                tags: vec![],
                 connection: None,
                 upstreams: vec![],
                 on_drift: vec![],
@@ -301,11 +325,8 @@ spec: {{}}
         for (name, desc) in cases {
             let resource = NagiKind::Asset {
                 api_version: API_VERSION.to_string(),
-                metadata: Metadata {
-                    name: name.to_string(),
-                },
+                metadata: Metadata::new(name),
                 spec: AssetSpec {
-                    tags: vec![],
                     connection: None,
                     upstreams: vec![],
                     on_drift: vec![],

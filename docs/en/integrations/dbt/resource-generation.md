@@ -20,7 +20,7 @@ Generated Asset names are prefixed with the Origin name: `{origin}.{model}`. See
 
 A dbt source is converted to an Asset resource.
 
-From the Origin configuration, `connection` and `autoSync` are applied. `upstreams` and `tags` are not set.
+From the Origin configuration, `connection` and `autoSync` are applied. `upstreams` is not set. dbt source tags are converted to `metadata.labels` with the `dbt/` prefix.
 
 ```yaml
 apiVersion: nagi.io/v1alpha1
@@ -41,19 +41,21 @@ A dbt model is converted to an Asset resource.
 
 From the Origin configuration, `connection` and `autoSync` are applied.
 
-The dbt lineage (dependencies between dbt models and from dbt source to dbt model) is converted to `spec.upstreams`, and dbt model tags are converted to `spec.tags`.
+The dbt lineage (dependencies between dbt models and from dbt source to dbt model) is converted to `spec.upstreams`, and dbt model tags are converted to `metadata.labels` with the `dbt/` prefix.
 
 ```yaml
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   autoSync: true
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: dbt-tests-my-project.daily-sales
       sync: my-project-dbt-run
@@ -153,11 +155,13 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: dbt-tests-my-project.daily-sales
       sync: my-project-dbt-run
@@ -205,11 +209,13 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: freshness-daily-sales
       sync: my-project-dbt-run
@@ -240,11 +246,13 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: dbt-tests-my-project.daily-sales
       sync: my-project-dbt-run

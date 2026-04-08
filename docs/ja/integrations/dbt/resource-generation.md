@@ -20,7 +20,7 @@ Origin は dbt プロジェクトの `manifest.json` を読み取り、以下の
 
 dbt source は Asset リソースに変換されます。
 
-Origin の設定からは、 `connection`, `autoSync` が付与されます。`upstreams` と `tags` は設定されません。
+Origin の設定からは、`connection`, `autoSync` が付与されます。`upstreams` は設定されません。dbt source のタグは `dbt/` プレフィックス付きで `metadata.labels` に変換されます。
 
 ```yaml
 apiVersion: nagi.io/v1alpha1
@@ -41,19 +41,21 @@ dbt model は Asset リソースに変換されます。
 
 Origin の設定からは、`connection`, `autoSync` が付与されます。
 
-dbt のリネージ（dbt model 間の依存関係、dbt source → dbt model の依存関係）は `spec.upstreams` に、dbt model のタグは `spec.tags` に変換されます。
+dbt のリネージ（dbt model 間の依存関係、dbt source → dbt model の依存関係）は `spec.upstreams` に、dbt model のタグは `dbt/` プレフィックス付きで `metadata.labels` に変換されます。
 
 ```yaml
 apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   autoSync: true
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: dbt-tests-my-project.daily-sales
       sync: my-project-dbt-run
@@ -153,11 +155,13 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: dbt-tests-my-project.daily-sales
       sync: my-project-dbt-run
@@ -205,11 +209,13 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: freshness-daily-sales
       sync: my-project-dbt-run
@@ -240,11 +246,13 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
 spec:
   connection: my-bigquery
   upstreams:
     - my-project.raw-sales
-  tags: [finance, daily]
   onDrift:
     - conditions: dbt-tests-my-project.daily-sales
       sync: my-project-dbt-run

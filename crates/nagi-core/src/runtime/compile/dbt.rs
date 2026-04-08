@@ -83,12 +83,9 @@ mod tests {
 
     fn make_resolved_asset(name: &str) -> ResolvedAsset {
         ResolvedAsset {
-            metadata: Metadata {
-                name: name.to_string(),
-            },
+            metadata: Metadata::new(name),
             model_name: name.to_string(),
             spec: AssetSpec {
-                tags: vec![],
                 upstreams: vec![],
                 on_drift: vec![],
                 connection: None,
