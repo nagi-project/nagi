@@ -1,6 +1,6 @@
 pub mod dbt;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -55,8 +55,8 @@ pub struct DependencyGraph {
 pub struct GraphNode {
     pub name: String,
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -532,7 +532,7 @@ fn build_graph(assets: &[ResolvedAsset]) -> Result<DependencyGraph, CompileError
         nodes.push(GraphNode {
             name: asset.metadata.name.clone(),
             kind: "Asset".to_string(),
-            tags: asset.spec.tags.clone(),
+            labels: asset.metadata.labels.clone(),
         });
         for upstream in &asset.spec.upstreams {
             edges.push(GraphEdge {
@@ -614,8 +614,6 @@ struct CompiledAssetYaml<'a> {
 #[serde(rename_all = "camelCase")]
 struct CompiledAssetSpecYaml<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    tags: &'a Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     upstreams: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     on_drift: &'a Vec<ResolvedOnDriftEntry>,
@@ -642,8 +640,6 @@ pub struct CompiledAsset {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompiledAssetSpec {
-    #[serde(default)]
-    pub tags: Vec<String>,
     #[serde(default)]
     pub upstreams: Vec<String>,
     #[serde(default)]
@@ -677,7 +673,6 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
             kind: "Asset",
             metadata: &asset.metadata,
             spec: CompiledAssetSpecYaml {
-                tags: &asset.spec.tags,
                 upstreams: &asset.spec.upstreams,
                 on_drift: &asset.resolved_on_drift,
                 auto_sync: asset.spec.auto_sync,
@@ -865,12 +860,9 @@ spec:
         resolved_on_drift: Vec<ResolvedOnDriftEntry>,
     ) -> ResolvedAsset {
         ResolvedAsset {
-            metadata: Metadata {
-                name: name.to_string(),
-            },
+            metadata: Metadata::new(name),
             model_name: name.to_string(),
             spec: AssetSpec {
-                tags: vec![],
                 connection: None,
                 upstreams,
                 on_drift,
@@ -1345,8 +1337,9 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
+  labels:
+    dbt/finance: ''
 spec:
-  tags: [finance]
   onDrift:
     - conditions: daily-sla
       sync: dbt-run
@@ -1355,15 +1348,19 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
+  labels:
+    dbt/other: ''
 spec:
-  tags: [other]
   onDrift:
     - conditions: quality-checks
       sync: dbt-full",
         ]));
         let output = resolve(resources).unwrap();
         let asset = &output.assets[0];
-        assert_eq!(asset.spec.tags, vec!["finance".to_string()]);
+        assert_eq!(
+            asset.metadata.labels.get("dbt/finance"),
+            Some(&String::new())
+        );
         assert_eq!(asset.resolved_on_drift.len(), 2);
     }
 
@@ -1512,8 +1509,9 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
+  labels:
+    dbt/finance: ''
 spec:
-  tags: [finance]
   upstreams:
     - raw-sales",
         ]));
@@ -1526,7 +1524,7 @@ spec:
             .iter()
             .find(|n| n.name == "daily-sales")
             .unwrap();
-        assert_eq!(asset_node.tags, vec!["finance"]);
+        assert_eq!(asset_node.labels.get("dbt/finance"), Some(&String::new()));
 
         assert_eq!(output.graph.edges.len(), 1);
         assert_eq!(output.graph.edges[0].from, "raw-sales");

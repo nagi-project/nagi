@@ -74,7 +74,17 @@ fn value_to_display(v: &serde_json::Value) -> String {
             let items: Vec<String> = arr.iter().map(value_to_display).collect();
             items.join(", ")
         }
-        serde_json::Value::Object(_) => "...".to_string(),
+        serde_json::Value::Object(map) => {
+            let items: Vec<String> = map
+                .iter()
+                .map(|(k, v)| match v.as_str() {
+                    Some("") => k.clone(),
+                    Some(s) => format!("{k}={s}"),
+                    None => format!("{k}={}", value_to_display(v)),
+                })
+                .collect();
+            items.join(", ")
+        }
     }
 }
 
@@ -90,7 +100,7 @@ pub const STATUS_COLUMNS: &[(&str, &str)] = &[
 
 pub const LS_ASSET_COLUMNS: &[(&str, &str)] = &[
     ("NAME", "name"),
-    ("TAGS", "tags"),
+    ("LABELS", "labels"),
     ("UPSTREAMS", "upstreams"),
     ("AUTO SYNC", "autoSync"),
 ];
@@ -152,6 +162,8 @@ pub fn ls_to_text(json_str: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use serde_json::json;
 
@@ -172,15 +184,15 @@ mod tests {
     #[test]
     fn format_table_missing_key_shows_null() {
         let data = json!([{"name": "a"}]);
-        let result = format_table(&data, &[("NAME", "name"), ("TAGS", "tags")]).unwrap();
+        let result = format_table(&data, &[("NAME", "name"), ("LABELS", "labels")]).unwrap();
         assert!(result.contains("null"));
     }
 
     #[test]
-    fn format_table_array_value_joins_with_comma() {
-        let data = json!([{"name": "a", "tags": ["x", "y"]}]);
-        let result = format_table(&data, &[("NAME", "name"), ("TAGS", "tags")]).unwrap();
-        assert!(result.contains("x, y"));
+    fn format_table_object_value_shows_labels() {
+        let data = json!([{"name": "a", "labels": {"dbt/x": "", "dbt/y": ""}}]);
+        let result = format_table(&data, &[("NAME", "name"), ("LABELS", "labels")]).unwrap();
+        assert!(result.contains("dbt/x, dbt/y"));
     }
 
     #[test]
@@ -208,7 +220,7 @@ mod tests {
 
     #[test]
     fn value_to_display_object() {
-        assert_eq!(value_to_display(&json!({"key": "val"})), "...");
+        assert_eq!(value_to_display(&json!({"key": "val"})), "key=val");
     }
 
     #[test]
@@ -227,7 +239,7 @@ mod tests {
     #[test]
     fn ls_to_text_renders_sections() {
         let json_str = json!({
-            "assets": [{"name": "daily-sales", "tags": ["finance"], "upstreams": [], "autoSync": true}],
+            "assets": [{"name": "daily-sales", "labels": {"dbt/finance": ""}, "upstreams": [], "autoSync": true}],
             "connections": [{"name": "my-bq"}],
             "conditions": [],
             "syncs": [],
@@ -325,7 +337,10 @@ mod tests {
         let output = LsOutput {
             assets: vec![LsAsset {
                 name: "daily-sales".to_string(),
-                tags: vec!["finance".to_string(), "daily".to_string()],
+                labels: BTreeMap::from([
+                    ("dbt/finance".to_string(), String::new()),
+                    ("dbt/daily".to_string(), String::new()),
+                ]),
                 upstreams: vec!["raw-sales".to_string()],
                 auto_sync: true,
                 on_drift: vec![LsOnDriftEntry {
@@ -342,7 +357,7 @@ mod tests {
         let json_str = serde_json::to_string(&output).unwrap();
         let text = ls_to_text(&json_str).unwrap();
         assert!(text.contains("daily-sales"));
-        assert!(text.contains("finance, daily"));
+        assert!(text.contains("dbt/daily, dbt/finance"));
         assert!(text.contains("raw-sales"));
         assert!(text.contains("true"));
         assert!(text.contains("my-bq"));

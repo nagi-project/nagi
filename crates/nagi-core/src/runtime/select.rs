@@ -22,8 +22,9 @@ pub enum SelectError {
 /// - `+name+`     — name + ancestors + descendants
 /// - `N+name`     — name + N levels upstream
 /// - `name+N`     — name + N levels downstream
-/// - `tag:value`  — all nodes with the given tag
-/// - `+tag:value` — tag match + all ancestors
+/// - `label:key=value` — all nodes with the given label key-value pair
+/// - `label:key`        — all nodes that have the given label key (any value)
+/// - `+label:key`       — label match + all ancestors
 ///
 /// Multiple selectors separated by spaces are combined as union (OR).
 /// Assets matching any exclude selector are removed from the result.
@@ -198,21 +199,32 @@ fn intersect_patterns(graph: &DependencyGraph, pattern: &str) -> Result<Vec<Stri
 }
 
 fn resolve_pattern(graph: &DependencyGraph, pattern: &str) -> Result<Vec<String>, SelectError> {
-    if let Some(tag) = pattern.strip_prefix("tag:") {
-        if tag.is_empty() {
+    if let Some(label_expr) = pattern.strip_prefix("label:") {
+        if label_expr.is_empty() {
             return Err(SelectError::InvalidSelector {
-                message: "tag value must not be empty".to_string(),
+                message: "label selector must not be empty".to_string(),
             });
         }
-        let matched: Vec<String> = graph
-            .nodes
-            .iter()
-            .filter(|n| n.tags.contains(&tag.to_string()))
-            .map(|n| n.name.clone())
-            .collect();
+        let matched: Vec<String> = if let Some((key, value)) = label_expr.split_once('=') {
+            // Equality match: label:key=value
+            graph
+                .nodes
+                .iter()
+                .filter(|n| n.labels.get(key).is_some_and(|v| v == value))
+                .map(|n| n.name.clone())
+                .collect()
+        } else {
+            // Existence check: label:key
+            graph
+                .nodes
+                .iter()
+                .filter(|n| n.labels.contains_key(label_expr))
+                .map(|n| n.name.clone())
+                .collect()
+        };
         if matched.is_empty() {
             return Err(SelectError::NotFound {
-                name: format!("tag:{tag}"),
+                name: format!("label:{label_expr}"),
             });
         }
         Ok(matched)
@@ -277,8 +289,17 @@ fn traverse(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::runtime::compile::{GraphEdge, GraphNode};
+
+    fn labels(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
 
     // raw-sales → daily-sales → monthly-report
     // raw-logs  → access-stats
@@ -288,27 +309,27 @@ mod tests {
                 GraphNode {
                     name: "raw-sales".to_string(),
                     kind: "Asset".to_string(),
-                    tags: vec![],
+                    labels: BTreeMap::new(),
                 },
                 GraphNode {
                     name: "daily-sales".to_string(),
                     kind: "Asset".to_string(),
-                    tags: vec!["finance".to_string(), "daily".to_string()],
+                    labels: labels(&[("dbt/finance", ""), ("dbt/daily", "")]),
                 },
                 GraphNode {
                     name: "monthly-report".to_string(),
                     kind: "Asset".to_string(),
-                    tags: vec!["finance".to_string()],
+                    labels: labels(&[("dbt/finance", "")]),
                 },
                 GraphNode {
                     name: "raw-logs".to_string(),
                     kind: "Asset".to_string(),
-                    tags: vec![],
+                    labels: BTreeMap::new(),
                 },
                 GraphNode {
                     name: "access-stats".to_string(),
                     kind: "Asset".to_string(),
-                    tags: vec!["ops".to_string()],
+                    labels: labels(&[("dbt/ops", "")]),
                 },
             ],
             edges: vec![
@@ -345,10 +366,10 @@ mod tests {
         upstream: ["+daily-sales"] => vec!["daily-sales", "raw-sales"];
         downstream: ["daily-sales+"] => vec!["daily-sales", "monthly-report"];
         upstream_and_downstream: ["+daily-sales+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
-        tag_selector: ["tag:finance"] => vec!["daily-sales", "monthly-report"];
-        tag_with_upstream: ["+tag:finance"] => vec!["daily-sales", "monthly-report", "raw-sales"];
-        tag_with_downstream: ["tag:finance+"] => vec!["daily-sales", "monthly-report"];
-        tag_with_upstream_and_downstream: ["+tag:finance+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        label_selector: ["label:dbt/finance"] => vec!["daily-sales", "monthly-report"];
+        label_with_upstream: ["+label:dbt/finance"] => vec!["daily-sales", "monthly-report", "raw-sales"];
+        label_with_downstream: ["label:dbt/finance+"] => vec!["daily-sales", "monthly-report"];
+        label_with_upstream_and_downstream: ["+label:dbt/finance+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
         multiple_selectors_union: ["daily-sales", "access-stats"] => vec!["access-stats", "daily-sales"];
         source_with_downstream: ["raw-sales+"] => vec!["daily-sales", "monthly-report", "raw-sales"];
         upstream_on_leaf_node: ["+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
@@ -358,9 +379,10 @@ mod tests {
         depth_1_downstream: ["raw-sales+1"] => vec!["daily-sales", "raw-sales"];
         depth_2_upstream: ["2+monthly-report"] => vec!["daily-sales", "monthly-report", "raw-sales"];
         depth_0_upstream: ["0+monthly-report"] => vec!["monthly-report"];
-        and_two_tags: ["tag:finance,tag:daily"] => vec!["daily-sales"];
-        and_tag_with_upstream: ["+tag:finance,tag:daily"] => vec!["daily-sales", "raw-sales"];
-        and_union_combined: ["tag:finance,tag:daily", "access-stats"] => vec!["access-stats", "daily-sales"];
+        and_two_labels: ["label:dbt/finance,label:dbt/daily"] => vec!["daily-sales"];
+        and_label_with_upstream: ["+label:dbt/finance,label:dbt/daily"] => vec!["daily-sales", "raw-sales"];
+        and_union_combined: ["label:dbt/finance,label:dbt/daily", "access-stats"] => vec!["access-stats", "daily-sales"];
+        label_equality: ["label:dbt/finance="] => vec!["daily-sales", "monthly-report"];
     }
 
     macro_rules! exclude_ok {
@@ -376,9 +398,9 @@ mod tests {
     }
 
     exclude_ok! {
-        exclude_single: selectors=["tag:finance"], excludes=["monthly-report"] => vec!["daily-sales"];
-        exclude_by_tag: selectors=["tag:finance"], excludes=["tag:daily"] => vec!["monthly-report"];
-        exclude_all: selectors=["tag:finance"], excludes=["tag:finance"] => Vec::<String>::new();
+        exclude_single: selectors=["label:dbt/finance"], excludes=["monthly-report"] => vec!["daily-sales"];
+        exclude_by_label: selectors=["label:dbt/finance"], excludes=["label:dbt/daily"] => vec!["monthly-report"];
+        exclude_all: selectors=["label:dbt/finance"], excludes=["label:dbt/finance"] => Vec::<String>::new();
         exclude_with_upstream: selectors=["+monthly-report"], excludes=["raw-sales"] => vec!["daily-sales", "monthly-report"];
     }
 
@@ -398,7 +420,7 @@ mod tests {
 
     select_not_found! {
         not_found: ["nonexistent"];
-        tag_not_found: ["tag:nonexistent"];
+        label_not_found: ["label:nonexistent"];
     }
 
     macro_rules! select_invalid {
@@ -418,9 +440,9 @@ mod tests {
     select_invalid! {
         empty_selector: [""];
         plus_only: ["+"];
-        empty_tag_value: ["tag:"];
+        empty_label_value: ["label:"];
         double_plus: ["++"];
-        empty_comma_part: ["tag:finance,"];
+        empty_comma_part: ["label:dbt/finance,"];
     }
 
     // ── union_selectors ──────────────────────────────────────────────────
@@ -469,7 +491,7 @@ mod tests {
             "monthly-report".to_string(),
             "access-stats".to_string(),
         ]);
-        exclude_selectors(&test_graph(), &mut set, &["tag:finance"]).unwrap();
+        exclude_selectors(&test_graph(), &mut set, &["label:dbt/finance"]).unwrap();
         assert_eq!(set, HashSet::from(["access-stats".to_string()]));
     }
 
@@ -517,16 +539,16 @@ mod tests {
     }
 
     intersect_patterns_test! {
-        intersect_single_tag: "tag:finance" => vec!["daily-sales", "monthly-report"];
+        intersect_single_label: "label:dbt/finance" => vec!["daily-sales", "monthly-report"];
         intersect_single_name: "daily-sales" => vec!["daily-sales"];
-        intersect_two_tags: "tag:finance,tag:daily" => vec!["daily-sales"];
-        intersect_disjoint_tags: "tag:finance,tag:ops" => Vec::<String>::new();
+        intersect_two_labels: "label:dbt/finance,label:dbt/daily" => vec!["daily-sales"];
+        intersect_disjoint_labels: "label:dbt/finance,label:dbt/ops" => Vec::<String>::new();
     }
 
     #[test]
     fn intersect_patterns_empty_part_is_error() {
         assert!(matches!(
-            intersect_patterns(&test_graph(), "tag:finance,"),
+            intersect_patterns(&test_graph(), "label:dbt/finance,"),
             Err(SelectError::InvalidSelector { .. })
         ));
     }
@@ -534,7 +556,7 @@ mod tests {
     #[test]
     fn intersect_patterns_not_found() {
         assert!(matches!(
-            intersect_patterns(&test_graph(), "tag:finance,tag:nonexistent"),
+            intersect_patterns(&test_graph(), "label:dbt/finance,label:nonexistent"),
             Err(SelectError::NotFound { .. })
         ));
     }

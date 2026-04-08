@@ -764,11 +764,8 @@ mod tests {
     fn make_asset(name: &str) -> NagiKind {
         NagiKind::Asset {
             api_version: "nagi.io/v1alpha1".to_string(),
-            metadata: crate::runtime::kind::Metadata {
-                name: name.to_string(),
-            },
+            metadata: crate::runtime::kind::Metadata::new(name),
             spec: crate::runtime::kind::asset::AssetSpec {
-                tags: vec![],
                 connection: None,
                 upstreams: vec![],
                 on_drift: vec![],
@@ -782,9 +779,7 @@ mod tests {
     fn make_sync(name: &str) -> NagiKind {
         NagiKind::Sync {
             api_version: "nagi.io/v1alpha1".to_string(),
-            metadata: crate::runtime::kind::Metadata {
-                name: name.to_string(),
-            },
+            metadata: crate::runtime::kind::Metadata::new(name),
             spec: crate::runtime::kind::sync::SyncSpec {
                 pre: None,
                 run: crate::runtime::kind::sync::SyncStep {
@@ -802,11 +797,8 @@ mod tests {
     fn make_asset_with_upstreams(name: &str, upstreams: &[&str]) -> NagiKind {
         NagiKind::Asset {
             api_version: "nagi.io/v1alpha1".to_string(),
-            metadata: crate::runtime::kind::Metadata {
-                name: name.to_string(),
-            },
+            metadata: crate::runtime::kind::Metadata::new(name),
             spec: crate::runtime::kind::asset::AssetSpec {
-                tags: vec![],
                 connection: None,
                 upstreams: upstreams.iter().map(|s| s.to_string()).collect(),
                 on_drift: vec![],
