@@ -1,0 +1,740 @@
+{
+  "$defs": {
+    "AssetSpec": {
+      "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.\n`on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
+      "properties": {
+        "autoSync": {
+          "default": true,
+          "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
+          "type": "boolean"
+        },
+        "connection": {
+          "default": null,
+          "description": "Name of the Connection resource for DB access.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evaluateCacheTtl": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default evaluate cache TTL for all conditions in this Asset.\nConditions can override this with their own `evaluateCacheTtl`."
+        },
+        "onDrift": {
+          "default": [],
+          "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift\ndetermines which sync to run. When omitted, the Asset is always Ready.",
+          "items": {
+            "$ref": "#/$defs/OnDriftEntry"
+          },
+          "type": "array"
+        },
+        "tags": {
+          "default": [],
+          "description": "Tags for filtering with `--select tag:X`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "upstreams": {
+          "default": [],
+          "description": "Names of upstream Asset resources.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ConditionsSpec": {
+      "description": "Spec for `kind: Conditions`. A reusable set of conditions referenced from Asset `onDrift` entries.",
+      "items": {
+        "$ref": "#/$defs/DesiredCondition"
+      },
+      "type": "array"
+    },
+    "ConnectionSpec": {
+      "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Assets.",
+      "oneOf": [
+        {
+          "description": "Connection resolved via dbt profiles.yml.",
+          "properties": {
+            "dbtCloud": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DbtCloudSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional dbt Cloud configuration for running-job checks before sync."
+            },
+            "profile": {
+              "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
+              "type": "string"
+            },
+            "profilesDir": {
+              "description": "Directory containing profiles.yml. If omitted, uses `~/.dbt/`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "description": "If omitted, the default target in profiles.yml is used.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "dbt",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "profile"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "BigQuery REST API connection.",
+          "properties": {
+            "dataset": {
+              "description": "BigQuery dataset name.",
+              "type": "string"
+            },
+            "executionProject": {
+              "description": "GCP project ID used for query execution billing. Defaults to `project` if omitted.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "keyfile": {
+              "description": "Path to the service account JSON key file. Required when `method` is `service-account`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "method": {
+              "description": "Authentication method. `oauth` (Application Default Credentials) or `service-account`. Defaults to `oauth`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "project": {
+              "description": "GCP project ID that contains the dataset.",
+              "type": "string"
+            },
+            "timeoutSeconds": {
+              "description": "Query timeout in seconds.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "bigquery",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "project",
+            "dataset"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "DuckDB connection via the `duckdb` CLI.",
+          "properties": {
+            "path": {
+              "description": "Path to the DuckDB database file.",
+              "type": "string"
+            },
+            "type": {
+              "const": "duckdb",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Snowflake SQL REST API connection with Key-Pair JWT authentication.",
+          "properties": {
+            "account": {
+              "description": "Snowflake account identifier (e.g. `myorg-myaccount`).",
+              "type": "string"
+            },
+            "database": {
+              "description": "Database name.",
+              "type": "string"
+            },
+            "privateKeyPath": {
+              "description": "Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.",
+              "type": "string"
+            },
+            "role": {
+              "description": "Role to use for the session. Uses the user's default role if omitted.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "schema": {
+              "description": "Schema name.",
+              "type": "string"
+            },
+            "type": {
+              "const": "snowflake",
+              "type": "string"
+            },
+            "user": {
+              "description": "Snowflake login user name.",
+              "type": "string"
+            },
+            "warehouse": {
+              "description": "Warehouse name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "account",
+            "user",
+            "database",
+            "schema",
+            "warehouse",
+            "privateKeyPath"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CronSchedule": {
+      "description": "A cron expression in standard 5-field format (e.g. \"0 3 * * *\").",
+      "format": "cron",
+      "type": "string"
+    },
+    "DbtCloudSpec": {
+      "description": "dbt Cloud configuration for pre-sync running-job checks.",
+      "properties": {
+        "credentialsFile": {
+          "description": "Path to the dbt Cloud credentials file. Defaults to `~/.dbt/dbt_cloud.yml`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DefaultSync": {
+      "description": "Override for the auto-generated Sync. Same interface as `onDrift` entries (sync name + with).",
+      "properties": {
+        "sync": {
+          "description": "Name of the user-defined Sync resource to use instead of the auto-generated one.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync and Conditions resources for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "sync"
+      ],
+      "type": "object"
+    },
+    "DesiredCondition": {
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied.\nEach condition carries a `name` that is unique within the Asset (after Conditions expansion)\nand used as a key in execution logs.",
+      "oneOf": [
+        {
+          "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
+          "properties": {
+            "checkAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CronSchedule"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cron expression for additional evaluation at a specific time."
+            },
+            "column": {
+              "description": "If omitted, freshness is determined from table metadata instead of a column value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
+            "interval": {
+              "$ref": "#/$defs/Duration",
+              "description": "Polling interval for re-evaluating this condition."
+            },
+            "maxAge": {
+              "$ref": "#/$defs/Duration",
+              "description": "Maximum acceptable age of the data before the condition becomes Not Ready."
+            },
+            "name": {
+              "description": "Unique identifier for this condition within the Asset.",
+              "type": "string"
+            },
+            "type": {
+              "const": "Freshness",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "maxAge",
+            "interval"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Query must return a scalar boolean. Ready when the result is true.",
+          "properties": {
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
+            },
+            "name": {
+              "description": "Unique identifier for this condition within the Asset.",
+              "type": "string"
+            },
+            "query": {
+              "description": "SQL query that must return a scalar boolean.",
+              "type": "string"
+            },
+            "type": {
+              "const": "SQL",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "query"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Runs an external command. Ready when the process exits with code 0.\n`run` is argv: the first element is the program, the rest are arguments.",
+          "properties": {
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "Environment variables to set for the subprocess.",
+              "type": "object"
+            },
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
+            },
+            "name": {
+              "description": "Unique identifier for this condition within the Asset.",
+              "type": "string"
+            },
+            "run": {
+              "description": "Command and arguments in argv format.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "Command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "run"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
+    "MergePosition": {
+      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries\nduring Asset overlay merge.",
+      "enum": [
+        "beforeOrigin",
+        "afterOrigin"
+      ],
+      "type": "string"
+    },
+    "Metadata": {
+      "description": "Common metadata shared by all resource kinds.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "OnDriftEntry": {
+      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.\nThe conditions are evaluated as a group (all must pass for no drift).",
+      "properties": {
+        "conditions": {
+          "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
+          "type": "string"
+        },
+        "mergePosition": {
+          "$ref": "#/$defs/MergePosition",
+          "default": "beforeOrigin",
+          "description": "Controls insertion position during overlay merge. Not included in compiled output."
+        },
+        "sync": {
+          "description": "Name of the Sync resource to execute when drift is detected.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync and Conditions resources for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "conditions",
+        "sync"
+      ],
+      "type": "object"
+    },
+    "OriginSpec": {
+      "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
+      "oneOf": [
+        {
+          "properties": {
+            "autoSync": {
+              "default": null,
+              "description": "Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "connection": {
+              "description": "Connection resource name for auto-generated Assets.",
+              "type": "string"
+            },
+            "defaultSync": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DefaultSync"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "User-defined Sync to override the auto-generated `nagi-dbt-run`."
+            },
+            "projectDir": {
+              "description": "Local path to the dbt project directory (relative or absolute).",
+              "type": "string"
+            },
+            "type": {
+              "const": "DBT",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "connection",
+            "projectDir"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StepType": {
+      "description": "Currently only `Command` (subprocess execution) is supported.",
+      "enum": [
+        "Command"
+      ],
+      "type": "string"
+    },
+    "SyncSpec": {
+      "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps.\nReusable across multiple Assets via `ref`.",
+      "properties": {
+        "post": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyncStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional step executed after the main sync command."
+        },
+        "pre": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyncStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional step executed before the main sync command."
+        },
+        "run": {
+          "$ref": "#/$defs/SyncStep",
+          "description": "The main convergence step."
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "type": "object"
+    },
+    "SyncStep": {
+      "properties": {
+        "args": {
+          "description": "Command and arguments in argv format.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables to set for the subprocess.",
+          "type": "object"
+        },
+        "type": {
+          "$ref": "#/$defs/StepType",
+          "description": "Execution type for this step (currently only `Command`)."
+        }
+      },
+      "required": [
+        "type",
+        "args"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A Nagi resource. Dispatched by the `kind` field in YAML, following the Kubernetes CRD convention.\nIncludes `apiVersion` to ensure the same YAML works in CLI, `nagi serve`, and future k8s environments.",
+  "oneOf": [
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Connection",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/ConnectionSpec"
+        }
+      },
+      "required": [
+        "kind",
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Asset",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/AssetSpec"
+        }
+      },
+      "required": [
+        "kind",
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Conditions",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/ConditionsSpec"
+        }
+      },
+      "required": [
+        "kind",
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Sync",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/SyncSpec"
+        }
+      },
+      "required": [
+        "kind",
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Origin",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/OriginSpec"
+        }
+      },
+      "required": [
+        "kind",
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "NagiKind"
+}

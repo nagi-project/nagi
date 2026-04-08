@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A sync log entry as read from SQLite.",
+  "properties": {
+    "assetName": {
+      "description": "Name of the Asset that was synced.",
+      "type": "string"
+    },
+    "date": {
+      "description": "Date partition key (YYYY-MM-DD) derived from `started_at`.",
+      "type": "string"
+    },
+    "executionId": {
+      "description": "Unique identifier for this sync execution.",
+      "type": "string"
+    },
+    "exitCode": {
+      "description": "Process exit code of the stage command. None for non-execution stages (e.g. lock_retry).",
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "finishedAt": {
+      "description": "RFC 3339 timestamp when the stage finished.",
+      "type": "string"
+    },
+    "stage": {
+      "description": "Pipeline stage (e.g. `pre`, `run`, `post`).",
+      "type": "string"
+    },
+    "startedAt": {
+      "description": "RFC 3339 timestamp when the stage started.",
+      "type": "string"
+    },
+    "stderrPath": {
+      "description": "File path where stderr output is stored. None for non-execution stages.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stdoutPath": {
+      "description": "File path where stdout output is stored. None for non-execution stages.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "syncType": {
+      "description": "Whether this was a `sync` operation.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "executionId",
+    "stage",
+    "assetName",
+    "syncType",
+    "startedAt",
+    "finishedAt",
+    "date"
+  ],
+  "title": "SyncLogEntry",
+  "type": "object"
+}

@@ -1,0 +1,103 @@
+{
+  "$defs": {
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
+    "MergePosition": {
+      "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries\nduring Asset overlay merge.",
+      "enum": [
+        "beforeOrigin",
+        "afterOrigin"
+      ],
+      "type": "string"
+    },
+    "OnDriftEntry": {
+      "description": "An entry in `on_drift`. Pairs a Conditions reference with a Sync reference.\nThe conditions are evaluated as a group (all must pass for no drift).",
+      "properties": {
+        "conditions": {
+          "description": "Name of the `kind: Conditions` resource whose conditions define drift.",
+          "type": "string"
+        },
+        "mergePosition": {
+          "$ref": "#/$defs/MergePosition",
+          "default": "beforeOrigin",
+          "description": "Controls insertion position during overlay merge. Not included in compiled output."
+        },
+        "sync": {
+          "description": "Name of the Sync resource to execute when drift is detected.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync and Conditions resources for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "conditions",
+        "sync"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Spec for `kind: Asset`. The core resource: declares desired state and convergence operations.\n`on_drift` pairs conditions with sync operations. Entries are evaluated in order (first-match).",
+  "properties": {
+    "autoSync": {
+      "default": true,
+      "description": "Controls automatic sync execution in `nagi serve`. Defaults to `true`.",
+      "type": "boolean"
+    },
+    "connection": {
+      "default": null,
+      "description": "Name of the Connection resource for DB access.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evaluateCacheTtl": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Default evaluate cache TTL for all conditions in this Asset.\nConditions can override this with their own `evaluateCacheTtl`."
+    },
+    "onDrift": {
+      "default": [],
+      "description": "Condition-sync pairs evaluated in order. First entry whose conditions detect drift\ndetermines which sync to run. When omitted, the Asset is always Ready.",
+      "items": {
+        "$ref": "#/$defs/OnDriftEntry"
+      },
+      "type": "array"
+    },
+    "tags": {
+      "default": [],
+      "description": "Tags for filtering with `--select tag:X`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "upstreams": {
+      "default": [],
+      "description": "Names of upstream Asset resources.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": "AssetSpec",
+  "type": "object"
+}

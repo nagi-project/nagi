@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "CronSchedule": {
+      "description": "A cron expression in standard 5-field format (e.g. \"0 3 * * *\").",
+      "format": "cron",
+      "type": "string"
+    },
+    "DesiredCondition": {
+      "description": "A single desired state condition. The Asset is Ready only when all conditions are satisfied.\nEach condition carries a `name` that is unique within the Asset (after Conditions expansion)\nand used as a key in execution logs.",
+      "oneOf": [
+        {
+          "description": "Can transition to Not Ready as time passes beyond `maxAge`.",
+          "properties": {
+            "checkAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CronSchedule"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cron expression for additional evaluation at a specific time."
+            },
+            "column": {
+              "description": "If omitted, freshness is determined from table metadata instead of a column value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
+            "interval": {
+              "$ref": "#/$defs/Duration",
+              "description": "Polling interval for re-evaluating this condition."
+            },
+            "maxAge": {
+              "$ref": "#/$defs/Duration",
+              "description": "Maximum acceptable age of the data before the condition becomes Not Ready."
+            },
+            "name": {
+              "description": "Unique identifier for this condition within the Asset.",
+              "type": "string"
+            },
+            "type": {
+              "const": "Freshness",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "maxAge",
+            "interval"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Query must return a scalar boolean. Ready when the result is true.",
+          "properties": {
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
+            },
+            "name": {
+              "description": "Unique identifier for this condition within the Asset.",
+              "type": "string"
+            },
+            "query": {
+              "description": "SQL query that must return a scalar boolean.",
+              "type": "string"
+            },
+            "type": {
+              "const": "SQL",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "query"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Runs an external command. Ready when the process exits with code 0.\n`run` is argv: the first element is the program, the rest are arguments.",
+          "properties": {
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "Environment variables to set for the subprocess.",
+              "type": "object"
+            },
+            "evaluateCacheTtl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
+            },
+            "interval": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional polling interval. If omitted, only evaluated on upstream state change or after sync."
+            },
+            "name": {
+              "description": "Unique identifier for this condition within the Asset.",
+              "type": "string"
+            },
+            "run": {
+              "description": "Command and arguments in argv format.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "Command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "run"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Spec for `kind: Conditions`. A reusable set of conditions referenced from Asset `onDrift` entries.",
+  "items": {
+    "$ref": "#/$defs/DesiredCondition"
+  },
+  "title": "ConditionsSpec",
+  "type": "array"
+}

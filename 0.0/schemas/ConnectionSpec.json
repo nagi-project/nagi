@@ -1,0 +1,186 @@
+{
+  "$defs": {
+    "DbtCloudSpec": {
+      "description": "dbt Cloud configuration for pre-sync running-job checks.",
+      "properties": {
+        "credentialsFile": {
+          "description": "Path to the dbt Cloud credentials file. Defaults to `~/.dbt/dbt_cloud.yml`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Spec for `kind: Connection`. Holds external data connection info referenced by Assets.",
+  "oneOf": [
+    {
+      "description": "Connection resolved via dbt profiles.yml.",
+      "properties": {
+        "dbtCloud": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbtCloudSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional dbt Cloud configuration for running-job checks before sync."
+        },
+        "profile": {
+          "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
+          "type": "string"
+        },
+        "profilesDir": {
+          "description": "Directory containing profiles.yml. If omitted, uses `~/.dbt/`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "If omitted, the default target in profiles.yml is used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "dbt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "profile"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "BigQuery REST API connection.",
+      "properties": {
+        "dataset": {
+          "description": "BigQuery dataset name.",
+          "type": "string"
+        },
+        "executionProject": {
+          "description": "GCP project ID used for query execution billing. Defaults to `project` if omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyfile": {
+          "description": "Path to the service account JSON key file. Required when `method` is `service-account`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "description": "Authentication method. `oauth` (Application Default Credentials) or `service-account`. Defaults to `oauth`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "GCP project ID that contains the dataset.",
+          "type": "string"
+        },
+        "timeoutSeconds": {
+          "description": "Query timeout in seconds.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "bigquery",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "project",
+        "dataset"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "DuckDB connection via the `duckdb` CLI.",
+      "properties": {
+        "path": {
+          "description": "Path to the DuckDB database file.",
+          "type": "string"
+        },
+        "type": {
+          "const": "duckdb",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Snowflake SQL REST API connection with Key-Pair JWT authentication.",
+      "properties": {
+        "account": {
+          "description": "Snowflake account identifier (e.g. `myorg-myaccount`).",
+          "type": "string"
+        },
+        "database": {
+          "description": "Database name.",
+          "type": "string"
+        },
+        "privateKeyPath": {
+          "description": "Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.",
+          "type": "string"
+        },
+        "role": {
+          "description": "Role to use for the session. Uses the user's default role if omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schema": {
+          "description": "Schema name.",
+          "type": "string"
+        },
+        "type": {
+          "const": "snowflake",
+          "type": "string"
+        },
+        "user": {
+          "description": "Snowflake login user name.",
+          "type": "string"
+        },
+        "warehouse": {
+          "description": "Warehouse name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "account",
+        "user",
+        "database",
+        "schema",
+        "warehouse",
+        "privateKeyPath"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ConnectionSpec"
+}

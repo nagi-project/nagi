@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Lock metadata written to the lock file. Shared across local and remote backends.",
+  "properties": {
+    "acquired_at_epoch_secs": {
+      "description": "Unix epoch seconds when the lock was acquired.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "execution_id": {
+      "description": "Execution ID of the sync run that acquired the lock.\nCorrelates with the execution_id in sync logs.",
+      "type": "string"
+    },
+    "ttl_secs": {
+      "description": "Time-to-live in seconds; the lock expires after this duration.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "execution_id",
+    "acquired_at_epoch_secs",
+    "ttl_secs"
+  ],
+  "title": "LockInfo",
+  "type": "object"
+}

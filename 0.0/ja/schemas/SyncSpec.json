@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "StepType": {
+      "description": "Currently only `Command` (subprocess execution) is supported.",
+      "enum": [
+        "Command"
+      ],
+      "type": "string"
+    },
+    "SyncStep": {
+      "properties": {
+        "args": {
+          "description": "Command and arguments in argv format.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables to set for the subprocess.",
+          "type": "object"
+        },
+        "type": {
+          "$ref": "#/$defs/StepType",
+          "description": "Execution type for this step (currently only `Command`)."
+        }
+      },
+      "required": [
+        "type",
+        "args"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps.\nReusable across multiple Assets via `ref`.",
+  "properties": {
+    "post": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncStep"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional step executed after the main sync command."
+    },
+    "pre": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncStep"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional step executed before the main sync command."
+    },
+    "run": {
+      "$ref": "#/$defs/SyncStep",
+      "description": "The main convergence step."
+    }
+  },
+  "required": [
+    "run"
+  ],
+  "title": "SyncSpec",
+  "type": "object"
+}

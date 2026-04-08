@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "ConditionResult": {
+      "properties": {
+        "conditionName": {
+          "description": "Name of the evaluated condition.",
+          "type": "string"
+        },
+        "conditionType": {
+          "description": "Type discriminator of the condition (e.g. `Freshness`, `SQL`, `Command`).",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ConditionStatus",
+          "description": "Evaluation outcome for this condition."
+        }
+      },
+      "required": [
+        "conditionName",
+        "conditionType",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ConditionStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "const": "ready",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "description": "Human-readable explanation of why the condition is not satisfied.",
+              "type": "string"
+            },
+            "state": {
+              "const": "drifted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "assetName": {
+      "description": "Name of the evaluated Asset resource.",
+      "type": "string"
+    },
+    "conditions": {
+      "description": "Per-condition evaluation results.",
+      "items": {
+        "$ref": "#/$defs/ConditionResult"
+      },
+      "type": "array"
+    },
+    "evaluationId": {
+      "description": "Set when the result was logged via `LogStore`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ready": {
+      "description": "true when all conditions are Ready.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "assetName",
+    "ready",
+    "conditions"
+  ],
+  "title": "AssetEvalResult",
+  "type": "object"
+}

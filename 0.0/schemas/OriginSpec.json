@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "DefaultSync": {
+      "description": "Override for the auto-generated Sync. Same interface as `onDrift` entries (sync name + with).",
+      "properties": {
+        "sync": {
+          "description": "Name of the user-defined Sync resource to use instead of the auto-generated one.",
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Template variables passed to the Sync and Conditions resources for argument interpolation.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "sync"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Spec for `kind: Origin`. References an external project (e.g. dbt) to auto-generate Assets.",
+  "oneOf": [
+    {
+      "properties": {
+        "autoSync": {
+          "default": null,
+          "description": "Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "connection": {
+          "description": "Connection resource name for auto-generated Assets.",
+          "type": "string"
+        },
+        "defaultSync": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "User-defined Sync to override the auto-generated `nagi-dbt-run`."
+        },
+        "projectDir": {
+          "description": "Local path to the dbt project directory (relative or absolute).",
+          "type": "string"
+        },
+        "type": {
+          "const": "DBT",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "connection",
+        "projectDir"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "OriginSpec"
+}

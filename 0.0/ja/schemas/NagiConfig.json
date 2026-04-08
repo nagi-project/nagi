@@ -1,0 +1,192 @@
+{
+  "$defs": {
+    "BackendConfig": {
+      "properties": {
+        "bucket": {
+          "description": "Bucket name for GCS or S3 backend. Required when type is `gcs` or `s3`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prefix": {
+          "description": "Path prefix for remote storage (e.g. `my-project/nagi`). When set, all\nremote paths are prefixed with this value. Ignored for the local backend.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "region": {
+          "description": "AWS region for S3 backend (e.g. `us-east-1`). Required when type is `s3`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "default": "local",
+          "description": "Backend type identifier. One of `local`, `gcs`, `s3`. Defaults to `local`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
+    "ExportConfig": {
+      "description": "Configuration for exporting logs to a remote data warehouse.",
+      "properties": {
+        "connection": {
+          "description": "Reference to a `kind: Connection` resource name.",
+          "type": "string"
+        },
+        "dataset": {
+          "description": "Data warehouse dataset (BigQuery) or schema (Snowflake) to export into.",
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/$defs/ExportFormat",
+          "description": "Intermediate file format for export."
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "30m",
+          "description": "Condition evaluation interval and export throttling threshold."
+        }
+      },
+      "required": [
+        "connection",
+        "dataset"
+      ],
+      "type": "object"
+    },
+    "ExportFormat": {
+      "description": "Export format for log data.",
+      "enum": [
+        "jsonl",
+        "duckdb"
+      ],
+      "type": "string"
+    },
+    "NagiDir": {
+      "description": "Newtype wrapper around the Nagi state directory path.\nProvides accessors for all well-known subdirectories.\n\nDeserializes from a plain string path (e.g. `\"~/.nagi\"` in YAML).",
+      "type": "string"
+    },
+    "NotifyConfig": {
+      "properties": {
+        "slack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlackConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Slack notification settings. When set, notifications are sent to the specified channel."
+        }
+      },
+      "type": "object"
+    },
+    "SlackConfig": {
+      "properties": {
+        "channel": {
+          "description": "Slack channel to send notifications to (e.g. `#nagi-alerts`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "backend": {
+      "$ref": "#/$defs/BackendConfig",
+      "description": "State storage backend configuration."
+    },
+    "export": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExportConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Log export configuration. When set, compile generates export Assets\nand logs are transferred to the remote data warehouse."
+    },
+    "lockRetryIntervalSeconds": {
+      "default": 900,
+      "description": "Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "lockRetryMaxAttempts": {
+      "default": 3,
+      "description": "Maximum number of lock acquisition retry attempts before skipping. Defaults to 3.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "lockTtlSeconds": {
+      "default": 3600,
+      "description": "Time-to-live in seconds for sync lock files. Locks expire after this duration,\npreventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "maxControllers": {
+      "description": "Maximum number of Controllers to run in parallel during `nagi serve`.\nWhen the number of connected components exceeds this limit, serve exits with an error.\nWhen omitted, one Controller is created per connected component.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "maxEvaluateConcurrency": {
+      "description": "Maximum number of concurrent evaluate tasks per Controller.\nWhen omitted, no limit is applied.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "maxSyncConcurrency": {
+      "description": "Maximum number of concurrent sync tasks per Controller.\nWhen omitted, no limit is applied.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "nagiDir": {
+      "$ref": "#/$defs/NagiDir",
+      "description": "Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`."
+    },
+    "notify": {
+      "$ref": "#/$defs/NotifyConfig",
+      "description": "Notification channel configuration."
+    },
+    "terminationGracePeriodSeconds": {
+      "description": "Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown.\nWhen omitted, waits indefinitely.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "NagiConfig",
+  "type": "object"
+}
