@@ -145,3 +145,40 @@ class TestCompileFailure:
         assert result.exit_code == 1
         output = json.loads(result.output)
         assert "error" in output
+
+
+class TestCompilePager:
+    def test_success_uses_echo_output(self, tmp_path: Path) -> None:
+        write_valid_resources(tmp_path / "resources")
+        runner = CliRunner()
+        with patch("nagi_cli.commands.compile.echo_output") as mock_echo:
+            runner.invoke(
+                compile,
+                [
+                    "--resources-dir",
+                    str(tmp_path / "resources"),
+                    "--target-dir",
+                    str(tmp_path / "target"),
+                ],
+            )
+            mock_echo.assert_called_once()
+            _, kwargs = mock_echo.call_args
+            assert kwargs["no_pager"] is False
+
+    def test_no_pager_flag_passed_to_echo_output(self, tmp_path: Path) -> None:
+        write_valid_resources(tmp_path / "resources")
+        runner = CliRunner()
+        with patch("nagi_cli.commands.compile.echo_output") as mock_echo:
+            runner.invoke(
+                compile,
+                [
+                    "--resources-dir",
+                    str(tmp_path / "resources"),
+                    "--target-dir",
+                    str(tmp_path / "target"),
+                    "--no-pager",
+                ],
+            )
+            mock_echo.assert_called_once()
+            _, kwargs = mock_echo.call_args
+            assert kwargs["no_pager"] is True
