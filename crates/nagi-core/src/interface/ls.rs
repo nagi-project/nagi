@@ -27,8 +27,8 @@ pub struct LsOutput {
 #[serde(rename_all = "camelCase")]
 pub struct LsAsset {
     pub name: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub upstreams: Vec<String>,
     pub auto_sync: bool,
@@ -145,7 +145,7 @@ fn collect_assets(compiled_assets: &[(String, CompiledAsset)]) -> Vec<LsAsset> {
                 .collect();
             LsAsset {
                 name: name.clone(),
-                tags: compiled.spec.tags.clone(),
+                labels: compiled.metadata.labels.clone(),
                 upstreams: compiled.spec.upstreams.clone(),
                 auto_sync: compiled.spec.auto_sync,
                 on_drift,
@@ -264,10 +264,11 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
+  labels:
+    dbt/finance: ''
 spec:
   connection: my-bq
   upstreams: [raw-sales]
-  tags: [finance]
   onDrift:
     - conditions: freshness-check
       sync: dbt-run";
@@ -277,13 +278,13 @@ spec:
     // ── collect_assets ──────────────────────────────────────────────────
 
     #[test]
-    fn collect_assets_extracts_name_tags_upstreams() {
+    fn collect_assets_extracts_name_labels_upstreams() {
         let compiled = setup_compiled_assets(&yaml_docs(ALL_YAML));
         let assets = collect_assets(&compiled);
 
         assert_eq!(assets.len(), 2);
         let daily = assets.iter().find(|a| a.name == "daily-sales").unwrap();
-        assert_eq!(daily.tags, vec!["finance"]);
+        assert_eq!(daily.labels.get("dbt/finance"), Some(&String::new()));
         assert_eq!(daily.upstreams, vec!["raw-sales"]);
         assert!(daily.auto_sync);
     }

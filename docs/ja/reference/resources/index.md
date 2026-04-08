@@ -9,9 +9,70 @@ apiVersion: nagi.io/v1alpha1
 kind: <リソース種別>
 metadata:
   name: <一意な名前>
+  labels:
+    team: data-eng
+  annotations:
+    description: "..."
+    owner: "data-team@example.com"
 spec:
   ...
 ```
+
+<!-- schema:auto-generated:start:Metadata -->
+
+## Attributes
+
+| Attribute | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | string | Yes | - | Unique name of the resource. |
+| `annotations` | map[string, string] | — | - | Non-identifying metadata for descriptions, owner contacts, or other arbitrary information. |
+| `labels` | map[string, string] | — | - | Key-value pairs for filtering with `--select label:key` or `--select label:key=value`. |
+
+<!-- schema:auto-generated:end:Metadata -->
+
+### labels
+
+labels は `--select` セレクターで Asset の絞り込みに使用します。
+
+```yaml
+metadata:
+  name: daily-sales
+  labels:
+    team: data-eng
+    env: prod
+```
+
+```bash
+# team ラベルが存在する Asset を選択
+nagi evaluate --select "label:team"
+
+# team=data-eng の Asset を選択
+nagi evaluate --select "label:team=data-eng"
+```
+
+Origin (dbt) から自動生成された Asset では、dbt のタグが `dbt/` プレフィックス付きで labels に変換されます。
+
+```yaml
+metadata:
+  name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
+```
+
+### annotations
+
+annotations はリソースの補足情報を格納します。Nagi はこの値を処理に使用しません。
+
+```yaml
+metadata:
+  name: daily-sales
+  annotations:
+    description: "日次売上の集計テーブル"
+    owner: "data-team@example.com"
+```
+
+## kind
 
 kind ごとに reconciliation loop の中での役割が異なります。
 

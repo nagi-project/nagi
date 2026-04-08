@@ -13,6 +13,7 @@ from pathlib import Path
 # Map schema file names to (relative doc path from docs_root, page title, table_only)
 # table_only=True suppresses ## Attributes heading (for embedding in existing sections)
 SCHEMA_MAP = {
+    "Metadata": ("reference/resources/index.md", "metadata", False),
     "AssetSpec": ("reference/resources/asset.md", "kind: Asset", False),
     "OnDriftEntry": ("reference/resources/asset.md", "OnDriftEntry", True),
     "ConnectionSpec": ("reference/resources/connection.md", "kind: Connection", False),

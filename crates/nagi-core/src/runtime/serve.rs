@@ -358,7 +358,7 @@ mod tests {
                 .map(|n| GraphNode {
                     name: n.to_string(),
                     kind: "Asset".to_string(),
-                    tags: vec![],
+                    labels: Default::default(),
                 })
                 .collect(),
             edges: edges
@@ -377,7 +377,7 @@ mod tests {
 
         for name in asset_names {
             let yaml = format!(
-                "apiVersion: nagi.io/v1alpha1\nmetadata:\n  name: {name}\nspec:\n  upstreams: []\n  onDrift: []\n  autoSync: false\n  tags: []\n"
+                "apiVersion: nagi.io/v1alpha1\nmetadata:\n  name: {name}\nspec:\n  upstreams: []\n  onDrift: []\n  autoSync: false\n"
             );
             std::fs::write(assets_dir.join(format!("{name}.yaml")), yaml).unwrap();
         }

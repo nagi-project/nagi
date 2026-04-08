@@ -529,7 +529,7 @@ mod tests {
         GraphNode {
             name: name.to_string(),
             kind: "Asset".to_string(),
-            tags: vec![],
+            labels: Default::default(),
         }
     }
 

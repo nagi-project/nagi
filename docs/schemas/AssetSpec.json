@@ -81,14 +81,6 @@
       },
       "type": "array"
     },
-    "tags": {
-      "default": [],
-      "description": "Tags for filtering with `--select tag:X`.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
     "upstreams": {
       "default": [],
       "description": "Names of upstream Asset resources.",

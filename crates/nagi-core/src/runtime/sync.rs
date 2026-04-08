@@ -802,9 +802,7 @@ mod tests {
 
         CompiledAsset {
             _api_version: "nagi.io/v1alpha1".to_string(),
-            metadata: Metadata {
-                name: "test-asset".to_string(),
-            },
+            metadata: Metadata::new("test-asset"),
             spec: CompiledAssetSpec {
                 on_drift: vec![ResolvedOnDriftEntry {
                     conditions: vec![crate::runtime::kind::asset::DesiredCondition::Command {
@@ -827,7 +825,6 @@ mod tests {
                     sync_ref_name: "test-sync".to_string(),
                 }],
                 upstreams: vec![],
-                tags: vec![],
                 auto_sync: true,
                 dbt_cloud_job_ids: None,
                 evaluate_cache_ttl: None,

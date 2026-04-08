@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Common metadata shared by all resource kinds.",
+  "properties": {
+    "annotations": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Non-identifying metadata for descriptions, owner contacts, or other arbitrary information.",
+      "type": "object"
+    },
+    "labels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Key-value pairs for filtering with `--select label:key` or `--select label:key=value`.",
+      "type": "object"
+    },
+    "name": {
+      "description": "Unique name of the resource.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "Metadata",
+  "type": "object"
+}

@@ -498,11 +498,8 @@ mod tests {
         use crate::runtime::kind::sync::{StepType, SyncSpec, SyncStep};
         CompiledAsset {
             _api_version: "v1".to_string(),
-            metadata: Metadata {
-                name: "test-asset".to_string(),
-            },
+            metadata: Metadata::new("test-asset"),
             spec: CompiledAssetSpec {
-                tags: vec![],
                 upstreams: vec![],
                 on_drift: vec![ResolvedOnDriftEntry {
                     conditions,

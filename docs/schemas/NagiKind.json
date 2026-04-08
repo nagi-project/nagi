@@ -36,14 +36,6 @@
           },
           "type": "array"
         },
-        "tags": {
-          "default": [],
-          "description": "Tags for filtering with `--select tag:X`.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "upstreams": {
           "default": [],
           "description": "Names of upstream Asset resources.",
@@ -454,7 +446,22 @@
     "Metadata": {
       "description": "Common metadata shared by all resource kinds.",
       "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Non-identifying metadata for descriptions, owner contacts, or other arbitrary information.",
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Key-value pairs for filtering with `--select label:key` or `--select label:key=value`.",
+          "type": "object"
+        },
         "name": {
+          "description": "Unique name of the resource.",
           "type": "string"
         }
       },
@@ -521,7 +528,7 @@
                 }
               ],
               "default": null,
-              "description": "User-defined Sync to override the auto-generated `nagi-dbt-run`."
+              "description": "User-defined Sync to override the auto-generated Sync\n(e.g. `my-project-dbt-run` for Origin named `my-project`)."
             },
             "projectDir": {
               "description": "Local path to the dbt project directory (relative or absolute).",
