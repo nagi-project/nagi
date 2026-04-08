@@ -10,6 +10,8 @@ theme:
   language: ja
 
 extra:
+  version:
+    provider: mike
   alternate:
     - name: English
       link: /

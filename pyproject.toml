@@ -82,6 +82,7 @@ include = ["python/nagi_cli/*.py", "python/nagi_cli/commands/*.py", "python/test
 unresolved-import = "ignore"
 
 [tool.pytest.ini_options]
+pythonpath = ["scripts"]
 markers = [
     "integration: tests that require real DB connections and CLI execution",
     "scenario: end-to-end serve scenario tests verifying reconciliation loop behavior",
