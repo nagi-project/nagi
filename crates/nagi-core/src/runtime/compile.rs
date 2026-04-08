@@ -43,6 +43,27 @@ pub enum CompileError {
 
     #[error("failed to create async runtime: {0}")]
     Runtime(String),
+
+    #[error("{}", format_multiple_errors(.0))]
+    Multiple(Vec<CompileError>),
+}
+
+fn format_multiple_errors(errors: &[CompileError]) -> String {
+    errors
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Converts a vec of errors into a single Result.
+/// Empty vec → Ok, single error → that error, multiple → Multiple.
+fn into_result(errors: Vec<CompileError>) -> Result<(), CompileError> {
+    match errors.len() {
+        0 => Ok(()),
+        1 => Err(errors.into_iter().next().unwrap()),
+        _ => Err(CompileError::Multiple(errors)),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,7 +164,9 @@ pub fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
     }
     let mut resources = Vec::new();
     let mut visited = HashSet::new();
-    load_resources_recursive(dir, &mut resources, &mut visited)?;
+    let mut errors = Vec::new();
+    load_resources_recursive(dir, &mut resources, &mut visited, &mut errors)?;
+    into_result(errors)?;
     Ok(resources)
 }
 
@@ -151,6 +174,7 @@ fn load_resources_recursive(
     dir: &Path,
     resources: &mut Vec<NagiKind>,
     visited: &mut HashSet<std::path::PathBuf>,
+    errors: &mut Vec<CompileError>,
 ) -> Result<(), CompileError> {
     let canonical = dir.canonicalize()?;
     if !visited.insert(canonical) {
@@ -161,15 +185,30 @@ fn load_resources_recursive(
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            load_resources_recursive(&path, resources, visited)?;
-        } else if matches!(
-            path.extension().and_then(|e| e.to_str()),
-            Some("yaml") | Some("yml")
-        ) {
-            let content = std::fs::read_to_string(&path)?;
-            let kinds = kind::parse_kinds(&content)?;
-            resources.extend(kinds);
+            load_resources_recursive(&path, resources, visited, errors)?;
+        } else if is_yaml_file(&path) {
+            parse_yaml_file(&path, resources, errors)?;
         }
+    }
+    Ok(())
+}
+
+fn is_yaml_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("yaml") | Some("yml")
+    )
+}
+
+fn parse_yaml_file(
+    path: &Path,
+    resources: &mut Vec<NagiKind>,
+    errors: &mut Vec<CompileError>,
+) -> Result<(), CompileError> {
+    let content = std::fs::read_to_string(path)?;
+    match kind::parse_kinds(&content) {
+        Ok(kinds) => resources.extend(kinds),
+        Err(e) => errors.push(CompileError::Kind(e)),
     }
     Ok(())
 }
@@ -178,6 +217,7 @@ use crate::runtime::kind::connection::{
     resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
 };
 
+#[derive(Debug)]
 struct CategorizedResources {
     connections: HashMap<String, ConnectionSpec>,
     conditions_groups: HashMap<String, Vec<DesiredCondition>>,
@@ -196,8 +236,25 @@ fn check_dup(
     Ok(())
 }
 
+/// Returns `true` if the resource is new, `false` if duplicate (error pushed to `errors`).
+fn check_dup_collect(
+    seen: &mut HashSet<(String, String)>,
+    errors: &mut Vec<CompileError>,
+    kind: String,
+    name: String,
+) -> bool {
+    match check_dup(seen, kind, name) {
+        Ok(()) => true,
+        Err(e) => {
+            errors.push(e);
+            false
+        }
+    }
+}
+
 fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileError> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut errors: Vec<CompileError> = Vec::new();
     let mut result = CategorizedResources {
         connections: HashMap::new(),
         conditions_groups: HashMap::new(),
@@ -213,31 +270,36 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         match resource {
             NagiKind::Asset { metadata, spec, .. } => {
                 if let Some(&idx) = asset_indices.get(&name) {
-                    check_dup(&mut seen, kind, name)?;
-                    let overlay = std::mem::take(&mut result.assets[idx].1.on_drift);
-                    result.assets[idx].1.on_drift =
-                        asset::merge_on_drift_entries(overlay, spec.on_drift);
+                    if check_dup_collect(&mut seen, &mut errors, kind, name) {
+                        let overlay = std::mem::take(&mut result.assets[idx].1.on_drift);
+                        result.assets[idx].1.on_drift =
+                            asset::merge_on_drift_entries(overlay, spec.on_drift);
+                    }
                 } else {
                     asset_indices.insert(name, result.assets.len());
                     result.assets.push((metadata, spec));
                 }
             }
             NagiKind::Connection { spec, .. } => {
-                check_dup(&mut seen, kind, name.clone())?;
-                result.connections.insert(name, spec);
+                if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
+                    result.connections.insert(name, spec);
+                }
             }
             NagiKind::Conditions { spec, .. } => {
-                check_dup(&mut seen, kind, name.clone())?;
-                result.conditions_groups.insert(name, spec.0.clone());
+                if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
+                    result.conditions_groups.insert(name, spec.0.clone());
+                }
             }
             NagiKind::Sync { spec, .. } => {
-                check_dup(&mut seen, kind, name.clone())?;
-                result.syncs.insert(name, spec);
+                if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
+                    result.syncs.insert(name, spec);
+                }
             }
             NagiKind::Origin { .. } => {}
         }
     }
 
+    into_result(errors)?;
     Ok(result)
 }
 
@@ -413,24 +475,28 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
 
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
-    let resolved_assets: Vec<_> = assets
-        .into_iter()
-        .map(|(metadata, spec)| {
-            resolve_asset(
-                metadata,
-                spec,
-                &asset_names,
-                &connections,
-                &conditions_groups,
-                &syncs,
-            )
-        })
-        .collect::<Result<_, _>>()?;
+    let mut errors: Vec<CompileError> = Vec::new();
+    let mut resolved_assets = Vec::new();
+    for (metadata, spec) in assets {
+        match resolve_asset(
+            metadata,
+            spec,
+            &asset_names,
+            &connections,
+            &conditions_groups,
+            &syncs,
+        ) {
+            Ok(asset) => resolved_assets.push(asset),
+            Err(e) => errors.push(e),
+        }
+    }
 
     warn_asset_readiness(&resolved_assets);
 
     let graph = build_graph(&resolved_assets)?;
-    detect_cycles(&graph)?;
+    errors.extend(collect_cycle_errors(&graph));
+
+    into_result(errors)?;
 
     Ok(CompileOutput {
         assets: resolved_assets,
@@ -447,32 +513,45 @@ fn resolve_asset(
     conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
     syncs: &HashMap<String, SyncSpec>,
 ) -> Result<ResolvedAsset, CompileError> {
-    for upstream_ref in &spec.upstreams {
-        if !asset_names.contains(upstream_ref) {
-            return Err(CompileError::UnresolvedRef {
-                kind: "Asset".to_string(),
-                name: upstream_ref.clone(),
-            });
-        }
-    }
+    let mut errors: Vec<CompileError> = Vec::new();
+
+    errors.extend(collect_unresolved_upstream_errors(
+        &spec.upstreams,
+        asset_names,
+    ));
 
     let model_name = spec
         .model_name
         .as_deref()
         .unwrap_or(&metadata.name)
         .to_string();
-    let resolved_on_drift = resolve_on_drift(
+    let resolved_on_drift = match resolve_on_drift(
         &metadata.name,
         &model_name,
         &spec.on_drift,
         conditions_groups,
         syncs,
-    )?;
-    let connection = spec
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            errors.push(e);
+            Vec::new()
+        }
+    };
+    let connection = match spec
         .connection
         .as_deref()
         .map(|name| resolve_connection_by_name(name, connections))
-        .transpose()?;
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => {
+            errors.push(e);
+            None
+        }
+    };
+
+    into_result(errors)?;
 
     Ok(ResolvedAsset {
         metadata,
@@ -482,6 +561,20 @@ fn resolve_asset(
         connection,
         dbt_cloud_job_ids: None,
     })
+}
+
+fn collect_unresolved_upstream_errors(
+    upstreams: &[String],
+    asset_names: &HashSet<String>,
+) -> Vec<CompileError> {
+    upstreams
+        .iter()
+        .filter(|name| !asset_names.contains(*name))
+        .map(|name| CompileError::UnresolvedRef {
+            kind: "Asset".to_string(),
+            name: name.clone(),
+        })
+        .collect()
 }
 
 /// Resolves on_drift entries: validates conditions/sync refs and expands templates.
@@ -494,16 +587,24 @@ fn resolve_on_drift(
 ) -> Result<Vec<ResolvedOnDriftEntry>, CompileError> {
     let mut resolved = Vec::new();
     let mut all_conditions: Vec<DesiredCondition> = Vec::new();
+    let mut errors: Vec<CompileError> = Vec::new();
 
     for entry in on_drift {
-        let conditions = conditions_groups.get(&entry.conditions).ok_or_else(|| {
-            CompileError::UnresolvedRef {
-                kind: "Conditions".to_string(),
-                name: entry.conditions.clone(),
+        let conditions = match conditions_groups.get(&entry.conditions) {
+            Some(c) => c,
+            None => {
+                errors.push(CompileError::UnresolvedRef {
+                    kind: "Conditions".to_string(),
+                    name: entry.conditions.clone(),
+                });
+                continue;
             }
-        })?;
+        };
 
-        require_sync_ref(syncs, &entry.sync)?;
+        if let Err(e) = require_sync_ref(syncs, &entry.sync) {
+            errors.push(e);
+            continue;
+        }
         let sync_spec = &syncs[&entry.sync];
         let resolved_sync = expand_sync_templates(sync_spec, asset_name, model_name, &entry.with);
 
@@ -520,7 +621,11 @@ fn resolve_on_drift(
         });
     }
 
-    validate_no_duplicate_condition_names(&all_conditions)?;
+    if let Err(e) = validate_no_duplicate_condition_names(&all_conditions) {
+        errors.push(CompileError::Kind(e));
+    }
+
+    into_result(errors)?;
     Ok(resolved)
 }
 
@@ -548,9 +653,8 @@ fn build_graph(assets: &[ResolvedAsset]) -> Result<DependencyGraph, CompileError
     Ok(DependencyGraph { nodes, edges })
 }
 
-/// Detects cycles using Kahn's algorithm (topological sort via BFS).
-/// If not all nodes are visited, at least one cycle exists.
-fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
+/// Collects all nodes involved in dependency cycles using Kahn's algorithm.
+fn collect_cycle_errors(graph: &DependencyGraph) -> Vec<CompileError> {
     let mut in_degree: HashMap<&str, usize> =
         graph.nodes.iter().map(|n| (n.name.as_str(), 0)).collect();
     let mut adjacency: HashMap<&str, Vec<&str>> = graph
@@ -573,9 +677,7 @@ fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
         .map(|(&name, _)| name)
         .collect();
 
-    let mut visited = 0usize;
     while let Some(node) = queue.pop_front() {
-        visited += 1;
         for &neighbor in &adjacency[node] {
             let deg = in_degree.get_mut(neighbor).unwrap();
             *deg -= 1;
@@ -585,16 +687,16 @@ fn detect_cycles(graph: &DependencyGraph) -> Result<(), CompileError> {
         }
     }
 
-    if visited < in_degree.len() {
-        let name = in_degree
-            .into_iter()
-            .find(|(_, deg)| *deg > 0)
-            .map(|(name, _)| name.to_string())
-            .unwrap_or_default();
-        return Err(CompileError::CycleDetected { name });
-    }
-
-    Ok(())
+    let mut cycle_nodes: Vec<_> = in_degree
+        .into_iter()
+        .filter(|(_, deg)| *deg > 0)
+        .map(|(name, _)| name.to_string())
+        .collect();
+    cycle_nodes.sort();
+    cycle_nodes
+        .into_iter()
+        .map(|name| CompileError::CycleDetected { name })
+        .collect()
 }
 
 /// Serialization-only struct for writing compiled assets to `target/`.
@@ -1952,6 +2054,112 @@ spec:
         );
     }
 
+    // ── check_dup_collect ────────────────────────────────────────────────
+
+    #[test]
+    fn check_dup_collect_returns_true_for_new_entry() {
+        let mut seen = HashSet::new();
+        let mut errors = Vec::new();
+        assert!(check_dup_collect(
+            &mut seen,
+            &mut errors,
+            "Asset".into(),
+            "foo".into()
+        ));
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn check_dup_collect_returns_false_and_pushes_error_on_duplicate() {
+        let mut seen = HashSet::new();
+        let mut errors = Vec::new();
+        check_dup_collect(&mut seen, &mut errors, "Asset".into(), "foo".into());
+        assert!(!check_dup_collect(
+            &mut seen,
+            &mut errors,
+            "Asset".into(),
+            "foo".into()
+        ));
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(
+            &errors[0],
+            CompileError::DuplicateName { kind, name } if kind == "Asset" && name == "foo"
+        ));
+    }
+
+    // ── is_yaml_file ───────────────────────────────────────────────────
+
+    macro_rules! is_yaml_file_test {
+        ($($name:ident: $path:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_eq!(is_yaml_file(Path::new($path)), $expected);
+                }
+            )*
+        };
+    }
+
+    is_yaml_file_test! {
+        yaml_extension: "foo.yaml" => true;
+        yml_extension: "foo.yml" => true;
+        json_extension: "foo.json" => false;
+        no_extension: "foo" => false;
+        toml_extension: "foo.toml" => false;
+    }
+
+    // ── parse_yaml_file ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_yaml_file_adds_resources_on_valid_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("asset.yaml");
+        std::fs::write(
+            &path,
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: test-asset
+spec: {}",
+        )
+        .unwrap();
+
+        let mut resources = Vec::new();
+        let mut errors = Vec::new();
+        parse_yaml_file(&path, &mut resources, &mut errors).unwrap();
+        assert_eq!(resources.len(), 1);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn parse_yaml_file_pushes_error_on_invalid_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("bad.yaml");
+        std::fs::write(&path, "not: valid: yaml: [").unwrap();
+
+        let mut resources = Vec::new();
+        let mut errors = Vec::new();
+        parse_yaml_file(&path, &mut resources, &mut errors).unwrap();
+        assert!(resources.is_empty());
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(&errors[0], CompileError::Kind(_)));
+    }
+
+    #[test]
+    fn parse_yaml_file_returns_io_error_on_missing_file() {
+        let mut resources = Vec::new();
+        let mut errors = Vec::new();
+        let err = parse_yaml_file(
+            Path::new("/nonexistent/file.yaml"),
+            &mut resources,
+            &mut errors,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CompileError::Io(_)));
+        assert!(errors.is_empty());
+    }
+
     // ── expand_step ─────────────────────────────────────────────────────
 
     #[test]
@@ -1994,5 +2202,335 @@ spec:
         with.insert("target".into(), "prod".into());
         let result = expand_step(&step, "a", "b", &with);
         assert_eq!(result.args, vec!["prod"]);
+    }
+
+    // ── into_result ────────────────────────────────────────────────────
+
+    #[test]
+    fn into_result_empty_is_ok() {
+        assert!(into_result(vec![]).is_ok());
+    }
+
+    #[test]
+    fn into_result_single_returns_that_error() {
+        let err = into_result(vec![CompileError::CycleDetected { name: "a".into() }]).unwrap_err();
+        assert!(matches!(err, CompileError::CycleDetected { name } if name == "a"));
+    }
+
+    #[test]
+    fn into_result_multiple_returns_multiple_variant() {
+        let err = into_result(vec![
+            CompileError::CycleDetected { name: "a".into() },
+            CompileError::CycleDetected { name: "b".into() },
+        ])
+        .unwrap_err();
+        match err {
+            CompileError::Multiple(errors) => assert_eq!(errors.len(), 2),
+            other => panic!("expected Multiple, got: {other}"),
+        }
+    }
+
+    // ── collect_unresolved_upstream_errors ──────────────────────────────
+
+    #[test]
+    fn collect_unresolved_upstream_errors_all_valid() {
+        let names: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        let upstreams = vec!["a".to_string(), "b".to_string()];
+        assert!(collect_unresolved_upstream_errors(&upstreams, &names).is_empty());
+    }
+
+    #[test]
+    fn collect_unresolved_upstream_errors_empty_upstreams() {
+        let names: HashSet<String> = HashSet::new();
+        assert!(collect_unresolved_upstream_errors(&[], &names).is_empty());
+    }
+
+    #[test]
+    fn collect_unresolved_upstream_errors_multiple_missing() {
+        let names: HashSet<String> = HashSet::new();
+        let upstreams = vec!["x".to_string(), "y".to_string()];
+        let errors = collect_unresolved_upstream_errors(&upstreams, &names);
+        assert_eq!(errors.len(), 2);
+        assert!(errors
+            .iter()
+            .all(|e| matches!(e, CompileError::UnresolvedRef { kind, .. } if kind == "Asset")));
+    }
+
+    #[test]
+    fn collect_unresolved_upstream_errors_partial_match() {
+        let names: HashSet<String> = ["a"].iter().map(|s| s.to_string()).collect();
+        let upstreams = vec!["a".to_string(), "missing".to_string()];
+        let errors = collect_unresolved_upstream_errors(&upstreams, &names);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], CompileError::UnresolvedRef { name, .. } if name == "missing")
+        );
+    }
+
+    // ── collect_cycle_errors ───────────────────────────────────────────
+
+    #[test]
+    fn collect_cycle_errors_empty_graph() {
+        let graph = DependencyGraph {
+            nodes: vec![],
+            edges: vec![],
+        };
+        assert!(collect_cycle_errors(&graph).is_empty());
+    }
+
+    #[test]
+    fn collect_cycle_errors_no_cycle() {
+        let graph = DependencyGraph {
+            nodes: vec![
+                GraphNode {
+                    name: "a".into(),
+                    kind: "Asset".into(),
+                    tags: vec![],
+                },
+                GraphNode {
+                    name: "b".into(),
+                    kind: "Asset".into(),
+                    tags: vec![],
+                },
+            ],
+            edges: vec![GraphEdge {
+                from: "a".into(),
+                to: "b".into(),
+            }],
+        };
+        assert!(collect_cycle_errors(&graph).is_empty());
+    }
+
+    #[test]
+    fn collect_cycle_errors_reports_all_cycle_nodes() {
+        let graph = DependencyGraph {
+            nodes: vec![
+                GraphNode {
+                    name: "a".into(),
+                    kind: "Asset".into(),
+                    tags: vec![],
+                },
+                GraphNode {
+                    name: "b".into(),
+                    kind: "Asset".into(),
+                    tags: vec![],
+                },
+                GraphNode {
+                    name: "c".into(),
+                    kind: "Asset".into(),
+                    tags: vec![],
+                },
+            ],
+            edges: vec![
+                GraphEdge {
+                    from: "a".into(),
+                    to: "b".into(),
+                },
+                GraphEdge {
+                    from: "b".into(),
+                    to: "a".into(),
+                },
+            ],
+        };
+        let errors = collect_cycle_errors(&graph);
+        assert_eq!(errors.len(), 2);
+        let names: Vec<String> = errors
+            .iter()
+            .map(|e| match e {
+                CompileError::CycleDetected { name } => name.clone(),
+                _ => panic!("expected CycleDetected"),
+            })
+            .collect();
+        assert!(names.contains(&"a".to_string()));
+        assert!(names.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn collect_cycle_errors_self_cycle() {
+        let graph = DependencyGraph {
+            nodes: vec![GraphNode {
+                name: "a".into(),
+                kind: "Asset".into(),
+                tags: vec![],
+            }],
+            edges: vec![GraphEdge {
+                from: "a".into(),
+                to: "a".into(),
+            }],
+        };
+        let errors = collect_cycle_errors(&graph);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(&errors[0], CompileError::CycleDetected { name } if name == "a"));
+    }
+
+    // ── resolve accumulates multiple errors ────────────────────────────
+
+    #[test]
+    fn resolve_accumulates_multiple_unresolved_refs() {
+        let resources = parse(
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: a
+spec:
+  upstreams: [missing-1, missing-2]",
+        );
+        let err = resolve(resources).unwrap_err();
+        match err {
+            CompileError::Multiple(errors) => {
+                assert_eq!(errors.len(), 2);
+                assert!(errors
+                    .iter()
+                    .all(|e| matches!(e, CompileError::UnresolvedRef { .. })));
+            }
+            other => panic!("expected Multiple, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn resolve_accumulates_errors_across_assets() {
+        let resources = parse(
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: a
+spec:
+  upstreams: [nonexistent-1]
+---
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: b
+spec:
+  upstreams: [nonexistent-2]",
+        );
+        let err = resolve(resources).unwrap_err();
+        match err {
+            CompileError::Multiple(errors) => {
+                assert_eq!(errors.len(), 2);
+            }
+            other => panic!("expected Multiple, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn categorize_accumulates_multiple_duplicates() {
+        let resources = parse(
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: conn-a
+spec:
+  type: dbt
+  profile: proj
+---
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: conn-a
+spec:
+  type: dbt
+  profile: proj
+---
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: sync-a
+spec:
+  run:
+    type: Command
+    args: [\"true\"]
+---
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: sync-a
+spec:
+  run:
+    type: Command
+    args: [\"true\"]",
+        );
+        let err = categorize(resources).unwrap_err();
+        match err {
+            CompileError::Multiple(errors) => {
+                assert_eq!(errors.len(), 2);
+                assert!(errors
+                    .iter()
+                    .all(|e| matches!(e, CompileError::DuplicateName { .. })));
+            }
+            other => panic!("expected Multiple, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn resolve_on_drift_accumulates_missing_conditions_and_sync() {
+        let entries = vec![
+            asset::OnDriftEntry {
+                conditions: "missing-cond".to_string(),
+                sync: "dbt-run".to_string(),
+                with: HashMap::new(),
+                merge_position: asset::MergePosition::BeforeOrigin,
+            },
+            asset::OnDriftEntry {
+                conditions: "daily-sla".to_string(),
+                sync: "missing-sync".to_string(),
+                with: HashMap::new(),
+                merge_position: asset::MergePosition::BeforeOrigin,
+            },
+        ];
+        let err = resolve_on_drift("a", "a", &entries, &sample_conditions(), &sample_syncs())
+            .unwrap_err();
+        match err {
+            CompileError::Multiple(errors) => {
+                assert_eq!(errors.len(), 2);
+            }
+            other => panic!("expected Multiple, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn load_resources_accumulates_yaml_parse_errors() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("resources");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        write_yaml(
+            &dir,
+            "good.yaml",
+            "\
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: valid-asset
+spec: {}",
+        );
+        write_yaml(&dir, "bad1.yaml", "not: valid: yaml: content: [");
+        write_yaml(&dir, "bad2.yaml", "also: invalid: [yaml");
+
+        let err = load_resources(&dir).unwrap_err();
+        match err {
+            CompileError::Multiple(errors) => {
+                assert_eq!(errors.len(), 2);
+            }
+            other => panic!("expected Multiple, got: {other}"),
+        }
+    }
+
+    // ── format_multiple_errors ─────────────────────────────────────────
+
+    #[test]
+    fn format_multiple_errors_joins_with_newline() {
+        let errors = vec![
+            CompileError::CycleDetected { name: "a".into() },
+            CompileError::CycleDetected { name: "b".into() },
+        ];
+        let msg = format_multiple_errors(&errors);
+        assert_eq!(
+            msg,
+            "dependency cycle detected involving 'a'\ndependency cycle detected involving 'b'"
+        );
     }
 }
