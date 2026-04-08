@@ -1,0 +1,80 @@
+name: Deploy Docs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Main branch: scripts, pyproject.toml, setup-uv action
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Tag: docs source and mkdocs config
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: tag-source
+
+      - uses: ./.github/actions/setup-uv
+
+      - name: Install docs dependencies
+        run: uv sync --no-dev --group docs
+
+      - name: Extract minor version
+        id: version
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"  # e.g. v0.1.3
+          MINOR="${TAG#v}"                             # 0.1.3
+          MINOR="${MINOR%.*}"                         # 0.1
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+
+      - name: Build docs
+        run: |
+          uv run mkdocs build -f tag-source/mkdocs.yml --strict -d "$GITHUB_WORKSPACE/docs-build"
+          uv run mkdocs build -f tag-source/mkdocs.ja.yml --strict -d "$GITHUB_WORKSPACE/docs-build/ja"
+
+      - name: Checkout docs-site branch
+        run: |
+          git fetch origin docs-site || true
+          if git rev-parse --verify origin/docs-site >/dev/null 2>&1; then
+            git worktree add docs-deploy origin/docs-site
+          else
+            git worktree add --orphan -b docs-site docs-deploy
+          fi
+
+      - name: Copy build output
+        run: |
+          MINOR="${{ steps.version.outputs.minor }}"
+          rm -rf "docs-deploy/${MINOR}"
+          cp -r docs-build/. "docs-deploy/${MINOR}/"
+
+      - name: Update versions.json
+        run: |
+          MINOR="${{ steps.version.outputs.minor }}"
+          uv run scripts/update_versions.py docs-deploy "$MINOR"
+
+      - name: Push to docs-site branch
+        run: |
+          cd docs-deploy
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          MINOR="${{ steps.version.outputs.minor }}"
+          TAG="${{ inputs.tag || github.ref_name }}"
+          git diff --cached --quiet && echo "No changes to deploy" && exit 0
+          git commit -m "docs: deploy ${TAG} (${MINOR})"
+          git push origin HEAD:docs-site
