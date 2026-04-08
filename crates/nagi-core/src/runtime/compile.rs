@@ -2285,12 +2285,12 @@ spec: {}",
                 GraphNode {
                     name: "a".into(),
                     kind: "Asset".into(),
-                    tags: vec![],
+                    labels: Default::default(),
                 },
                 GraphNode {
                     name: "b".into(),
                     kind: "Asset".into(),
-                    tags: vec![],
+                    labels: Default::default(),
                 },
             ],
             edges: vec![GraphEdge {
@@ -2308,17 +2308,17 @@ spec: {}",
                 GraphNode {
                     name: "a".into(),
                     kind: "Asset".into(),
-                    tags: vec![],
+                    labels: Default::default(),
                 },
                 GraphNode {
                     name: "b".into(),
                     kind: "Asset".into(),
-                    tags: vec![],
+                    labels: Default::default(),
                 },
                 GraphNode {
                     name: "c".into(),
                     kind: "Asset".into(),
-                    tags: vec![],
+                    labels: Default::default(),
                 },
             ],
             edges: vec![
@@ -2351,7 +2351,7 @@ spec: {}",
             nodes: vec![GraphNode {
                 name: "a".into(),
                 kind: "Asset".into(),
-                tags: vec![],
+                labels: Default::default(),
             }],
             edges: vec![GraphEdge {
                 from: "a".into(),
