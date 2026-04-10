@@ -6,7 +6,7 @@ Nagi monitors your data, detects drift from the desired state, and automatically
 
 A successful job does not guarantee that data is as expected. Even when a job completes normally, data can be stale, contain NULLs, or have inconsistent aggregations.
 
-Nagi starts from evaluating whether data is as expected. Declare the desired state, pair it with a convergence operation, and Nagi continuously evaluates and auto-converges — unifying state evaluation, routine ELT, and incident response into a single loop.
+Nagi starts by evaluating whether data is as expected. Declare the desired state, pair it with a convergence operation, and Nagi continuously evaluates and auto-converges — unifying state evaluation, routine ELT, and incident response into a single loop.
 
 ## Install
 

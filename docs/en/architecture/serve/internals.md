@@ -69,7 +69,7 @@ Evaluate and Sync are each issued as async tasks, so they do not block the Contr
 
 ### Concurrency Limits
 
-You can limit the number of concurrent Evaluate and Sync tasks per Controller. This is used to control query load on the data warehouse when a large number of root Assets are queued immediately after startup, or when many downstream syncs are triggered simultaneously by an upstream Asset's transition to Ready.
+You can limit the number of concurrent Evaluate and Sync tasks per Controller. This controls query load on the data warehouse when many root Assets are queued at startup, or when many downstream Syncs are triggered by an upstream Asset's transition to Ready.
 
 Configure with `maxEvaluateConcurrency` and `maxSyncConcurrency` in [`nagi.yaml`](../../reference/project.md). If omitted, concurrency is unlimited.
 
@@ -95,7 +95,7 @@ For Freshness, in addition to periodic evaluation via `interval`, scheduled eval
 
 ### Upstream State Change
 
-When an Asset's state transitions from Drifted to Ready, Sync is executed for downstream Assets that depend on it. In this case, Evaluate is skipped and Sync is triggered directly. This is because the upstream Asset has transitioned from Drifted to Ready, because upstream recovery implies the downstream data may be stale.
+When an Asset transitions from Drifted to Ready, Sync is executed for downstream Assets that depend on it. Evaluate is skipped and Sync is triggered directly, since the upstream recovery means the downstream data may now be stale.
 
 After Sync completes, Evaluate is run to verify the convergence result.
 

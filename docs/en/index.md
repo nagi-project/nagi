@@ -6,7 +6,7 @@ Nagi is a workflow engine that declaratively defines the desired state of data a
 
 A successful job does not guarantee that data is as expected. Even when a job completes normally, data can be stale, contain NULLs, or have inconsistent aggregations.
 
-Nagi starts from evaluating whether data is as expected. It continuously evaluates the desired state of data and, when it finds data that has diverged, executes the corresponding convergence operation. By declaratively defining desired states and convergence operations, Nagi unifies state evaluation, routine Extract/Load/Transform, and incident response into a single loop.
+Nagi starts by evaluating whether data is as expected. It continuously evaluates the desired state of data and, when drift is detected, runs the convergence operation defined for it. With desired states and convergence operations declared up front, Nagi unifies state evaluation, routine Extract/Load/Transform, and incident response into a single loop.
 
 ### Traditional Approach
 
