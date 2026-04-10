@@ -50,9 +50,11 @@ jobs:
           export SITE_URL_JA="https://nagi-project.dev/${MINOR}/ja/"
           export DOCS_LINK_EN="/${MINOR}/"
           export DOCS_LINK_JA="/${MINOR}/ja/"
-          uv run --no-project mkdocs build -f tag-source/mkdocs.yml --strict \
+          export DOCS_DIR_EN="$GITHUB_WORKSPACE/tag-source/docs/en"
+          export DOCS_DIR_JA="$GITHUB_WORKSPACE/tag-source/docs/ja"
+          uv run --no-project mkdocs build -f mkdocs.yml --strict \
             -d "$GITHUB_WORKSPACE/docs-build"
-          uv run --no-project mkdocs build -f tag-source/mkdocs.ja.yml --strict \
+          uv run --no-project mkdocs build -f mkdocs.ja.yml --strict \
             -d "$GITHUB_WORKSPACE/docs-build/ja"
 
       - name: Checkout docs-site branch
