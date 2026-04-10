@@ -57,3 +57,7 @@ graph LR
 - Declarative — Define the desired state; let the engine converge.
 - Composable — Use with your existing tools, or let Nagi take the wheel.
 - AI-collaborative — Designed for humans and AI agents to work as one.
+
+## What's Next
+
+- [Concepts](./overview/concepts.md) — Learn how the Reconciliation Loop works
