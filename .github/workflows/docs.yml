@@ -32,7 +32,7 @@ jobs:
       - uses: ./.github/actions/setup-uv
 
       - name: Install docs dependencies
-        run: uv sync --no-dev --group docs
+        run: uv sync --no-install-project --no-dev --group docs
 
       - name: Extract minor version
         id: version
@@ -43,9 +43,17 @@ jobs:
           echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
 
       - name: Build docs
+        env:
+          MINOR: ${{ steps.version.outputs.minor }}
         run: |
-          uv run mkdocs build -f tag-source/mkdocs.yml --strict -d "$GITHUB_WORKSPACE/docs-build"
-          uv run mkdocs build -f tag-source/mkdocs.ja.yml --strict -d "$GITHUB_WORKSPACE/docs-build/ja"
+          export SITE_URL="https://nagi-project.dev/${MINOR}/"
+          export SITE_URL_JA="https://nagi-project.dev/${MINOR}/ja/"
+          export DOCS_LINK_EN="/${MINOR}/"
+          export DOCS_LINK_JA="/${MINOR}/ja/"
+          uv run --no-project mkdocs build -f tag-source/mkdocs.yml --strict \
+            -d "$GITHUB_WORKSPACE/docs-build"
+          uv run --no-project mkdocs build -f tag-source/mkdocs.ja.yml --strict \
+            -d "$GITHUB_WORKSPACE/docs-build/ja"
 
       - name: Checkout docs-site branch
         run: |
@@ -65,7 +73,7 @@ jobs:
       - name: Update versions.json
         run: |
           MINOR="${{ steps.version.outputs.minor }}"
-          uv run scripts/update_versions.py docs-deploy "$MINOR"
+          uv run --no-project scripts/update_versions.py docs-deploy "$MINOR"
 
       - name: Push to docs-site branch
         run: |
