@@ -51,6 +51,7 @@ When an upstream Asset transitions from Drifted to Ready, the downstream Asset s
 ### Sync
 
 Sync is an operation that converges a Drifted Asset toward its desired state.
+Commands configured in Sync are expected to be idempotent. Because the Reconciliation Loop may execute Sync repeatedly, configure operations that produce the same result no matter how many times they run.
 
 Sync executes three stages in order:
 
