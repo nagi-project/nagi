@@ -1,119 +1,119 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>https://nagi-project.dev/ja/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/export/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/export/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/mcp/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/mcp/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/notifications/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/notifications/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/storage/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/storage/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/serve/internals/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/serve/internals/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/serve/restart/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/serve/restart/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/architecture/serve/scenarios/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/architecture/serve/scenarios/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/integrations/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/integrations/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/integrations/dbt/cloud/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/integrations/dbt/cloud/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/integrations/dbt/core/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/integrations/dbt/core/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/integrations/dbt/resource-generation/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/integrations/dbt/resource-generation/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/operations/deployment/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/operations/deployment/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/operations/deployment/container/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/operations/deployment/container/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/operations/deployment/local/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/operations/deployment/local/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/operations/deployment/vm/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/operations/deployment/vm/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/overview/concepts/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/overview/concepts/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/overview/get-started/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/overview/get-started/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/overview/quickstart/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/overview/quickstart/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/cli/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/cli/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/glossary/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/glossary/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/project/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/project/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/resources/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/resources/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/resources/asset/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/resources/asset/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/resources/conditions/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/resources/conditions/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/resources/connection/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/resources/connection/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/resources/origin/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/resources/origin/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
     <url>
-         <loc>https://nagi-project.dev/ja/reference/resources/sync/</loc>
+         <loc>https://nagi-project.dev/0.0/ja/reference/resources/sync/</loc>
          <lastmod>2026-04-10</lastmod>
     </url>
 </urlset>
