@@ -96,7 +96,7 @@ Define the convergence operation and its execution conditions as a Sync. The nex
 
 Once manual Sync execution is stable, switch to automatic convergence. When Nagi detects data that does not meet the desired state, it automatically executes Sync.
 
-By repeating this workflow, the goal is to **unify state evaluation, routine ELT, and data incident response into a continuous process**. As new patterns are discovered, following the same steps enriches the scope of automation.
+By repeating this process, the goal is to **unify state evaluation, routine ELT, and data incident response into a continuous loop**. As new patterns are discovered, following the same steps enriches the scope of automation.
 
 An Asset can have multiple pairs of desired state and convergence operation. Nagi evaluates pairs from top to bottom and executes the convergence operation of the first pair that evaluates to Drifted. As patterns are added, more pairs accumulate, and the appropriate convergence operation is selected based on the current data state.
 
@@ -126,7 +126,7 @@ Notified events:
 
 ## What's Next
 
-- [Quickstart](./quickstart.md) — Experience Nagi's workflow with a sample project
+- [Quickstart](./quickstart.md) — Experience Nagi's reconciliation loop with a sample project
 - [Get Started](./get-started.md) — Set up your environment
 - [Architecture](../architecture/index.md) — Learn about the architecture in detail
 - [Resources](../reference/resources/index.md) — Learn about resource types and how to define them
