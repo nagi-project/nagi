@@ -3,16 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - 'mkdocs.yml'
-      - 'mkdocs.ja.yml'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - 'mkdocs.yml'
-      - 'mkdocs.ja.yml'
 
 permissions:
   contents: read
@@ -236,3 +228,15 @@ jobs:
 
       - name: Scenario test
         run: uv run --no-dev --group test --group dbt pytest python/tests/scenario/ -v -m scenario
+
+  ci-success:
+    needs:
+      - build-and-test-rust
+      - unit-test-python
+      - integration-test-python
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: exit 1

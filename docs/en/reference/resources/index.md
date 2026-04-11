@@ -68,7 +68,7 @@ annotations store supplementary information about a resource. Nagi does not use 
 metadata:
   name: daily-sales
   annotations:
-    description: "Daily sales aggregation table"
+    description: "Aggregated metrics for daily sales"
     owner: "data-team@example.com"
 ```
 
@@ -78,8 +78,8 @@ Each kind has a different role within the reconciliation loop.
 
 | kind | Role in the reconciliation loop |
 | --- | --- |
-| [Asset](./asset.md) | The target of Evaluate and Sync. `onDrift` defines pairs of desired state and the corresponding convergence operation. `upstreams` references upstream Assets, and `connection` specifies the DB connection |
-| [Connection](./connection.md) | Connection information for the data warehouse referenced by Assets. Used for query execution during Evaluate |
+| [Asset](./asset.md) | The target of Evaluate and Sync. `onDrift` defines pairs of desired state and the corresponding convergence operation. `upstreams` references upstream Assets. `connection` specifies an external data source when desired state evaluation needs to query one |
+| [Connection](./connection.md) | Connection information for an external data source. Used by Conditions that query data, such as `Freshness` and `SQL` |
 | [Sync](./sync.md) | Sync procedure definition. Three stages: pre, run, post |
 | [Conditions](./conditions.md) | A resource that groups desired state definitions. Can be shared across multiple Assets |
 | [Origin](./origin.md) | Auto-generates Assets from data structure information managed by other software |

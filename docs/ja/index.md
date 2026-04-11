@@ -1,6 +1,6 @@
 # Nagi
 
-Nagi はデータの期待状態を宣言的に定義し、その評価と収束を継続的に行うワークフローエンジンです。
+Nagi はデータの期待状態を宣言的に定義し、その評価と収束を継続的に行う data reconciliation engine です。
 
 ## Motivation
 

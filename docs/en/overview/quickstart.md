@@ -1,6 +1,6 @@
 # Quickstart
 
-A sample project that lets you experience Nagi's workflow without connecting to a data warehouse.
+A sample project that lets you experience Nagi's reconciliation loop without connecting to a data warehouse.
 
 ## Prerequisites
 

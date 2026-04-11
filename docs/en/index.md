@@ -1,6 +1,6 @@
 # Nagi
 
-Nagi is a workflow engine that declaratively defines the desired state of data and continuously performs evaluation and convergence.
+Nagi is a data reconciliation engine that declaratively defines the desired state of data and continuously performs evaluation and convergence.
 
 ## Motivation
 

@@ -1,6 +1,6 @@
 # kind: Asset
 
-データの単位です。データウェアハウスのテーブルやビューに対応します。reconciliation loop において evaluate と sync の対象となる中心的なリソースです。
+宣言された期待状態に対して Nagi が evaluate を行い、Sync によって収束させるデータの単位です。reconciliation loop の中心となるリソースです。
 
 ```yaml
 apiVersion: nagi.io/v1alpha1
