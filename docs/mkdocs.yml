@@ -3,7 +3,8 @@ site_url: !ENV [SITE_URL, 'https://nagi-project.dev/']
 repo_url: https://github.com/nagi-project/nagi
 repo_name: nagi-project/nagi
 edit_uri: edit/main/docs/en/
-docs_dir: !ENV [DOCS_DIR_EN, docs/en]
+docs_dir: !ENV [DOCS_DIR_EN, en]
+site_dir: ../site
 
 theme:
   name: material
