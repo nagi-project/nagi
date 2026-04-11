@@ -1,6 +1,6 @@
 # kind: Asset
 
-A unit of data. Corresponds to a table or view in a data warehouse. The central resource that is the target of Evaluate and Sync in the reconciliation loop.
+A unit of data that Nagi evaluates against a declared desired state and converges through Sync. The central resource of the reconciliation loop.
 
 ```yaml
 apiVersion: nagi.io/v1alpha1

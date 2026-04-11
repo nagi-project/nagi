@@ -27,7 +27,7 @@ See [Serve](../architecture/serve/internals.md) for architecture details.
 
 ### Asset
 
-In Nagi, a unit of data such as a data warehouse table or view is called an **Asset**.
+In Nagi, a unit of data whose state is declared and kept converged by Evaluate and Sync is called an **Asset**.
 
 An Asset is configured with a desired state and a convergence operation to execute when the desired state is not met.
 
@@ -57,9 +57,9 @@ Sync executes three stages in order:
 
 | Stage | Role | Example |
 | --- | --- | --- |
-| Pre | Pre-processing. Preparation before the main process runs | Re-fetching source data, creating temporary tables |
-| Run | Main process. Transforms or updates data | `dbt run`, executing SQL scripts |
-| Post | Post-processing. Cleanup or notifications after the main process completes | Deleting temporary data, notifying external systems |
+| Pre | Pre-processing before the main operation | Preparing inputs, reserving resources |
+| Run | Main operation that updates the Asset | Running a transformation job, invoking an API |
+| Post | Post-processing after the main operation | Cleaning up temporary state, notifying external systems |
 
 Pre and post are optional. Each stage executes the configured command as a subprocess.
 

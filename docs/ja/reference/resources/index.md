@@ -68,7 +68,7 @@ annotations はリソースの補足情報を格納します。Nagi はこの値
 metadata:
   name: daily-sales
   annotations:
-    description: "日次売上の集計テーブル"
+    description: "日次売上の集計指標"
     owner: "data-team@example.com"
 ```
 
@@ -78,8 +78,8 @@ kind ごとに reconciliation loop の中での役割が異なります。
 
 | kind | reconciliation loop での役割 |
 | --- | --- |
-| [Asset](./asset.md) | evaluate と sync の対象。`onDrift` で期待状態とその収束操作のペアを定義する。`upstreams` で上流 Asset を参照し、`connection` で DB 接続を指定する |
-| [Connection](./connection.md) | Asset が参照するデータウェアハウスへの接続情報。evaluate 時のクエリ実行に使用する |
+| [Asset](./asset.md) | evaluate と sync の対象。`onDrift` で期待状態とその収束操作のペアを定義する。`upstreams` で上流 Asset を参照する。`connection` は、期待状態の評価で外部データソースへ問い合わせる必要がある場合に指定する |
+| [Connection](./connection.md) | 外部データソースへの接続情報。`Freshness` や `SQL` など、データを問い合わせる Conditions で使用する |
 | [Sync](./sync.md) | sync の手順定義。pre → run → post の3ステージ |
 | [Conditions](./conditions.md) | 期待状態の定義をまとめたリソース。複数の Asset で共有できる |
 | [Origin](./origin.md) | 他のソフトウェアが持つデータの構成情報から Asset を自動生成する |

@@ -21,6 +21,8 @@ Desired states within the same Conditions are AND-evaluated. If even one is Drif
 
 ## Freshness
 
+Freshness applies to Assets backed by an SQL-queryable data source (e.g. a data warehouse). It uses the configured [Connection](./connection.md) to retrieve the last update time.
+
 Freshness changes how the last update time is retrieved depending on the configuration.
 
 ### When `column` Is Specified
@@ -51,7 +53,7 @@ Omit `column` for tables without a timestamp column or where column values are n
 
 ## SQL Read-Only Constraint
 
-Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.
+Applies to `SQL` and `Freshness` conditions. Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.
 
 ## Command Without Shell
 

@@ -25,7 +25,7 @@ Sync
 ## Resources
 
 Asset
-: A table or view in a data warehouse that Nagi monitors. Declares desired states and Syncs to run when drift is detected.
+: A unit of data whose desired state is declared and evaluated by Nagi. Runs the corresponding Sync when drift is detected.
 
 Conditions
 : A resource that groups desired state definitions. Can be referenced by multiple Assets.
