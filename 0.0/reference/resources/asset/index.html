@@ -1769,13 +1769,15 @@
 
 
 <h1 id="kind-asset">kind: Asset</h1>
-<p>A unit of data. Corresponds to a table or view in a data warehouse. The central resource that is the target of Evaluate and Sync in the reconciliation loop.</p>
+<p>A unit of data that Nagi evaluates against a declared desired state and converges through Sync. The central resource of the reconciliation loop.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">finance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
 <span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">raw-sales</span>
@@ -1834,13 +1836,6 @@
 <td>—</td>
 <td>[]</td>
 <td>Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready.</td>
-</tr>
-<tr>
-<td><code>tags</code></td>
-<td>list[string]</td>
-<td>—</td>
-<td>[]</td>
-<td>Tags for filtering with <code>--select tag:X</code>.</td>
 </tr>
 <tr>
 <td><code>upstreams</code></td>

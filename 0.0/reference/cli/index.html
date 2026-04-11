@@ -1461,6 +1461,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#init" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1592,6 +1603,17 @@
     <span class="md-ellipsis">
       
         --select syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#-exclude-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --exclude syntax
       
     </span>
   </a>
@@ -1931,6 +1953,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#init" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2068,6 +2101,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#-exclude-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --exclude syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2092,7 +2136,7 @@
 <h2 id="install">Install</h2>
 <p>See <a href="../../overview/get-started/#install">Get Started</a> for installation instructions.</p>
 <h2 id="output">Output</h2>
-<p>All command output is in JSON format.</p>
+<p>Command output defaults to JSON. Use <code>--output text</code> for human-readable table output (<code>evaluate</code>, <code>status</code>, <code>ls</code>).</p>
 <h2 id="subcommands">Subcommands</h2>
 <table>
 <thead>
@@ -2148,6 +2192,23 @@
 </tr>
 </tbody>
 </table>
+<h2 id="global-options">Global options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--log-level</code></td>
+<td><code>warn</code></td>
+<td>Set log level (<code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>). Overrides <code>NAGI_LOG_LEVEL</code> env var</td>
+</tr>
+</tbody>
+</table>
 <h2 id="init">init</h2>
 <p>Prepares the environment so that <code>compile</code> can run.</p>
 <div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>init
@@ -2184,7 +2245,7 @@
 </tbody>
 </table>
 <h2 id="ls">ls</h2>
-<p>Lists all compiled resources as JSON.</p>
+<p>Lists all compiled resources.</p>
 <div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>ls<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
 </code></pre></div>
 <table>
@@ -2200,6 +2261,16 @@
 <td><code>--target-dir</code></td>
 <td><code>target</code></td>
 <td>Compiled directory</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>json</code></td>
+<td>Output format (<code>json</code>, <code>text</code>)</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>Disable pager for terminal output</td>
 </tr>
 </tbody>
 </table>
@@ -2222,6 +2293,11 @@
 <td>Specify the Assets to evaluate</td>
 </tr>
 <tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>Exclude assets matching this selector</td>
+</tr>
+<tr>
 <td><code>--target-dir</code></td>
 <td><code>target</code></td>
 <td>Compiled directory</td>
@@ -2235,6 +2311,16 @@
 <td><code>--dry-run</code></td>
 <td>—</td>
 <td>Show the desired state to be evaluated (does not execute queries or commands)</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>json</code></td>
+<td>Output format (<code>json</code>, <code>text</code>)</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>Disable pager for terminal output</td>
 </tr>
 </tbody>
 </table>
@@ -2255,6 +2341,11 @@
 <td><code>--select</code></td>
 <td>—</td>
 <td>Specify the target Assets</td>
+</tr>
+<tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>Exclude assets matching this selector</td>
 </tr>
 <tr>
 <td><code>--target-dir</code></td>
@@ -2281,6 +2372,11 @@
 <td>—</td>
 <td>Skip the dbt Cloud running-job check</td>
 </tr>
+<tr>
+<td><code>--auto-approve</code></td>
+<td>—</td>
+<td>Skip interactive confirmation and execute all proposals</td>
+</tr>
 </tbody>
 </table>
 <h2 id="status">status</h2>
@@ -2302,6 +2398,11 @@
 <td>Specify the target Assets</td>
 </tr>
 <tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>Exclude assets matching this selector</td>
+</tr>
+<tr>
 <td><code>--target-dir</code></td>
 <td><code>target</code></td>
 <td>Compiled directory</td>
@@ -2310,6 +2411,16 @@
 <td><code>--cache-dir</code></td>
 <td>—</td>
 <td>Cache directory</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>json</code></td>
+<td>Output format (<code>json</code>, <code>text</code>)</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>Disable pager for terminal output</td>
 </tr>
 </tbody>
 </table>
@@ -2330,6 +2441,11 @@
 <td><code>--select</code></td>
 <td>—</td>
 <td>Specify the target Assets</td>
+</tr>
+<tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>Exclude assets matching this selector</td>
 </tr>
 <tr>
 <td><code>--resources-dir</code></td>
@@ -2470,15 +2586,44 @@
 <td>The specified Asset and N levels of downstream Assets</td>
 </tr>
 <tr>
-<td><code>tag:finance</code></td>
-<td>Select by tag</td>
+<td><code>label:key</code></td>
+<td>Select by label existence</td>
 </tr>
 <tr>
-<td><code>+tag:finance</code></td>
-<td>Select by tag, including upstream Assets</td>
+<td><code>label:key=value</code></td>
+<td>Select by label key-value match</td>
+</tr>
+<tr>
+<td><code>+label:key</code></td>
+<td>Select by label, including upstream Assets</td>
+</tr>
+<tr>
+<td><code>label:key1,label:key2</code></td>
+<td>Intersection — Assets matching all criteria (AND)</td>
 </tr>
 </tbody>
 </table>
+<p>Multiple <code>--select</code> arguments are combined as union (OR). Comma-separated patterns within a single argument are intersected (AND).</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># OR: Assets matching either selector</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span>daily-sales<span class="w"> </span>--select<span class="w"> </span>access-stats
+
+<span class="c1"># AND: Assets with both labels</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span>
+
+<span class="c1"># Combined: (label:dbt/finance AND label:dbt/daily) OR access-stats</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span><span class="w"> </span>--select<span class="w"> </span>access-stats
+
+<span class="c1"># Select by label key-value pair</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team=data-eng&quot;</span>
+</code></pre></div>
+<h2 id="-exclude-syntax">--exclude syntax</h2>
+<p><code>--exclude</code> uses the same selector syntax as <code>--select</code>. Assets matching any <code>--exclude</code> selector are removed from the result after <code>--select</code> is applied.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Evaluate all assets except monthly-report</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--exclude<span class="w"> </span>monthly-report
+
+<span class="c1"># Evaluate finance-labeled assets, excluding daily-labeled ones</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance&quot;</span><span class="w"> </span>--exclude<span class="w"> </span><span class="s2">&quot;label:dbt/daily&quot;</span>
+</code></pre></div>
 
 
 

@@ -1985,6 +1985,7 @@
 </code></pre></div>
 <p>同一 Conditions 内の期待状態は AND 評価されます。1つでも Drifted であればその Conditions は Drifted です。</p>
 <h2 id="freshness">Freshness</h2>
+<p>Freshness は、SQL でクエリ可能なデータソース（データウェアハウスなど）を背後に持つ Asset を対象とします。設定された <a href="../connection/">Connection</a> を通じて最終更新時刻を取得します。</p>
 <p>Freshness は、設定方法によって最終更新時刻の取得方法が変わります。</p>
 <h3 id="when-column-is-specified">When <code>column</code> Is Specified</h3>
 <p><code>SELECT MAX(column)</code> でカラムの最大値を取得し、データの論理的な最終更新時刻として使用します。<code>updated_at</code> や <code>created_at</code> のようなタイムスタンプカラムが対象です。</p>
@@ -2004,7 +2005,7 @@
 </code></pre></div>
 <p>タイムスタンプ列がないテーブルや、列の値がデータの鮮度と関連しない場合は <code>column</code> を省略してください。</p>
 <h2 id="sql-read-only-constraint">SQL Read-Only Constraint</h2>
-<p>Nagi は SQL クエリを読み取り専用に制限します。SELECT 以外の文（INSERT, UPDATE, DELETE, DDL 等）やmulti-statement query は拒否されます。</p>
+<p><code>SQL</code> および <code>Freshness</code> の Conditions に適用されます。Nagi は SQL クエリを読み取り専用に制限します。SELECT 以外の文（INSERT, UPDATE, DELETE, DDL 等）やmulti-statement query は拒否されます。</p>
 <h2 id="command-without-shell">Command Without Shell</h2>
 <p>シェルを経由しないため、メタキャラクタ（<code>;</code>, <code>&amp;&amp;</code>, <code>|</code> 等）はそのまま引数として渡されます。<code>dbt test --select</code> のように既存のデータ検証ツールを期待状態としてマッピングする用途を想定しています。</p>
 <!-- schema:auto-generated:start:ConditionsSpec -->

@@ -2059,6 +2059,7 @@
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">greeting-check</span>
 <span class="nt">spec</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">file-exists</span>
+<span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span>
 <span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
 <span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">test</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-f</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">greeting.txt</span><span class="p p-Indicator">]</span>
 <span class="nn">---</span>
@@ -2122,7 +2123,7 @@
 <p>ファイルがまだ存在しないため、両方の Asset が Drifted と判定されます。</p>
 <div class="highlight"><pre><span></span><code><span class="p">[</span>
 <span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;assetName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;greeting&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;assetName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;farewell&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;ready&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;conditions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">      </span><span class="p">{</span>
@@ -2133,7 +2134,7 @@
 <span class="w">    </span><span class="p">]</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;assetName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;farewell&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;assetName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;greeting&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;ready&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;conditions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">      </span><span class="p">{</span>
@@ -2148,7 +2149,7 @@
 <h3 id="step-3-sync">Step 3: Sync</h3>
 <div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>sync
 </code></pre></div>
-<p>プランが表示され、承認すると <code>greeting.txt</code> と <code>farewell.txt</code> が作成されます。Sync 完了後に自動で evaluate が行われます。</p>
+<p>プランが表示され、承認すると <code>greeting.txt</code> と <code>farewell.txt</code> が作成されます。</p>
 <h3 id="step-4-verify">Step 4: Verify</h3>
 <div class="highlight"><pre><span></span><code>cat<span class="w"> </span>greeting.txt
 <span class="c1"># Hello from Nagi!</span>

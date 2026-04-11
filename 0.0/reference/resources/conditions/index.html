@@ -1985,6 +1985,7 @@
 </code></pre></div>
 <p>Desired states within the same Conditions are AND-evaluated. If even one is Drifted, the Conditions is Drifted.</p>
 <h2 id="freshness">Freshness</h2>
+<p>Freshness applies to Assets backed by an SQL-queryable data source (e.g. a data warehouse). It uses the configured <a href="../connection/">Connection</a> to retrieve the last update time.</p>
 <p>Freshness changes how the last update time is retrieved depending on the configuration.</p>
 <h3 id="when-column-is-specified">When <code>column</code> Is Specified</h3>
 <p>Retrieves the maximum value of the column with <code>SELECT MAX(column)</code> and uses it as the logical last update time of the data. Targets timestamp columns such as <code>updated_at</code> or <code>created_at</code>.</p>
@@ -2004,7 +2005,7 @@
 </code></pre></div>
 <p>Omit <code>column</code> for tables without a timestamp column or where column values are not related to data freshness.</p>
 <h2 id="sql-read-only-constraint">SQL Read-Only Constraint</h2>
-<p>Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.</p>
+<p>Applies to <code>SQL</code> and <code>Freshness</code> conditions. Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.</p>
 <h2 id="command-without-shell">Command Without Shell</h2>
 <p>Because no shell is used, metacharacters (<code>;</code>, <code>&amp;&amp;</code>, <code>|</code>, etc.) are passed as-is as arguments. This is intended for wrapping existing data validation tools (e.g. <code>dbt test --select</code>) as desired state checks.</p>
 <!-- schema:auto-generated:start:ConditionsSpec -->

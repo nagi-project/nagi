@@ -1461,6 +1461,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#init" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1592,6 +1603,17 @@
     <span class="md-ellipsis">
       
         --select syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#-exclude-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --exclude syntax
       
     </span>
   </a>
@@ -1931,6 +1953,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#init" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2068,6 +2101,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#-exclude-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --exclude syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2092,7 +2136,7 @@
 <h2 id="install">Install</h2>
 <p>インストール方法は <a href="../../overview/get-started/#install">Get Started</a> を参照してください。</p>
 <h2 id="output">Output</h2>
-<p>すべてのコマンドの出力形式は JSON です。</p>
+<p>コマンドの出力形式はデフォルトで JSON です。<code>--output text</code> で人間可読なテーブル形式に切り替えられます（<code>evaluate</code>, <code>status</code>, <code>ls</code>）。</p>
 <h2 id="subcommands">Subcommands</h2>
 <table>
 <thead>
@@ -2148,6 +2192,23 @@
 </tr>
 </tbody>
 </table>
+<h2 id="global-options">Global options</h2>
+<table>
+<thead>
+<tr>
+<th>オプション</th>
+<th>デフォルト</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--log-level</code></td>
+<td><code>warn</code></td>
+<td>ログレベルを設定（<code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>）。<code>NAGI_LOG_LEVEL</code> 環境変数を上書き</td>
+</tr>
+</tbody>
+</table>
 <h2 id="init">init</h2>
 <p>環境を準備し、<code>compile</code> が実行できる状態にします。</p>
 <div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>init
@@ -2184,7 +2245,7 @@
 </tbody>
 </table>
 <h2 id="ls">ls</h2>
-<p>コンパイル済みの全リソースを JSON で一覧表示します。</p>
+<p>コンパイル済みの全リソースを一覧表示します。</p>
 <div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>ls<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
 </code></pre></div>
 <table>
@@ -2200,6 +2261,16 @@
 <td><code>--target-dir</code></td>
 <td><code>target</code></td>
 <td>コンパイル済みディレクトリ</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>json</code></td>
+<td>出力形式（<code>json</code>, <code>text</code>）</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>ターミナル出力のページャーを無効化</td>
 </tr>
 </tbody>
 </table>
@@ -2222,6 +2293,11 @@
 <td>評価対象の Asset を指定</td>
 </tr>
 <tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>指定セレクターに一致する Asset を除外</td>
+</tr>
+<tr>
 <td><code>--target-dir</code></td>
 <td><code>target</code></td>
 <td>コンパイル済みディレクトリ</td>
@@ -2235,6 +2311,16 @@
 <td><code>--dry-run</code></td>
 <td>—</td>
 <td>評価対象の期待状態を表示（クエリやコマンドは実行しない）</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>json</code></td>
+<td>出力形式（<code>json</code>, <code>text</code>）</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>ターミナル出力のページャーを無効化</td>
 </tr>
 </tbody>
 </table>
@@ -2255,6 +2341,11 @@
 <td><code>--select</code></td>
 <td>—</td>
 <td>対象の Asset を指定</td>
+</tr>
+<tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>指定セレクターに一致する Asset を除外</td>
 </tr>
 <tr>
 <td><code>--target-dir</code></td>
@@ -2281,6 +2372,11 @@
 <td>—</td>
 <td>dbt Cloud の実行中ジョブチェックをスキップする</td>
 </tr>
+<tr>
+<td><code>--auto-approve</code></td>
+<td>—</td>
+<td>対話的な確認をスキップし、すべての提案を実行する</td>
+</tr>
 </tbody>
 </table>
 <h2 id="status">status</h2>
@@ -2302,6 +2398,11 @@
 <td>対象の Asset を指定</td>
 </tr>
 <tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>指定セレクターに一致する Asset を除外</td>
+</tr>
+<tr>
 <td><code>--target-dir</code></td>
 <td><code>target</code></td>
 <td>コンパイル済みディレクトリ</td>
@@ -2310,6 +2411,16 @@
 <td><code>--cache-dir</code></td>
 <td>—</td>
 <td>キャッシュディレクトリ</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>json</code></td>
+<td>出力形式（<code>json</code>, <code>text</code>）</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>ターミナル出力のページャーを無効化</td>
 </tr>
 </tbody>
 </table>
@@ -2330,6 +2441,11 @@
 <td><code>--select</code></td>
 <td>—</td>
 <td>対象の Asset を指定</td>
+</tr>
+<tr>
+<td><code>--exclude</code></td>
+<td>—</td>
+<td>指定セレクターに一致する Asset を除外</td>
 </tr>
 <tr>
 <td><code>--resources-dir</code></td>
@@ -2470,15 +2586,44 @@
 <td>指定した Asset と下流 N 段</td>
 </tr>
 <tr>
-<td><code>tag:finance</code></td>
-<td>タグで選択</td>
+<td><code>label:key</code></td>
+<td>ラベルの存在で選択</td>
 </tr>
 <tr>
-<td><code>+tag:finance</code></td>
-<td>タグで選択し、上流を含む</td>
+<td><code>label:key=value</code></td>
+<td>ラベルの key-value 一致で選択</td>
+</tr>
+<tr>
+<td><code>+label:key</code></td>
+<td>ラベルで選択し、上流を含む</td>
+</tr>
+<tr>
+<td><code>label:key1,label:key2</code></td>
+<td>積集合 — すべての条件に一致する Asset（AND）</td>
 </tr>
 </tbody>
 </table>
+<p>複数の <code>--select</code> 引数は和集合（OR）で結合されます。単一引数内のカンマ区切りパターンは積集合（AND）で結合されます。</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># OR: いずれかのセレクターに一致する Asset</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span>daily-sales<span class="w"> </span>--select<span class="w"> </span>access-stats
+
+<span class="c1"># AND: 両方のラベルを持つ Asset</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span>
+
+<span class="c1"># 組み合わせ: (label:dbt/finance AND label:dbt/daily) OR access-stats</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span><span class="w"> </span>--select<span class="w"> </span>access-stats
+
+<span class="c1"># ラベルの key-value ペアで選択</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team=data-eng&quot;</span>
+</code></pre></div>
+<h2 id="-exclude-syntax">--exclude syntax</h2>
+<p><code>--exclude</code> は <code>--select</code> と同じセレクター構文を使用します。<code>--select</code> の適用後に、<code>--exclude</code> に一致する Asset が結果から除外されます。</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># monthly-report 以外のすべての Asset を評価</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--exclude<span class="w"> </span>monthly-report
+
+<span class="c1"># finance ラベルの Asset から daily ラベルの Asset を除外して評価</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance&quot;</span><span class="w"> </span>--exclude<span class="w"> </span><span class="s2">&quot;label:dbt/daily&quot;</span>
+</code></pre></div>
 
 
 

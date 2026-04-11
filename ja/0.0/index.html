@@ -401,6 +401,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#whats-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's Next
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1824,6 +1835,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#whats-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's Next
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1845,7 +1867,7 @@
 
 
 <h1 id="nagi">Nagi</h1>
-<p>Nagi はデータの期待状態を宣言的に定義し、その評価と収束を継続的に行うワークフローエンジンです。</p>
+<p>Nagi はデータの期待状態を宣言的に定義し、その評価と収束を継続的に行う data reconciliation engine です。</p>
 <h2 id="motivation">Motivation</h2>
 <p>「ジョブの成功」は「データが期待どおりであること」を保証しません。ジョブが正常終了しても、データが古い、NULL が混入している、集計値に不整合がある、といったことは起こり得ます。</p>
 <p>Nagi は「データが期待どおりであるか」の評価を起点に動作します。データの期待状態を継続的に評価し、乖離しているデータを見つけた場合は、それに対応する収束操作を実行します。期待状態と収束操作を宣言的に定義することで、状態評価と定常的な Extract/Load/Transform、障害対応をひとつのループに統合します。</p>
@@ -1890,6 +1912,10 @@
 <li>Declarative — Define the desired state; let the engine converge.</li>
 <li>Composable — Use with your existing tools, or let Nagi take the wheel.</li>
 <li>AI-collaborative — Designed for humans and AI agents to work as one.</li>
+</ul>
+<h2 id="whats-next">What's Next</h2>
+<ul>
+<li><a href="overview/concepts/">Concepts</a> — Reconciliation Loop の仕組みを知る</li>
 </ul>
 
 

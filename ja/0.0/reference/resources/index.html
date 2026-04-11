@@ -1680,6 +1680,56 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attributes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Attributes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        labels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kind
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#template-variables" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1745,9 +1795,83 @@
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;リソース種別&gt;</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;一意な名前&gt;</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data-eng</span>
+<span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;...&quot;</span>
+<span class="w">    </span><span class="nt">owner</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;data-team@example.com&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
 <span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">...</span>
 </code></pre></div>
+<!-- schema:auto-generated:start:Metadata -->
+
+<h2 id="attributes">Attributes</h2>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>-</td>
+<td>Unique name of the resource.</td>
+</tr>
+<tr>
+<td><code>annotations</code></td>
+<td>map[string, string]</td>
+<td>—</td>
+<td>-</td>
+<td>Non-identifying metadata for descriptions, owner contacts, or other arbitrary information.</td>
+</tr>
+<tr>
+<td><code>labels</code></td>
+<td>map[string, string]</td>
+<td>—</td>
+<td>-</td>
+<td>Key-value pairs for filtering with <code>--select label:key</code> or <code>--select label:key=value</code>.</td>
+</tr>
+</tbody>
+</table>
+<!-- schema:auto-generated:end:Metadata -->
+
+<h3 id="labels">labels</h3>
+<p>labels は <code>--select</code> セレクターで Asset の絞り込みに使用します。</p>
+<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data-eng</span>
+<span class="w">    </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># team ラベルが存在する Asset を選択</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team&quot;</span>
+
+<span class="c1"># team=data-eng の Asset を選択</span>
+nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team=data-eng&quot;</span>
+</code></pre></div>
+<p>Origin (dbt) から自動生成された Asset では、dbt のタグが <code>dbt/</code> プレフィックス付きで labels に変換されます。</p>
+<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+</code></pre></div>
+<h3 id="annotations">annotations</h3>
+<p>annotations はリソースの補足情報を格納します。Nagi はこの値を処理に使用しません。</p>
+<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
+<span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;日次売上の集計指標&quot;</span>
+<span class="w">    </span><span class="nt">owner</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;data-team@example.com&quot;</span>
+</code></pre></div>
+<h2 id="kind">kind</h2>
 <p>kind ごとに reconciliation loop の中での役割が異なります。</p>
 <table>
 <thead>
@@ -1759,11 +1883,11 @@
 <tbody>
 <tr>
 <td><a href="asset/">Asset</a></td>
-<td>evaluate と sync の対象。<code>onDrift</code> で期待状態とその収束操作のペアを定義する。<code>upstreams</code> で上流 Asset を参照し、<code>connection</code> で DB 接続を指定する</td>
+<td>evaluate と sync の対象。<code>onDrift</code> で期待状態とその収束操作のペアを定義する。<code>upstreams</code> で上流 Asset を参照する。<code>connection</code> は、期待状態の評価で外部データソースへ問い合わせる必要がある場合に指定する</td>
 </tr>
 <tr>
 <td><a href="connection/">Connection</a></td>
-<td>Asset が参照するデータウェアハウスへの接続情報。evaluate 時のクエリ実行に使用する</td>
+<td>外部データソースへの接続情報。<code>Freshness</code> や <code>SQL</code> など、データを問い合わせる Conditions で使用する</td>
 </tr>
 <tr>
 <td><a href="sync/">Sync</a></td>

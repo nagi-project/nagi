@@ -2210,7 +2210,7 @@
 <p>生成される Asset の名前には Origin 名がプレフィックスとして付与されます: <code>{origin}.{model}</code>。詳細は <a href="../../../reference/resources/origin/#asset-naming">kind: Origin — Asset Naming</a> を参照してください。</p>
 <h3 id="dbt-source">dbt source</h3>
 <p>dbt source は Asset リソースに変換されます。</p>
-<p>Origin の設定からは、 <code>connection</code>, <code>autoSync</code> が付与されます。<code>upstreams</code> と <code>tags</code> は設定されません。</p>
+<p>Origin の設定からは、<code>connection</code>, <code>autoSync</code> が付与されます。<code>upstreams</code> は設定されません。dbt source のタグは <code>dbt/</code> プレフィックス付きで <code>metadata.labels</code> に変換されます。</p>
 <div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
@@ -2225,17 +2225,19 @@
 <h3 id="dbt-model">dbt model</h3>
 <p>dbt model は Asset リソースに変換されます。</p>
 <p>Origin の設定からは、<code>connection</code>, <code>autoSync</code> が付与されます。</p>
-<p>dbt のリネージ（dbt model 間の依存関係、dbt source → dbt model の依存関係）は <code>spec.upstreams</code> に、dbt model のタグは <code>spec.tags</code> に変換されます。</p>
+<p>dbt のリネージ（dbt model 間の依存関係、dbt source → dbt model の依存関係）は <code>spec.upstreams</code> に、dbt model のタグは <code>dbt/</code> プレフィックス付きで <code>metadata.labels</code> に変換されます。</p>
 <div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
 <span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">finance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
 <span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
@@ -2302,11 +2304,13 @@
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
 <span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">finance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
 <span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
@@ -2343,11 +2347,13 @@
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
 <span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">finance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-daily-sales</span>
 <span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
@@ -2372,11 +2378,13 @@
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
 <span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">finance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
 <span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>

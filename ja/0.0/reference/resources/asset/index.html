@@ -1769,13 +1769,15 @@
 
 
 <h1 id="kind-asset">kind: Asset</h1>
-<p>データの単位です。データウェアハウスのテーブルやビューに対応します。reconciliation loop において evaluate と sync の対象となる中心的なリソースです。</p>
+<p>宣言された期待状態に対して Nagi が evaluate を行い、Sync によって収束させるデータの単位です。reconciliation loop の中心となるリソースです。</p>
 <div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
+<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
 <span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">finance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
 <span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">raw-sales</span>
@@ -1834,13 +1836,6 @@
 <td>—</td>
 <td>[]</td>
 <td>Condition-sync pairs evaluated in order. First entry whose conditions detect drift determines which sync to run. When omitted, the Asset is always Ready.</td>
-</tr>
-<tr>
-<td><code>tags</code></td>
-<td>list[string]</td>
-<td>—</td>
-<td>[]</td>
-<td>Tags for filtering with <code>--select tag:X</code>.</td>
 </tr>
 <tr>
 <td><code>upstreams</code></td>

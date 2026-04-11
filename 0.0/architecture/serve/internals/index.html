@@ -2128,7 +2128,7 @@
 </table>
 <p>Evaluate and Sync are each issued as async tasks, so they do not block the Controller loop.</p>
 <h3 id="concurrency-limits">Concurrency Limits</h3>
-<p>You can limit the number of concurrent Evaluate and Sync tasks per Controller. This is used to control query load on the data warehouse when a large number of root Assets are queued immediately after startup, or when many downstream syncs are triggered simultaneously by an upstream Asset's transition to Ready.</p>
+<p>You can limit the number of concurrent Evaluate and Sync tasks per Controller. This controls query load on the data warehouse when many root Assets are queued at startup, or when many downstream Syncs are triggered by an upstream Asset's transition to Ready.</p>
 <p>Configure with <code>maxEvaluateConcurrency</code> and <code>maxSyncConcurrency</code> in <a href="../../../reference/project/"><code>nagi.yaml</code></a>. If omitted, concurrency is unlimited.</p>
 <h2 id="evaluate-triggers">Evaluate Triggers</h2>
 <p>Evaluate is triggered by any of the following conditions.</p>
@@ -2164,7 +2164,7 @@
 <h3 id="scheduled-evaluation">Scheduled Evaluation</h3>
 <p>For Freshness, in addition to periodic evaluation via <code>interval</code>, scheduled evaluation via <code>checkAt</code> can also be run. For example, this is useful when the data handoff time is fixed.</p>
 <h3 id="upstream-state-change">Upstream State Change</h3>
-<p>When an Asset's state transitions from Drifted to Ready, Sync is executed for downstream Assets that depend on it. In this case, Evaluate is skipped and Sync is triggered directly. This is because the upstream Asset has transitioned from Drifted to Ready, because upstream recovery implies the downstream data may be stale.</p>
+<p>When an Asset transitions from Drifted to Ready, Sync is executed for downstream Assets that depend on it. Evaluate is skipped and Sync is triggered directly, since the upstream recovery means the downstream data may now be stale.</p>
 <p>After Sync completes, Evaluate is run to verify the convergence result.</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant U as Upstream Asset

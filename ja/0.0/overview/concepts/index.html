@@ -2076,7 +2076,7 @@
     Converge --&gt; Evaluate</code></pre>
 <p>アーキテクチャの詳細は <a href="../../architecture/serve/internals/">Serve</a> を参照してください。</p>
 <h3 id="asset">Asset</h3>
-<p>Nagi では、データウェアハウスのテーブルやビューといったデータの単位を <strong>Asset</strong> と呼びます。</p>
+<p>Nagi では、期待状態が宣言され、Evaluate と Sync によって収束が保たれるデータの単位を <strong>Asset</strong> と呼びます。</p>
 <p>Asset には期待状態と、期待状態を満たしていないときに実行する収束操作を設定します。</p>
 <p>また Asset は、他の Asset への依存関係を宣言できます。Nagi はそれを読み取って依存グラフを構築し、ループの実行制御に使用します。</p>
 <div class="admonition tip">
@@ -2093,7 +2093,8 @@
 </ul>
 <p>上流 Asset が Drifted → Ready に遷移した場合は、下流 Asset の evaluate をスキップして直接 sync を起動します。また、上流が Drifted の間は下流の evaluate はブロックされます。具体的な動作については <a href="../../architecture/serve/internals/#upstream-state-change">Serve: Upstream State Change</a> を参照してください。</p>
 <h3 id="sync">Sync</h3>
-<p>Sync は、Drifted である Asset を期待状態に収束させる操作です。</p>
+<p>Sync は、Drifted である Asset を期待状態に収束させる操作です。
+Sync に設定するコマンドは冪等性をもつことを期待しています。Reconciliation Loop は Sync を繰り返し実行する可能性があるため、何度実行しても同じ結果になる操作を設定してください。</p>
 <p>Sync は3つのステージを順番に実行します。</p>
 <table>
 <thead>
@@ -2106,18 +2107,18 @@
 <tbody>
 <tr>
 <td>Pre</td>
-<td>前処理。メイン処理の実行前に必要な準備を行う</td>
-<td>ソースデータの再取得、一時テーブルの作成</td>
+<td>メイン処理の前段</td>
+<td>入力の準備、リソースの確保</td>
 </tr>
 <tr>
 <td>Run</td>
-<td>メイン処理。データの変換や更新を行う</td>
-<td><code>dbt run</code>、SQL スクリプトの実行</td>
+<td>Asset を更新するメイン処理</td>
+<td>変換ジョブの実行、API の呼び出し</td>
 </tr>
 <tr>
 <td>Post</td>
-<td>後処理。メイン処理の完了後に行うクリーンアップや通知</td>
-<td>一時データの削除、外部システムへの通知</td>
+<td>メイン処理の後段</td>
+<td>一時状態のクリーンアップ、外部システムへの通知</td>
 </tr>
 </tbody>
 </table>
