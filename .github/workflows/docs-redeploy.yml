@@ -1,0 +1,73 @@
+name: Redeploy Docs
+
+on:
+  workflow_dispatch:
+    inputs:
+      minor:
+        description: "Minor version to overwrite (e.g. 0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-uv
+
+      - name: Install docs dependencies
+        run: uv sync --no-install-project --no-dev --group docs
+
+      - name: Build docs
+        env:
+          MINOR: ${{ inputs.minor }}
+        run: |
+          export SITE_URL="https://nagi-project.dev/${MINOR}/"
+          export SITE_URL_JA="https://nagi-project.dev/ja/${MINOR}/"
+          export DOCS_LINK_EN="/${MINOR}/"
+          export DOCS_LINK_JA="/ja/${MINOR}/"
+          export DOCS_DIR_EN="$GITHUB_WORKSPACE/docs/en"
+          export DOCS_DIR_JA="$GITHUB_WORKSPACE/docs/ja"
+          uv run --no-project mkdocs build -f mkdocs.yml --strict \
+            -d "$GITHUB_WORKSPACE/docs-build-en"
+          uv run --no-project mkdocs build -f mkdocs.ja.yml --strict \
+            -d "$GITHUB_WORKSPACE/docs-build-ja"
+
+      - name: Checkout docs-site branch
+        run: |
+          git fetch origin docs-site
+          git worktree add docs-deploy origin/docs-site
+
+      - name: Copy build output
+        run: |
+          MINOR="${{ inputs.minor }}"
+          rm -rf "docs-deploy/${MINOR}"
+          rm -rf "docs-deploy/ja/${MINOR}"
+          mkdir -p "docs-deploy/ja"
+          cp -r docs-build-en/. "docs-deploy/${MINOR}/"
+          cp -r docs-build-ja/. "docs-deploy/ja/${MINOR}/"
+          rm -rf "docs-deploy/${MINOR}/ja"
+
+      - name: Update versions.json
+        run: |
+          MINOR="${{ inputs.minor }}"
+          uv run --no-project scripts/update_versions.py docs-deploy "$MINOR"
+          uv run --no-project scripts/update_versions.py docs-deploy/ja "$MINOR"
+
+      - name: Push to docs-site branch
+        run: |
+          cd docs-deploy
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          MINOR="${{ inputs.minor }}"
+          git diff --cached --quiet && echo "No changes to deploy" && exit 0
+          git commit -m "docs: redeploy ${MINOR} from main"
+          git push origin HEAD:docs-site
