@@ -4,7 +4,7 @@
 
 In Nagi, you describe the desired state of data and convergence operations in YAML files. This configuration is called a **resource**.
 
-Based on the resource definitions, Nagi continuously evaluates the desired state of data (**Evaluate**) and executes convergence operations (**Sync**) on data that does not meet the desired state. This cycle of evaluation and convergence repeats.
+Based on the resource definitions, Nagi evaluates whether data meets its desired state (**Evaluate**) and, when drift is detected, executes convergence operations (**Sync**). This cycle of evaluation and convergence repeats.
 
 ```mermaid
 graph LR
@@ -31,7 +31,7 @@ In Nagi, a unit of data such as a data warehouse table or view is called an **As
 
 An Asset is configured with a desired state and a convergence operation to execute when the desired state is not met.
 
-An Asset can also declare dependencies on other Assets. Nagi reads these to build a dependency graph and uses it to control loop execution.
+An Asset can also declare dependencies on other Assets. Nagi uses these declarations to build a dependency graph that controls loop execution.
 
 !!! tip
     In this documentation, the Asset being depended on is called **upstream**, and the Asset that depends on it is called **downstream**.
@@ -51,12 +51,13 @@ When an upstream Asset transitions from Drifted to Ready, the downstream Asset s
 ### Sync
 
 Sync is an operation that converges a Drifted Asset toward its desired state.
+Commands configured in Sync are expected to be idempotent. Because the Reconciliation Loop may execute Sync repeatedly, configure operations that produce the same result no matter how many times they run.
 
 Sync executes three stages in order:
 
 | Stage | Role | Example |
 | --- | --- | --- |
-| Pre | Pre-processing. Performs preparation needed before the main process | Re-fetching source data, creating temporary tables |
+| Pre | Pre-processing. Preparation before the main process runs | Re-fetching source data, creating temporary tables |
 | Run | Main process. Transforms or updates data | `dbt run`, executing SQL scripts |
 | Post | Post-processing. Cleanup or notifications after the main process completes | Deleting temporary data, notifying external systems |
 

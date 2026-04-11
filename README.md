@@ -2,11 +2,11 @@
 
 Nagi monitors your data, detects drift from the desired state, and automatically runs the operation you defined to fix it.
 
-## Why Nagi
+## Motivation
 
-Orchestrators, data tests, and observability tools each catch part of the problem — but when data drifts, recovery still falls on a human.
+A successful job does not guarantee that data is as expected. Even when a job completes normally, data can be stale, contain NULLs, or have inconsistent aggregations.
 
-Nagi closes that gap. Declare the desired state, pair it with a convergence operation, and Nagi continuously evaluates and auto-converges. No manual triage, no forgotten re-runs.
+Nagi starts by evaluating whether data is as expected. Declare the desired state, pair it with a convergence operation, and Nagi continuously evaluates and auto-converges — unifying state evaluation, routine ELT, and incident response into a single loop.
 
 ## Install
 
