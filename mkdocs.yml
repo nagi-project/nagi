@@ -1,9 +1,9 @@
 site_name: Nagi Documentation
-site_url: https://nagi-project.dev/
+site_url: !ENV [SITE_URL, 'https://nagi-project.dev/']
 repo_url: https://github.com/nagi-project/nagi
 repo_name: nagi-project/nagi
 edit_uri: edit/main/docs/en/
-docs_dir: docs/en
+docs_dir: !ENV [DOCS_DIR_EN, docs/en]
 
 theme:
   name: material
@@ -30,10 +30,10 @@ extra:
     provider: mike
   alternate:
     - name: English
-      link: /
+      link: !ENV [DOCS_LINK_EN, '/']
       lang: en
     - name: 日本語
-      link: /ja/
+      link: !ENV [DOCS_LINK_JA, '/ja/']
       lang: ja
 
 extra_css:

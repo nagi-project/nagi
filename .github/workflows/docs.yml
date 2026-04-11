@@ -32,7 +32,7 @@ jobs:
       - uses: ./.github/actions/setup-uv
 
       - name: Install docs dependencies
-        run: uv sync --no-dev --group docs
+        run: uv sync --no-install-project --no-dev --group docs
 
       - name: Extract minor version
         id: version
@@ -43,9 +43,19 @@ jobs:
           echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
 
       - name: Build docs
+        env:
+          MINOR: ${{ steps.version.outputs.minor }}
         run: |
-          uv run mkdocs build -f tag-source/mkdocs.yml --strict -d "$GITHUB_WORKSPACE/docs-build"
-          uv run mkdocs build -f tag-source/mkdocs.ja.yml --strict -d "$GITHUB_WORKSPACE/docs-build/ja"
+          export SITE_URL="https://nagi-project.dev/${MINOR}/"
+          export SITE_URL_JA="https://nagi-project.dev/ja/${MINOR}/"
+          export DOCS_LINK_EN="/${MINOR}/"
+          export DOCS_LINK_JA="/ja/${MINOR}/"
+          export DOCS_DIR_EN="$GITHUB_WORKSPACE/tag-source/docs/en"
+          export DOCS_DIR_JA="$GITHUB_WORKSPACE/tag-source/docs/ja"
+          uv run --no-project mkdocs build -f mkdocs.yml --strict \
+            -d "$GITHUB_WORKSPACE/docs-build-en"
+          uv run --no-project mkdocs build -f mkdocs.ja.yml --strict \
+            -d "$GITHUB_WORKSPACE/docs-build-ja"
 
       - name: Checkout docs-site branch
         run: |
@@ -60,12 +70,18 @@ jobs:
         run: |
           MINOR="${{ steps.version.outputs.minor }}"
           rm -rf "docs-deploy/${MINOR}"
-          cp -r docs-build/. "docs-deploy/${MINOR}/"
+          rm -rf "docs-deploy/ja/${MINOR}"
+          mkdir -p "docs-deploy/ja"
+          cp -r docs-build-en/. "docs-deploy/${MINOR}/"
+          cp -r docs-build-ja/. "docs-deploy/ja/${MINOR}/"
+          # Remove legacy nested layout (docs-deploy/${MINOR}/ja) from prior deploys
+          rm -rf "docs-deploy/${MINOR}/ja"
 
       - name: Update versions.json
         run: |
           MINOR="${{ steps.version.outputs.minor }}"
-          uv run scripts/update_versions.py docs-deploy "$MINOR"
+          uv run --no-project scripts/update_versions.py docs-deploy "$MINOR"
+          uv run --no-project scripts/update_versions.py docs-deploy/ja "$MINOR"
 
       - name: Push to docs-site branch
         run: |

@@ -84,14 +84,14 @@ uv run python scripts/gen_schema_docs.py docs/schemas docs/ja
 description = "Build documentation site (EN + JA)"
 depends = ["docs:gen-schema"]
 run = """
-uv run mkdocs build -f mkdocs.yml --strict
-uv run mkdocs build -f mkdocs.ja.yml --strict
+uv run --no-project mkdocs build -f mkdocs.yml --strict
+uv run --no-project mkdocs build -f mkdocs.ja.yml --strict
 """
 
 [tasks."docs:serve"]
 description = "Serve English documentation site locally with live reload (port 8000)"
-run = "uv run mkdocs serve -a localhost:8000 --livereload"
+run = "uv run --no-project mkdocs serve -a localhost:8000 --livereload"
 
 [tasks."docs:serve-ja"]
 description = "Serve Japanese documentation site locally with live reload (port 8001)"
-run = "uv run mkdocs serve -f mkdocs.ja.yml -a localhost:8001 --livereload"
+run = "uv run --no-project mkdocs serve -f mkdocs.ja.yml -a localhost:8001 --livereload"
