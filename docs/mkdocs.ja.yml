@@ -3,8 +3,8 @@ INHERIT: mkdocs.yml
 site_name: Nagi Documentation
 site_url: !ENV [SITE_URL_JA, 'https://nagi-project.dev/ja/']
 edit_uri: edit/main/docs/ja/
-docs_dir: !ENV [DOCS_DIR_JA, docs/ja]
-site_dir: site/ja
+docs_dir: !ENV [DOCS_DIR_JA, ja]
+site_dir: ../site/ja
 
 theme:
   language: ja

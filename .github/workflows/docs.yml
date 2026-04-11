@@ -52,9 +52,9 @@ jobs:
           export DOCS_LINK_JA="/ja/${MINOR}/"
           export DOCS_DIR_EN="$GITHUB_WORKSPACE/tag-source/docs/en"
           export DOCS_DIR_JA="$GITHUB_WORKSPACE/tag-source/docs/ja"
-          uv run --no-project mkdocs build -f mkdocs.yml --strict \
+          uv run --no-project mkdocs build -f docs/mkdocs.yml --strict \
             -d "$GITHUB_WORKSPACE/docs-build-en"
-          uv run --no-project mkdocs build -f mkdocs.ja.yml --strict \
+          uv run --no-project mkdocs build -f docs/mkdocs.ja.yml --strict \
             -d "$GITHUB_WORKSPACE/docs-build-ja"
 
       - name: Checkout docs-site branch
