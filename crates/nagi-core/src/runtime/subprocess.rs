@@ -151,7 +151,7 @@ pub fn build_subprocess_env(
 #[cfg(windows)]
 fn create_environment_block_map() -> Result<HashMap<String, String>, SubprocessEnvError> {
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
     use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -175,7 +175,12 @@ fn create_environment_block_map() -> Result<HashMap<String, String>, SubprocessE
 
     unsafe {
         let mut raw_token = HANDLE::default();
-        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token).map_err(|e| {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_QUERY | TOKEN_DUPLICATE,
+            &mut raw_token,
+        )
+        .map_err(|e| {
             SubprocessEnvError::EnvironmentBlockFailed(format!("OpenProcessToken: {e}"))
         })?;
         let _token = HandleGuard(raw_token);
