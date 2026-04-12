@@ -214,7 +214,7 @@ fn parse_yaml_file(
 }
 
 use crate::runtime::kind::connection::{
-    resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
+    connection_identity_ref, resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
 };
 
 #[derive(Debug)]
@@ -223,7 +223,7 @@ struct CategorizedResources {
     conditions_groups: HashMap<String, Vec<DesiredCondition>>,
     syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
-    identity_names: HashSet<String>,
+    identities: HashMap<String, kind::identity::IdentitySpec>,
 }
 
 fn check_dup(
@@ -261,7 +261,7 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         conditions_groups: HashMap::new(),
         syncs: HashMap::new(),
         assets: Vec::new(),
-        identity_names: HashSet::new(),
+        identities: HashMap::new(),
     };
     // Track Asset names separately for overlay merge (max 2 allowed).
     let mut asset_indices: HashMap<String, usize> = HashMap::new();
@@ -298,9 +298,9 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                 }
             }
             NagiKind::Origin { .. } => {}
-            NagiKind::Identity { .. } => {
+            NagiKind::Identity { spec, .. } => {
                 if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
-                    result.identity_names.insert(name);
+                    result.identities.insert(name, spec);
                 }
             }
         }
@@ -473,35 +473,31 @@ fn warn_asset_readiness(assets: &[ResolvedAsset]) {
 
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
-    let CategorizedResources {
-        connections,
-        conditions_groups,
-        syncs,
-        assets,
-        identity_names,
-    } = categorize(resources)?;
+    let mut categorized = categorize(resources)?;
 
-    syncs
+    categorized
+        .syncs
         .iter()
         .for_each(|(name, spec)| warn_multi_asset_sync(name, spec));
 
+    let assets = std::mem::take(&mut categorized.assets);
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
     let mut errors: Vec<CompileError> = Vec::new();
 
     // Validate Identity references in Syncs.
-    for (name, spec) in &syncs {
+    for (name, spec) in &categorized.syncs {
         errors.extend(collect_unresolved_identity_errors_sync(
             name,
             spec,
-            &identity_names,
+            &categorized.identities,
         ));
     }
 
     // Validate Identity references in Connections.
-    for (conn_name, spec) in &connections {
-        if let Some(id) = connection_identity(spec) {
-            if !identity_names.contains(id) {
+    for (conn_name, spec) in &categorized.connections {
+        if let Some(id) = connection_identity_ref(spec) {
+            if !categorized.identities.contains_key(id) {
                 errors.push(CompileError::UnresolvedRef {
                     kind: "Identity".to_string(),
                     name: id.to_string(),
@@ -522,15 +518,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
 
     let mut resolved_assets = Vec::new();
     for (metadata, spec) in assets {
-        match resolve_asset(
-            metadata,
-            spec,
-            &asset_names,
-            &connections,
-            &conditions_groups,
-            &syncs,
-            &identity_names,
-        ) {
+        match resolve_asset(metadata, spec, &asset_names, &categorized) {
             Ok(asset) => resolved_assets.push(asset),
             Err(e) => errors.push(e),
         }
@@ -554,11 +542,15 @@ fn resolve_asset(
     metadata: Metadata,
     spec: AssetSpec,
     asset_names: &HashSet<String>,
-    connections: &HashMap<String, ConnectionSpec>,
-    conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
-    syncs: &HashMap<String, SyncSpec>,
-    identity_names: &HashSet<String>,
+    resources: &CategorizedResources,
 ) -> Result<ResolvedAsset, CompileError> {
+    let CategorizedResources {
+        connections,
+        conditions_groups,
+        syncs,
+        identities,
+        ..
+    } = resources;
     let mut errors: Vec<CompileError> = Vec::new();
 
     errors.extend(collect_unresolved_upstream_errors(
@@ -594,7 +586,7 @@ fn resolve_asset(
                 } => Some(id),
                 _ => None,
             })
-            .filter(|id| !identity_names.contains(*id))
+            .filter(|id| !identities.contains_key(*id))
             .map(|id| CompileError::UnresolvedRef {
                 kind: "Identity".to_string(),
                 name: id.clone(),
@@ -604,7 +596,7 @@ fn resolve_asset(
     let connection = match spec
         .connection
         .as_deref()
-        .map(|name| resolve_connection_by_name(name, connections))
+        .map(|name| resolve_connection_by_name(name, connections, identities))
         .transpose()
     {
         Ok(v) => v,
@@ -643,7 +635,7 @@ fn collect_unresolved_upstream_errors(
 fn collect_unresolved_identity_errors_sync(
     _sync_name: &str,
     spec: &SyncSpec,
-    identity_names: &HashSet<String>,
+    identities: &HashMap<String, kind::identity::IdentitySpec>,
 ) -> Vec<CompileError> {
     let mut errors = Vec::new();
     let refs: Vec<Option<&String>> = vec![
@@ -653,7 +645,7 @@ fn collect_unresolved_identity_errors_sync(
         spec.post.as_ref().and_then(|s| s.identity.as_ref()),
     ];
     for id in refs.into_iter().flatten() {
-        if !identity_names.contains(id) {
+        if !identities.contains_key(id) {
             errors.push(CompileError::UnresolvedRef {
                 kind: "Identity".to_string(),
                 name: id.clone(),
@@ -661,15 +653,6 @@ fn collect_unresolved_identity_errors_sync(
         }
     }
     errors
-}
-
-fn connection_identity(spec: &ConnectionSpec) -> Option<&str> {
-    match spec {
-        ConnectionSpec::Dbt { identity, .. }
-        | ConnectionSpec::BigQuery { identity, .. }
-        | ConnectionSpec::DuckDb { identity, .. }
-        | ConnectionSpec::Snowflake { identity, .. } => identity.as_deref(),
-    }
 }
 
 /// Resolves on_drift entries: validates conditions/sync refs and expands templates.
