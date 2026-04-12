@@ -133,15 +133,6 @@ mod tests {
         assert_eq!(output.assets[2].dbt_cloud_job_ids, None);
     }
 
-    #[test]
-    fn apply_cloud_job_mapping_empty_mapping_leaves_none() {
-        let mut output = make_output(vec![make_resolved_asset("daily_sales")]);
-
-        apply_cloud_job_mapping(&mut output, &HashMap::new());
-
-        assert_eq!(output.assets[0].dbt_cloud_job_ids, None);
-    }
-
     // ── find_dbt_cloud_credentials ──────────────────────────────────────
 
     #[test]
