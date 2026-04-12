@@ -65,14 +65,7 @@ impl OriginSpec {
             } => {
                 require_non_empty("connection", connection)?;
                 require_non_empty("projectDir", project_dir)?;
-                for key in env.keys() {
-                    crate::runtime::subprocess::validate_env_key(key).map_err(|e| {
-                        KindError::InvalidSpec {
-                            kind: KIND.to_string(),
-                            message: format!("env: {e}"),
-                        }
-                    })?;
-                }
+                crate::runtime::subprocess::validate_env_keys(env, KIND, "env")?;
                 Ok(())
             }
         }

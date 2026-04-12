@@ -43,6 +43,22 @@ pub fn validate_env_key(key: &str) -> Result<(), SubprocessEnvError> {
     }
 }
 
+/// Validates all env key names in a map, returning a `KindError::InvalidSpec`
+/// on the first invalid key.
+pub fn validate_env_keys(
+    env: &HashMap<String, String>,
+    kind: &str,
+    context: &str,
+) -> Result<(), crate::runtime::kind::KindError> {
+    for key in env.keys() {
+        validate_env_key(key).map_err(|e| crate::runtime::kind::KindError::InvalidSpec {
+            kind: kind.to_string(),
+            message: format!("{context}: {e}"),
+        })?;
+    }
+    Ok(())
+}
+
 fn is_valid_env_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
