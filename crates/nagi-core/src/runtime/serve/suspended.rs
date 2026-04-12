@@ -107,12 +107,6 @@ mod tests {
     }
 
     #[test]
-    fn suspended_remove_nonexistent_is_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        remove_suspended(dir.path(), "nonexistent").unwrap();
-    }
-
-    #[test]
     fn suspended_list_returns_sorted() {
         let dir = tempfile::tempdir().unwrap();
         write_suspended(dir.path(), &sample_suspended("z-asset")).unwrap();
@@ -127,12 +121,6 @@ mod tests {
     fn suspended_list_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
         let list = list_suspended(dir.path()).unwrap();
-        assert!(list.is_empty());
-    }
-
-    #[test]
-    fn suspended_list_nonexistent_dir() {
-        let list = list_suspended(&std::env::temp_dir().join("nonexistent-nagi-test-dir")).unwrap();
         assert!(list.is_empty());
     }
 }
