@@ -85,6 +85,7 @@ nav:
       - "kind: Sync": reference/resources/sync.md
       - "kind: Conditions": reference/resources/conditions.md
       - "kind: Origin": reference/resources/origin.md
+      - "kind: Identity": reference/resources/identity.md
     - Environment Variables: reference/environment-variables.md
     - CLI: reference/cli.md
     - Glossary: reference/glossary.md

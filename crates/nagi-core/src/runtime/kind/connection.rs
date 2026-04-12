@@ -120,6 +120,9 @@ pub enum ResolvedConnection {
         profiles_dir: Option<String>,
         /// Path to the dbt Cloud credentials file, if dbt Cloud is configured.
         dbt_cloud_credentials_file: Option<String>,
+        /// Unexpanded Identity env template. Excluded from serialization.
+        #[serde(skip)]
+        identity_env: Option<HashMap<String, String>>,
     },
     /// Direct BigQuery connection without dbt profiles.yml.
     #[serde(rename = "bigquery", rename_all = "camelCase")]
@@ -131,10 +134,19 @@ pub enum ResolvedConnection {
         method: Option<String>,
         keyfile: Option<String>,
         timeout_seconds: Option<u32>,
+        /// Unexpanded Identity env template. Excluded from serialization.
+        #[serde(skip)]
+        identity_env: Option<HashMap<String, String>>,
     },
     /// Direct DuckDB connection.
     #[serde(rename = "duckdb", rename_all = "camelCase")]
-    DuckDb { name: String, path: String },
+    DuckDb {
+        name: String,
+        path: String,
+        /// Unexpanded Identity env template. Excluded from serialization.
+        #[serde(skip)]
+        identity_env: Option<HashMap<String, String>>,
+    },
     /// Direct Snowflake connection via SQL REST API with Key-Pair JWT authentication.
     #[serde(rename = "snowflake", rename_all = "camelCase")]
     Snowflake {
@@ -146,6 +158,9 @@ pub enum ResolvedConnection {
         warehouse: String,
         role: Option<String>,
         private_key_path: String,
+        /// Unexpanded Identity env template. Excluded from serialization.
+        #[serde(skip)]
+        identity_env: Option<HashMap<String, String>>,
     },
 }
 
@@ -176,15 +191,20 @@ impl ResolvedConnection {
                 method,
                 keyfile,
                 timeout_seconds,
+                identity_env,
                 ..
-            } => connect_bigquery(
-                project,
-                dataset,
-                execution_project,
-                method.as_deref(),
-                keyfile,
-                *timeout_seconds,
-            ),
+            } => {
+                let conn = bigquery::BigQueryConnection::from_resolved(
+                    project,
+                    dataset,
+                    execution_project,
+                    method.as_deref(),
+                    keyfile,
+                    *timeout_seconds,
+                    identity_env.as_ref(),
+                )?;
+                Ok(Box::new(conn))
+            }
             #[cfg(not(feature = "bigquery"))]
             ResolvedConnection::BigQuery { .. } => Err(ConnectionError::UnsupportedAdapter(
                 "bigquery (feature disabled)".to_string(),
@@ -217,26 +237,6 @@ impl ResolvedConnection {
             )),
         }
     }
-}
-
-#[cfg(feature = "bigquery")]
-fn connect_bigquery(
-    project: &str,
-    dataset: &str,
-    execution_project: &Option<String>,
-    method: Option<&str>,
-    keyfile: &Option<String>,
-    timeout_seconds: Option<u32>,
-) -> Result<Box<dyn Connection>, ConnectionError> {
-    let conn = bigquery::BigQueryConnection::from_resolved(
-        project,
-        dataset,
-        execution_project,
-        method,
-        keyfile,
-        timeout_seconds,
-    )?;
-    Ok(Box::new(conn))
 }
 
 fn connect_dbt(
@@ -281,9 +281,11 @@ fn connect_snowflake(
 }
 
 /// Resolves a named `ConnectionSpec` into a `ResolvedConnection`.
+/// If the connection references an Identity, the unexpanded env template is attached.
 pub fn resolve_connection_by_name(
     conn_name: &str,
     connections: &HashMap<String, ConnectionSpec>,
+    identities: &HashMap<String, super::identity::IdentitySpec>,
 ) -> Result<ResolvedConnection, CompileError> {
     let conn_spec = connections
         .get(conn_name)
@@ -291,12 +293,14 @@ pub fn resolve_connection_by_name(
             kind: "Connection".to_string(),
             name: conn_name.to_string(),
         })?;
+    let identity_env = resolve_identity_env(connection_identity_ref(conn_spec), identities);
     match conn_spec {
         ConnectionSpec::Dbt {
             ref profile,
             ref target,
             ref profiles_dir,
             ref dbt_cloud,
+            ..
         } => Ok(ResolvedConnection::Dbt {
             name: conn_name.to_string(),
             profile: profile.clone(),
@@ -307,6 +311,7 @@ pub fn resolve_connection_by_name(
                     .clone()
                     .unwrap_or_else(|| "~/.dbt/dbt_cloud.yml".to_string())
             }),
+            identity_env: identity_env.clone(),
         }),
         ConnectionSpec::BigQuery {
             ref project,
@@ -315,6 +320,7 @@ pub fn resolve_connection_by_name(
             ref method,
             ref keyfile,
             ref timeout_seconds,
+            ..
         } => Ok(ResolvedConnection::BigQuery {
             name: conn_name.to_string(),
             project: project.clone(),
@@ -323,10 +329,12 @@ pub fn resolve_connection_by_name(
             method: method.clone(),
             keyfile: keyfile.clone(),
             timeout_seconds: *timeout_seconds,
+            identity_env: identity_env.clone(),
         }),
-        ConnectionSpec::DuckDb { ref path } => Ok(ResolvedConnection::DuckDb {
+        ConnectionSpec::DuckDb { ref path, .. } => Ok(ResolvedConnection::DuckDb {
             name: conn_name.to_string(),
             path: path.clone(),
+            identity_env: identity_env.clone(),
         }),
         ConnectionSpec::Snowflake {
             ref account,
@@ -336,6 +344,7 @@ pub fn resolve_connection_by_name(
             ref warehouse,
             ref role,
             ref private_key_path,
+            ..
         } => Ok(ResolvedConnection::Snowflake {
             name: conn_name.to_string(),
             account: account.clone(),
@@ -345,7 +354,28 @@ pub fn resolve_connection_by_name(
             warehouse: warehouse.clone(),
             role: role.clone(),
             private_key_path: private_key_path.clone(),
+            identity_env: identity_env.clone(),
         }),
+    }
+}
+
+pub(crate) fn connection_identity_ref(spec: &ConnectionSpec) -> Option<&str> {
+    match spec {
+        ConnectionSpec::Dbt { identity, .. }
+        | ConnectionSpec::BigQuery { identity, .. }
+        | ConnectionSpec::DuckDb { identity, .. }
+        | ConnectionSpec::Snowflake { identity, .. } => identity.as_deref(),
+    }
+}
+
+fn resolve_identity_env(
+    identity_ref: Option<&str>,
+    identities: &HashMap<String, super::identity::IdentitySpec>,
+) -> Option<HashMap<String, String>> {
+    let name = identity_ref?;
+    let spec = identities.get(name)?;
+    match spec {
+        super::identity::IdentitySpec::Env { env } => Some(env.clone()),
     }
 }
 
@@ -369,6 +399,9 @@ pub enum ConnectionSpec {
         /// Optional dbt Cloud configuration for running-job checks before sync.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dbt_cloud: Option<DbtCloudSpec>,
+        /// Reference to a `kind: Identity` resource for authentication scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<String>,
     },
     /// BigQuery REST API connection.
     #[serde(rename = "bigquery", rename_all = "camelCase")]
@@ -389,12 +422,18 @@ pub enum ConnectionSpec {
         /// Query timeout in seconds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<u32>,
+        /// Reference to a `kind: Identity` resource for authentication scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<String>,
     },
     /// DuckDB connection via the `duckdb` CLI.
     #[serde(rename = "duckdb")]
     DuckDb {
         /// Path to the DuckDB database file.
         path: String,
+        /// Reference to a `kind: Identity` resource for authentication scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<String>,
     },
     /// Snowflake SQL REST API connection with Key-Pair JWT authentication.
     #[serde(rename = "snowflake", rename_all = "camelCase")]
@@ -414,6 +453,9 @@ pub enum ConnectionSpec {
         role: Option<String>,
         /// Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.
         private_key_path: String,
+        /// Reference to a `kind: Identity` resource for authentication scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<String>,
     },
 }
 
@@ -443,7 +485,7 @@ impl ConnectionSpec {
                 reject_empty_optional("executionProject", execution_project.as_deref())?;
                 Ok(())
             }
-            ConnectionSpec::DuckDb { path } => {
+            ConnectionSpec::DuckDb { path, .. } => {
                 reject_empty("path", path)?;
                 Ok(())
             }
@@ -455,6 +497,7 @@ impl ConnectionSpec {
                 warehouse,
                 role,
                 private_key_path,
+                ..
             } => {
                 reject_empty("account", account)?;
                 reject_empty("user", user)?;
@@ -522,6 +565,7 @@ target: dev
                 target,
                 profiles_dir,
                 dbt_cloud,
+                ..
             } => {
                 assert_eq!(profile, "my_project");
                 assert_eq!(target, &Some("dev".to_string()));
@@ -624,6 +668,7 @@ timeoutSeconds: 30
                 method,
                 keyfile,
                 timeout_seconds,
+                ..
             } => {
                 assert_eq!(project, "my-gcp-project");
                 assert_eq!(dataset, "raw");
@@ -652,6 +697,7 @@ dataset: raw
                 method,
                 keyfile,
                 timeout_seconds,
+                ..
             } => {
                 assert_eq!(project, "my-gcp-project");
                 assert_eq!(dataset, "raw");
@@ -684,6 +730,7 @@ dataset: raw
                 target: Some("dev".to_string()),
                 profiles_dir: None,
                 dbt_cloud: None,
+                identity: None,
             };
         validate_bigquery_oauth:
             ConnectionSpec::BigQuery {
@@ -693,6 +740,7 @@ dataset: raw
                 method: Some("oauth".to_string()),
                 keyfile: None,
                 timeout_seconds: None,
+                identity: None,
             };
         validate_bigquery_service_account:
             ConnectionSpec::BigQuery {
@@ -702,6 +750,7 @@ dataset: raw
                 method: Some("service-account".to_string()),
                 keyfile: Some("/path/to/key.json".to_string()),
                 timeout_seconds: None,
+                identity: None,
             };
     }
 
@@ -729,6 +778,7 @@ dataset: raw
                 target: None,
                 profiles_dir: None,
                 dbt_cloud: None,
+                identity: None,
             } => "profile must not be empty";
         validate_bigquery_rejects_empty_project:
             ConnectionSpec::BigQuery {
@@ -738,6 +788,7 @@ dataset: raw
                 method: None,
                 keyfile: None,
                 timeout_seconds: None,
+                identity: None,
             } => "project must not be empty";
         validate_bigquery_rejects_empty_dataset:
             ConnectionSpec::BigQuery {
@@ -747,6 +798,7 @@ dataset: raw
                 method: None,
                 keyfile: None,
                 timeout_seconds: None,
+                identity: None,
             } => "dataset must not be empty";
         validate_bigquery_rejects_empty_execution_project:
             ConnectionSpec::BigQuery {
@@ -756,6 +808,7 @@ dataset: raw
                 method: None,
                 keyfile: None,
                 timeout_seconds: None,
+                identity: None,
             } => "executionProject must not be empty";
     }
 
@@ -803,9 +856,10 @@ dataset: raw
                 target: Some("dev".to_string()),
                 profiles_dir: None,
                 dbt_cloud: None,
+                identity: None,
             },
         );
-        let conn = resolve_connection_by_name("my-bq", &connections).unwrap();
+        let conn = resolve_connection_by_name("my-bq", &connections, &HashMap::new()).unwrap();
         assert!(matches!(conn, ResolvedConnection::Dbt { name, profile, .. }
             if name == "my-bq" && profile == "proj"));
     }
@@ -822,9 +876,11 @@ dataset: raw
                 method: Some("oauth".to_string()),
                 keyfile: None,
                 timeout_seconds: Some(30),
+                identity: None,
             },
         );
-        let conn = resolve_connection_by_name("my-bq-direct", &connections).unwrap();
+        let conn =
+            resolve_connection_by_name("my-bq-direct", &connections, &HashMap::new()).unwrap();
         match conn {
             ResolvedConnection::BigQuery {
                 name,
@@ -834,6 +890,7 @@ dataset: raw
                 method,
                 keyfile,
                 timeout_seconds,
+                ..
             } => {
                 assert_eq!(name, "my-bq-direct");
                 assert_eq!(project, "my-gcp-project");
@@ -850,7 +907,7 @@ dataset: raw
     #[test]
     fn resolve_connection_by_name_missing() {
         let connections = HashMap::new();
-        let err = resolve_connection_by_name("missing", &connections).unwrap_err();
+        let err = resolve_connection_by_name("missing", &connections, &HashMap::new()).unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, name }
             if kind == "Connection" && name == "missing"));
     }
@@ -865,7 +922,7 @@ path: ./data/warehouse.duckdb
 "#;
         let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
         match &spec {
-            ConnectionSpec::DuckDb { path } => {
+            ConnectionSpec::DuckDb { path, .. } => {
                 assert_eq!(path, "./data/warehouse.duckdb");
             }
             other => panic!("expected DuckDb, got {other:?}"),
@@ -876,6 +933,7 @@ path: ./data/warehouse.duckdb
         validate_duckdb_valid:
             ConnectionSpec::DuckDb {
                 path: "./data/warehouse.duckdb".to_string(),
+                identity: None,
             };
     }
 
@@ -883,6 +941,7 @@ path: ./data/warehouse.duckdb
         validate_duckdb_rejects_empty_path:
             ConnectionSpec::DuckDb {
                 path: "".to_string(),
+                identity: None,
             } => "path must not be empty";
     }
 
@@ -893,11 +952,12 @@ path: ./data/warehouse.duckdb
             "my-duck".to_string(),
             ConnectionSpec::DuckDb {
                 path: "./data/warehouse.duckdb".to_string(),
+                identity: None,
             },
         );
-        let conn = resolve_connection_by_name("my-duck", &connections).unwrap();
+        let conn = resolve_connection_by_name("my-duck", &connections, &HashMap::new()).unwrap();
         match conn {
-            ResolvedConnection::DuckDb { name, path } => {
+            ResolvedConnection::DuckDb { name, path, .. } => {
                 assert_eq!(name, "my-duck");
                 assert_eq!(path, "./data/warehouse.duckdb");
             }
@@ -929,6 +989,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse,
                 role,
                 private_key_path,
+                ..
             } => {
                 assert_eq!(account, "myorg-myacct");
                 assert_eq!(user, "MY_USER");
@@ -972,6 +1033,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "MY_WH".to_string(),
                 role: None,
                 private_key_path: "/path/to/rsa_key.p8".to_string(),
+                identity: None,
             };
     }
 
@@ -985,6 +1047,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                identity: None,
             } => "account must not be empty";
         validate_snowflake_rejects_empty_user:
             ConnectionSpec::Snowflake {
@@ -995,6 +1058,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                identity: None,
             } => "user must not be empty";
         validate_snowflake_rejects_empty_database:
             ConnectionSpec::Snowflake {
@@ -1005,6 +1069,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                identity: None,
             } => "database must not be empty";
         validate_snowflake_rejects_empty_schema:
             ConnectionSpec::Snowflake {
@@ -1015,6 +1080,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                identity: None,
             } => "schema must not be empty";
         validate_snowflake_rejects_empty_warehouse:
             ConnectionSpec::Snowflake {
@@ -1025,6 +1091,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                identity: None,
             } => "warehouse must not be empty";
         validate_snowflake_rejects_empty_private_key_path:
             ConnectionSpec::Snowflake {
@@ -1035,6 +1102,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "".to_string(),
+                identity: None,
             } => "privateKeyPath must not be empty";
         validate_snowflake_rejects_empty_role:
             ConnectionSpec::Snowflake {
@@ -1045,6 +1113,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: Some("".to_string()),
                 private_key_path: "p".to_string(),
+                identity: None,
             } => "role must not be empty";
     }
 
@@ -1061,9 +1130,10 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "MY_WH".to_string(),
                 role: Some("MY_ROLE".to_string()),
                 private_key_path: "/path/to/key.p8".to_string(),
+                identity: None,
             },
         );
-        let conn = resolve_connection_by_name("my-sf", &connections).unwrap();
+        let conn = resolve_connection_by_name("my-sf", &connections, &HashMap::new()).unwrap();
         match conn {
             ResolvedConnection::Snowflake {
                 name,
@@ -1074,6 +1144,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse,
                 role,
                 private_key_path,
+                ..
             } => {
                 assert_eq!(name, "my-sf");
                 assert_eq!(account, "myorg-myacct");

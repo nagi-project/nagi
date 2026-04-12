@@ -472,38 +472,29 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::runtime::kind::sync::{StepType, SyncStep};
+    use crate::runtime::kind::sync::SyncStep;
 
     fn run_only_spec() -> SyncSpec {
-        SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["echo".to_string(), "hello".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        }
+        SyncSpec::new(SyncStep::command(vec![
+            "echo".to_string(),
+            "hello".to_string(),
+        ]))
     }
 
     fn full_spec() -> SyncSpec {
-        SyncSpec {
-            pre: Some(SyncStep {
-                step_type: StepType::Command,
-                args: vec!["echo".to_string(), "pre".to_string()],
-                env: HashMap::new(),
-            }),
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["echo".to_string(), "run".to_string()],
-                env: HashMap::new(),
-            },
-            post: Some(SyncStep {
-                step_type: StepType::Command,
-                args: vec!["echo".to_string(), "post".to_string()],
-                env: HashMap::new(),
-            }),
-        }
+        let mut spec = SyncSpec::new(SyncStep::command(vec![
+            "echo".to_string(),
+            "run".to_string(),
+        ]));
+        spec.pre = Some(SyncStep::command(vec![
+            "echo".to_string(),
+            "pre".to_string(),
+        ]));
+        spec.post = Some(SyncStep::command(vec![
+            "echo".to_string(),
+            "post".to_string(),
+        ]));
+        spec
     }
 
     // ── resolve_stages ───────────────────────────────────────────────────
@@ -588,15 +579,10 @@ mod tests {
 
     #[tokio::test]
     async fn execute_captures_stdout() {
-        let spec = SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["echo".to_string(), "hello world".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let spec = SyncSpec::new(SyncStep::command(vec![
+            "echo".to_string(),
+            "hello world".to_string(),
+        ]));
         let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap();
@@ -605,19 +591,11 @@ mod tests {
 
     #[tokio::test]
     async fn execute_captures_stderr() {
-        let spec = SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec![
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    "echo error >&2".to_string(),
-                ],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let spec = SyncSpec::new(SyncStep::command(vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "echo error >&2".to_string(),
+        ]));
         let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap();
@@ -626,19 +604,11 @@ mod tests {
 
     #[tokio::test]
     async fn execute_short_circuits_on_failure() {
-        let spec = SyncSpec {
-            pre: Some(SyncStep {
-                step_type: StepType::Command,
-                args: vec!["false".to_string()],
-                env: HashMap::new(),
-            }),
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["echo".to_string(), "should not run".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let mut spec = SyncSpec::new(SyncStep::command(vec![
+            "echo".to_string(),
+            "should not run".to_string(),
+        ]));
+        spec.pre = Some(SyncStep::command(vec!["false".to_string()]));
         let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap();
@@ -686,15 +656,9 @@ mod tests {
 
     #[tokio::test]
     async fn execute_nonexistent_command_returns_error() {
-        let spec = SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["__nagi_no_such_command__".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let spec = SyncSpec::new(SyncStep::command(vec![
+            "__nagi_no_such_command__".to_string()
+        ]));
         let err = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
             .await
             .unwrap_err();
@@ -815,17 +779,10 @@ mod tests {
                         interval: None,
                         env: HashMap::new(),
                         evaluate_cache_ttl: None,
+                        identity: None,
                     }],
                     conditions_ref: "test-conditions".to_string(),
-                    sync: crate::runtime::kind::sync::SyncSpec {
-                        pre: None,
-                        run: SyncStep {
-                            step_type: StepType::Command,
-                            args: vec!["true".to_string()],
-                            env: HashMap::new(),
-                        },
-                        post: None,
-                    },
+                    sync: SyncSpec::new(SyncStep::command(vec!["true".to_string()])),
                     sync_ref_name: "test-sync".to_string(),
                 }],
                 upstreams: vec![],

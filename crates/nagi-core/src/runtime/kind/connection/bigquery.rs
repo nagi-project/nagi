@@ -10,6 +10,40 @@ use crate::runtime::kind::connection::dbt::AdapterConfig;
 
 use super::{require_str, Connection, ConnectionError};
 
+/// Expands `${VAR}` references in a single value using process env.
+fn expand_env_value(template: &str) -> Result<String, ConnectionError> {
+    let mut out = String::with_capacity(template.len());
+    let mut chars = template.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '$' && chars.peek() == Some(&'{') {
+            chars.next();
+            let mut var = String::new();
+            let mut closed = false;
+            for vc in chars.by_ref() {
+                if vc == '}' {
+                    closed = true;
+                    break;
+                }
+                var.push(vc);
+            }
+            if !closed {
+                return Err(ConnectionError::AuthFailed(format!(
+                    "unterminated '${{' in identity env template: {template}"
+                )));
+            }
+            let val = std::env::var(&var).map_err(|_| {
+                ConnectionError::AuthFailed(format!(
+                    "environment variable '{var}' referenced by identity is not set"
+                ))
+            })?;
+            out.push_str(&val);
+        } else {
+            out.push(ch);
+        }
+    }
+    Ok(out)
+}
+
 // ── BigQuery config ──────────────────────────────────────────────────────────
 
 /// Authentication method for BigQuery.
@@ -251,6 +285,8 @@ struct BqDatasetRef {
 pub struct BigQueryConnection {
     config: BigQueryConfig,
     agent: ureq::Agent,
+    /// Unexpanded Identity env template. `${VAR}` references are resolved at `access_token` time.
+    identity_env: Option<std::collections::HashMap<String, String>>,
 }
 
 impl BigQueryConnection {
@@ -262,6 +298,7 @@ impl BigQueryConnection {
         method: Option<&str>,
         keyfile: &Option<String>,
         timeout_seconds: Option<u32>,
+        identity_env: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Self, super::ConnectionError> {
         let auth = match method.unwrap_or("oauth") {
             "oauth" => AuthMethod::OAuth,
@@ -285,17 +322,30 @@ impl BigQueryConnection {
             dataset: dataset.to_string(),
             timeout_ms: timeout_seconds.map(|s| s.saturating_mul(1000)),
         };
-        Ok(Self::new(config))
+        Ok(Self {
+            config,
+            agent: ureq::Agent::new_with_defaults(),
+            identity_env: identity_env.cloned(),
+        })
     }
 
     pub fn new(config: BigQueryConfig) -> Self {
         Self {
             config,
             agent: ureq::Agent::new_with_defaults(),
+            identity_env: None,
         }
     }
 
     fn access_token(&self) -> Result<String, ConnectionError> {
+        // If Identity env provides GOOGLE_APPLICATION_CREDENTIALS, expand ${VAR} and use it
+        // as the ADC file path. The expanded value is dropped after this scope.
+        if let Some(env) = &self.identity_env {
+            if let Some(template) = env.get("GOOGLE_APPLICATION_CREDENTIALS") {
+                let expanded = expand_env_value(template)?;
+                return token_from_adc_path(&self.agent, std::path::Path::new(&expanded));
+            }
+        }
         match &self.config.auth {
             AuthMethod::OAuth => token_from_adc(&self.agent),
             AuthMethod::ServiceAccount { keyfile } => token_from_keyfile(&self.agent, keyfile),
@@ -527,8 +577,15 @@ impl Connection for BigQueryConnection {
         let config = self.config.clone();
         let agent = self.agent.clone();
         let sql = sql.to_string();
-        super::run_blocking(move || BigQueryConnection { config, agent }.query_scalar_sync(&sql))
-            .await
+        super::run_blocking(move || {
+            BigQueryConnection {
+                config,
+                agent,
+                identity_env: None,
+            }
+            .query_scalar_sync(&sql)
+        })
+        .await
     }
 
     fn freshness_sql(
@@ -575,8 +632,15 @@ impl Connection for BigQueryConnection {
         let config = self.config.clone();
         let agent = self.agent.clone();
         let sql = sql.to_string();
-        super::run_blocking(move || BigQueryConnection { config, agent }.execute_sql_sync(&sql))
-            .await
+        super::run_blocking(move || {
+            BigQueryConnection {
+                config,
+                agent,
+                identity_env: None,
+            }
+            .execute_sql_sync(&sql)
+        })
+        .await
     }
 
     async fn load_jsonl(
@@ -591,7 +655,12 @@ impl Connection for BigQueryConnection {
         let table = table.to_string();
         let jsonl_path = jsonl_path.to_path_buf();
         super::run_blocking(move || {
-            BigQueryConnection { config, agent }.load_jsonl_sync(&dataset, &table, &jsonl_path)
+            BigQueryConnection {
+                config,
+                agent,
+                identity_env: None,
+            }
+            .load_jsonl_sync(&dataset, &table, &jsonl_path)
         })
         .await
     }

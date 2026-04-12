@@ -315,15 +315,7 @@ mod tests {
     }
 
     fn dummy_sync_spec() -> SyncSpec {
-        SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: crate::runtime::kind::sync::StepType::Command,
-                args: vec!["true".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        }
+        SyncSpec::new(SyncStep::command(vec!["true".to_string()]))
     }
 
     fn on_drift_with(conditions: Vec<DesiredCondition>) -> Vec<ResolvedOnDriftEntry> {
@@ -559,6 +551,7 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            identity: None,
         };
         let on_drift = on_drift_with(vec![condition.clone()]);
         let result = dry_run_asset("my_table", &on_drift);
@@ -582,6 +575,7 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            identity: None,
         }]);
         let result = evaluate_asset("my_table", &on_drift, None, None)
             .await
@@ -822,6 +816,7 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            identity: None,
         }]);
         let result = evaluate_asset("a", &on_drift, None, None).await;
         assert!(
@@ -838,6 +833,7 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            identity: None,
         }]);
         let result = evaluate_asset("a", &on_drift, None, None).await.unwrap();
         assert!(!result.ready);

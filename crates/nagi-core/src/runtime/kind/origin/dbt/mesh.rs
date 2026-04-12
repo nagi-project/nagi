@@ -780,15 +780,9 @@ mod tests {
         NagiKind::Sync {
             api_version: "nagi.io/v1alpha1".to_string(),
             metadata: crate::runtime::kind::Metadata::new(name),
-            spec: crate::runtime::kind::sync::SyncSpec {
-                pre: None,
-                run: crate::runtime::kind::sync::SyncStep {
-                    step_type: crate::runtime::kind::sync::StepType::Command,
-                    args: vec![],
-                    env: HashMap::new(),
-                },
-                post: None,
-            },
+            spec: crate::runtime::kind::sync::SyncSpec::new(
+                crate::runtime::kind::sync::SyncStep::command(vec![]),
+            ),
         }
     }
 

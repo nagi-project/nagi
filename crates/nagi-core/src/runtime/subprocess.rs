@@ -90,16 +90,18 @@ fn expand_template(
 }
 
 #[cfg(unix)]
-pub(crate) fn compose_subprocess_env(
+fn compose_subprocess_env(
     parent_env: &HashMap<String, String>,
+    identity_env: Option<&HashMap<String, String>>,
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
-    compose_subprocess_env_with_allowlist(ALLOWLIST, parent_env, declared)
+    compose_subprocess_env_with_allowlist(ALLOWLIST, parent_env, identity_env, declared)
 }
 
-pub(crate) fn compose_subprocess_env_with_allowlist(
+fn compose_subprocess_env_with_allowlist(
     allowlist: &[&str],
     parent_env: &HashMap<String, String>,
+    identity_env: Option<&HashMap<String, String>>,
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
     let mut out = HashMap::new();
@@ -108,12 +110,25 @@ pub(crate) fn compose_subprocess_env_with_allowlist(
             out.insert((*key).to_string(), value.clone());
         }
     }
-    for (key, value) in declared {
-        validate_env_key(key)?;
-        let expanded = expand_template(value, parent_env)?;
-        out.insert(key.clone(), expanded);
-    }
+    overlay_env(&mut out, identity_env, parent_env)?;
+    overlay_env(&mut out, Some(declared), parent_env)?;
     Ok(out)
+}
+
+/// Validates keys, expands `${VAR}` templates, and inserts into `out`.
+fn overlay_env(
+    out: &mut HashMap<String, String>,
+    env: Option<&HashMap<String, String>>,
+    parent_env: &HashMap<String, String>,
+) -> Result<(), SubprocessEnvError> {
+    if let Some(entries) = env {
+        for (key, value) in entries {
+            validate_env_key(key)?;
+            let expanded = expand_template(value, parent_env)?;
+            out.insert(key.clone(), expanded);
+        }
+    }
+    Ok(())
 }
 
 /// Call immediately before spawning a subprocess and drop the returned map as
@@ -121,10 +136,11 @@ pub(crate) fn compose_subprocess_env_with_allowlist(
 /// referenced via `${VAR}` are not retained beyond the spawn point.
 #[cfg(unix)]
 pub fn build_subprocess_env(
+    identity_env: Option<&HashMap<String, String>>,
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
     let parent_env: HashMap<String, String> = std::env::vars().collect();
-    compose_subprocess_env(&parent_env, declared)
+    compose_subprocess_env(&parent_env, identity_env, declared)
 }
 
 /// Windows version: uses `CreateEnvironmentBlock` to obtain the full
@@ -133,16 +149,13 @@ pub fn build_subprocess_env(
 /// variables that PowerShell and .NET CLR require to start.
 #[cfg(windows)]
 pub fn build_subprocess_env(
+    identity_env: Option<&HashMap<String, String>>,
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
-    let base_env = create_environment_block_map()?;
     let parent_env: HashMap<String, String> = std::env::vars().collect();
-    let mut out = base_env;
-    for (key, value) in declared {
-        validate_env_key(key)?;
-        let expanded = expand_template(value, &parent_env)?;
-        out.insert(key.clone(), expanded);
-    }
+    let mut out = create_environment_block_map()?;
+    overlay_env(&mut out, identity_env, &parent_env)?;
+    overlay_env(&mut out, Some(declared), &parent_env)?;
     Ok(out)
 }
 
@@ -240,7 +253,7 @@ mod tests {
                     let parent = hm(&$parent);
                     let declared = hm(&$declared);
                     let result = compose_subprocess_env_with_allowlist(
-                        TEST_ALLOWLIST, &parent, &declared,
+                        TEST_ALLOWLIST, &parent, None, &declared,
                     ).unwrap();
                     assert_eq!(result, hm(&$expected));
                 }
@@ -276,7 +289,7 @@ mod tests {
                     let parent = hm(&$parent);
                     let declared = hm(&[("X", $value)]);
                     let result = compose_subprocess_env_with_allowlist(
-                        TEST_ALLOWLIST, &parent, &declared,
+                        TEST_ALLOWLIST, &parent, None, &declared,
                     ).unwrap();
                     assert_eq!(result.get("X").map(String::as_str), Some($expected));
                 }
@@ -310,8 +323,8 @@ mod tests {
     fn undefined_var_errors() {
         let parent = hm(&[]);
         let declared = hm(&[("X", "${FOO}")]);
-        let err =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
+        let err = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+            .unwrap_err();
         assert_eq!(err, SubprocessEnvError::UndefinedVar("FOO".to_string()));
     }
 
@@ -319,8 +332,8 @@ mod tests {
     fn unclosed_template_errors() {
         let parent = hm(&[]);
         let declared = hm(&[("X", "${FOO")]);
-        let err =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
+        let err = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+            .unwrap_err();
         assert!(matches!(err, SubprocessEnvError::InvalidTemplate { .. }));
     }
 
@@ -328,8 +341,8 @@ mod tests {
     fn empty_template_errors() {
         let parent = hm(&[]);
         let declared = hm(&[("X", "${}")]);
-        let err =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
+        let err = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+            .unwrap_err();
         assert!(matches!(err, SubprocessEnvError::InvalidTemplate { .. }));
     }
 
@@ -337,8 +350,8 @@ mod tests {
     fn invalid_var_name_in_template_errors() {
         let parent = hm(&[("FOO-BAR", "x")]);
         let declared = hm(&[("X", "${FOO-BAR}")]);
-        let err =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
+        let err = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+            .unwrap_err();
         assert!(matches!(err, SubprocessEnvError::InvalidTemplate { .. }));
     }
 
@@ -351,7 +364,7 @@ mod tests {
                 fn $name() {
                     let parent = hm(&$parent);
                     let declared = hm(&$declared);
-                    let result = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap();
+                    let result = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared).unwrap();
                     assert_eq!(result, hm(&$expected));
                 }
             )*
@@ -373,7 +386,8 @@ mod tests {
         let parent = hm(&[("HOME", "/root")]);
         let declared = hm(&[("DBT_PROFILES_DIR", "${HOME}/.dbt")]);
         let result =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap();
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+                .unwrap();
         assert_eq!(
             result.get("DBT_PROFILES_DIR").map(String::as_str),
             Some("/root/.dbt")
@@ -444,19 +458,86 @@ mod tests {
         // is asserted here; parent env filtering is covered exhaustively by
         // the inner function tests above.
         let declared = hm(&[("NAGI_TEST_DECLARED", "value")]);
-        let result = build_subprocess_env(&declared).unwrap();
+        let result = build_subprocess_env(None, &declared).unwrap();
         assert_eq!(
             result.get("NAGI_TEST_DECLARED").map(String::as_str),
             Some("value")
         );
     }
 
+    // ── identity env tests ───────────────────────────────────────────
+
+    #[test]
+    fn identity_env_is_injected_between_allowlist_and_declared() {
+        let parent = hm(&[("PATH", "/usr/bin"), ("GAC_PATH", "/key.json")]);
+        let identity = hm(&[("GOOGLE_APPLICATION_CREDENTIALS", "${GAC_PATH}")]);
+        let declared = hm(&[("FOO", "bar")]);
+        let result = compose_subprocess_env_with_allowlist(
+            TEST_ALLOWLIST,
+            &parent,
+            Some(&identity),
+            &declared,
+        )
+        .unwrap();
+        assert_eq!(result.get("PATH").map(String::as_str), Some("/usr/bin"));
+        assert_eq!(
+            result
+                .get("GOOGLE_APPLICATION_CREDENTIALS")
+                .map(String::as_str),
+            Some("/key.json")
+        );
+        assert_eq!(result.get("FOO").map(String::as_str), Some("bar"));
+    }
+
+    #[test]
+    fn declared_overrides_identity_env() {
+        let parent = hm(&[("GAC_PATH", "/identity.json")]);
+        let identity = hm(&[("MY_VAR", "${GAC_PATH}")]);
+        let declared = hm(&[("MY_VAR", "overridden")]);
+        let result = compose_subprocess_env_with_allowlist(
+            TEST_ALLOWLIST,
+            &parent,
+            Some(&identity),
+            &declared,
+        )
+        .unwrap();
+        assert_eq!(result.get("MY_VAR").map(String::as_str), Some("overridden"));
+    }
+
+    #[test]
+    fn none_identity_env_behaves_like_no_identity() {
+        let parent = hm(&[("PATH", "/usr/bin")]);
+        let declared = hm(&[("FOO", "bar")]);
+        let with_none =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+                .unwrap();
+        let without =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+                .unwrap();
+        assert_eq!(with_none, without);
+    }
+
+    #[test]
+    fn identity_env_undefined_var_errors() {
+        let parent = hm(&[]);
+        let identity = hm(&[("KEY", "${MISSING}")]);
+        let declared = hm(&[]);
+        let err = compose_subprocess_env_with_allowlist(
+            TEST_ALLOWLIST,
+            &parent,
+            Some(&identity),
+            &declared,
+        )
+        .unwrap_err();
+        assert!(matches!(err, SubprocessEnvError::UndefinedVar(ref v) if v == "MISSING"));
+    }
+
     #[test]
     fn invalid_declared_key_errors_during_build() {
         let parent = hm(&[]);
         let declared = hm(&[("FOO-BAR", "x")]);
-        let err =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
+        let err = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
+            .unwrap_err();
         assert_eq!(
             err,
             SubprocessEnvError::InvalidKeyName("FOO-BAR".to_string())
