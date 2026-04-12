@@ -9,10 +9,11 @@
 
 ## Design
 
+- No unnecessarily public APIs. New functions, structs, and enums should use the narrowest visibility (`pub(crate)`, `pub(super)`, or private) unless they need to be accessible from outside the crate. Flag any `pub` item that is only used within the crate.
 - Each function has a single responsibility. Specifically:
-    - A function should not generate multiple kinds of resources (e.g. Asset and Sync in the same function)
-    - If a function returns a Vec containing mixed resource kinds, consider splitting it
-    - Side-channel information (e.g. "was X needed?") should be returned explicitly (bool, enum), not hidden inside a collection
+  - A function should not generate multiple kinds of resources (e.g. Asset and Sync in the same function)
+  - If a function returns a Vec containing mixed resource kinds, consider splitting it
+  - Side-channel information (e.g. "was X needed?") should be returned explicitly (bool, enum), not hidden inside a collection
 - User-facing names (resource names, field names) must be self-explanatory to data engineers. Avoid programmer jargon (e.g. "noop") in names that appear in YAML or CLI output
 - References between resources are validated at compile time. A dangling reference (e.g. Asset referencing a non-existent Connection or upstream) must produce an error, not silently resolve to None
 
