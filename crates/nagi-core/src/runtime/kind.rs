@@ -30,6 +30,18 @@ pub enum KindError {
     UnsupportedApiVersion { version: String, expected: String },
 }
 
+impl KindError {
+    pub fn require_non_empty(value: &str, kind: &str, field: &str) -> Result<(), KindError> {
+        if value.is_empty() {
+            return Err(KindError::InvalidSpec {
+                kind: kind.to_string(),
+                message: format!("{field} must not be empty"),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Common metadata shared by all resource kinds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Metadata {

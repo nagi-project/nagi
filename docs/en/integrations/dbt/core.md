@@ -53,8 +53,8 @@ For resource generation mapping and merge behavior, see [Resource Generation](./
 
 Evaluate is executed directly by Nagi.
 
-- Freshness / SQL conditions: Nagi issues queries directly to the data warehouse using the Connection
-- Command conditions (dbt test): Executes dbt CLI as a subprocess
+- Freshness / SQL: Nagi issues queries directly to the data warehouse using the Connection
+- `type: Command` (dbt test): Executes dbt CLI as a subprocess
 
 ## Sync
 

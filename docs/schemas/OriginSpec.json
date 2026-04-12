@@ -51,6 +51,14 @@
           "default": null,
           "description": "User-defined Sync to override the auto-generated Sync\n(e.g. `my-project-dbt-run` for Origin named `my-project`)."
         },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables passed to the `dbt compile` subprocess.\nValues may reference the parent process env via `${VAR}`.",
+          "type": "object"
+        },
         "projectDir": {
           "description": "Local path to the dbt project directory (relative or absolute).",
           "type": "string"
