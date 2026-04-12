@@ -229,7 +229,7 @@ pub async fn execute_sync_core(
     for stage in stages_to_run {
         let step = step_for_stage(sync_spec, stage);
         let timeout = resolve_step_timeout(step, sync_spec, default_timeout);
-        let result = command::execute_step(stage, step, timeout).await?;
+        let result = command::execute_step(stage, step, &execution_id, timeout).await?;
         let succeeded = result.success();
         results.push(result);
         if !succeeded {
