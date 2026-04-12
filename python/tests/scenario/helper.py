@@ -90,14 +90,12 @@ def start_serve(project: Path) -> ServeProcess:
     ]
     stderr_path = project / "serve_stderr.log"
     stderr_file = open(stderr_path, "w")  # noqa: SIM115
-    env = {**os.environ, "RUST_LOG": "info"}
     if sys.platform == "win32":
         proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,
             stderr=stderr_file,
             cwd=project,
-            env=env,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
     else:
@@ -106,7 +104,6 @@ def start_serve(project: Path) -> ServeProcess:
             stdout=subprocess.DEVNULL,
             stderr=stderr_file,
             cwd=project,
-            env=env,
             start_new_session=True,
         )
     return ServeProcess(proc, stderr_file)
