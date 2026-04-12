@@ -483,38 +483,8 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
     let assets = std::mem::take(&mut categorized.assets);
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
-    let mut errors: Vec<CompileError> = Vec::new();
-
-    // Validate Identity references in Syncs.
-    for (name, spec) in &categorized.syncs {
-        errors.extend(collect_unresolved_identity_errors_sync(
-            name,
-            spec,
-            &categorized.identities,
-        ));
-    }
-
-    // Validate Identity references in Connections.
-    for (conn_name, spec) in &categorized.connections {
-        if let Some(id) = connection_identity_ref(spec) {
-            if !categorized.identities.contains_key(id) {
-                errors.push(CompileError::UnresolvedRef {
-                    kind: "Identity".to_string(),
-                    name: id.to_string(),
-                });
-            }
-            if matches!(
-                spec,
-                ConnectionSpec::DuckDb { .. } | ConnectionSpec::Snowflake { .. }
-            ) {
-                tracing::warn!(
-                    connection = conn_name,
-                    identity = id,
-                    "identity on DuckDB/Snowflake Connection is not yet supported and will be ignored"
-                );
-            }
-        }
-    }
+    let mut errors = validate_identity_refs(&categorized);
+    warn_unsupported_identity_connections(&categorized);
 
     let mut resolved_assets = Vec::new();
     for (metadata, spec) in assets {
@@ -632,27 +602,54 @@ fn collect_unresolved_upstream_errors(
         .collect()
 }
 
-fn collect_unresolved_identity_errors_sync(
-    _sync_name: &str,
-    spec: &SyncSpec,
-    identities: &HashMap<String, kind::identity::IdentitySpec>,
-) -> Vec<CompileError> {
-    let mut errors = Vec::new();
-    let refs: Vec<Option<&String>> = vec![
-        spec.identity.as_ref(),
-        spec.run.identity.as_ref(),
-        spec.pre.as_ref().and_then(|s| s.identity.as_ref()),
-        spec.post.as_ref().and_then(|s| s.identity.as_ref()),
-    ];
-    for id in refs.into_iter().flatten() {
-        if !identities.contains_key(id) {
-            errors.push(CompileError::UnresolvedRef {
-                kind: "Identity".to_string(),
-                name: id.clone(),
-            });
-        }
-    }
-    errors
+/// Validates that all Identity references in Syncs and Connections point to existing Identities.
+fn validate_identity_refs(resources: &CategorizedResources) -> Vec<CompileError> {
+    let identities = &resources.identities;
+
+    let sync_refs = resources.syncs.values().flat_map(|spec| {
+        [
+            spec.identity.as_deref(),
+            Some(&spec.run).and_then(|s| s.identity.as_deref()),
+            spec.pre.as_ref().and_then(|s| s.identity.as_deref()),
+            spec.post.as_ref().and_then(|s| s.identity.as_deref()),
+        ]
+        .into_iter()
+        .flatten()
+    });
+
+    let connection_refs = resources
+        .connections
+        .values()
+        .filter_map(|spec| connection_identity_ref(spec));
+
+    sync_refs
+        .chain(connection_refs)
+        .filter(|id| !identities.contains_key(*id))
+        .map(|id| CompileError::UnresolvedRef {
+            kind: "Identity".to_string(),
+            name: id.to_string(),
+        })
+        .collect()
+}
+
+fn warn_unsupported_identity_connections(resources: &CategorizedResources) {
+    resources
+        .connections
+        .iter()
+        .filter(|(_, spec)| {
+            matches!(
+                spec,
+                ConnectionSpec::DuckDb { .. } | ConnectionSpec::Snowflake { .. }
+            )
+        })
+        .filter_map(|(name, spec)| connection_identity_ref(spec).map(|id| (name, id)))
+        .for_each(|(conn_name, id)| {
+            tracing::warn!(
+                connection = conn_name,
+                identity = id,
+                "identity on DuckDB/Snowflake Connection is not yet supported and will be ignored"
+            );
+        });
 }
 
 /// Resolves on_drift entries: validates conditions/sync refs and expands templates.
@@ -2680,6 +2677,94 @@ spec:
     }
 
     // ── format_multiple_errors ─────────────────────────────────────────
+
+    fn empty_categorized() -> CategorizedResources {
+        CategorizedResources {
+            connections: HashMap::new(),
+            conditions_groups: HashMap::new(),
+            syncs: HashMap::new(),
+            assets: Vec::new(),
+            identities: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn validate_identity_refs_returns_empty_when_no_refs() {
+        let resources = empty_categorized();
+        assert!(validate_identity_refs(&resources).is_empty());
+    }
+
+    #[test]
+    fn validate_identity_refs_accepts_existing_identity_in_sync() {
+        let mut resources = empty_categorized();
+        resources.identities.insert(
+            "bq-eval".to_string(),
+            kind::identity::IdentitySpec::Env {
+                env: HashMap::new(),
+            },
+        );
+        resources.syncs.insert(
+            "s".to_string(),
+            SyncSpec {
+                identity: Some("bq-eval".to_string()),
+                ..SyncSpec::new(SyncStep::command(vec!["true".to_string()]))
+            },
+        );
+        assert!(validate_identity_refs(&resources).is_empty());
+    }
+
+    #[test]
+    fn validate_identity_refs_rejects_missing_identity_in_sync() {
+        let mut resources = empty_categorized();
+        resources.syncs.insert(
+            "s".to_string(),
+            SyncSpec {
+                identity: Some("nonexistent".to_string()),
+                ..SyncSpec::new(SyncStep::command(vec!["true".to_string()]))
+            },
+        );
+        let errors = validate_identity_refs(&resources);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], CompileError::UnresolvedRef { kind, name }
+            if kind == "Identity" && name == "nonexistent")
+        );
+    }
+
+    #[test]
+    fn validate_identity_refs_rejects_missing_identity_in_connection() {
+        let mut resources = empty_categorized();
+        resources.connections.insert(
+            "c".to_string(),
+            ConnectionSpec::BigQuery {
+                project: "p".to_string(),
+                dataset: "d".to_string(),
+                execution_project: None,
+                method: None,
+                keyfile: None,
+                timeout_seconds: None,
+                identity: Some("nonexistent".to_string()),
+            },
+        );
+        let errors = validate_identity_refs(&resources);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], CompileError::UnresolvedRef { kind, name }
+            if kind == "Identity" && name == "nonexistent")
+        );
+    }
+
+    #[test]
+    fn validate_identity_refs_deduplicates_across_sync_stages() {
+        let mut resources = empty_categorized();
+        let mut spec = SyncSpec::new(SyncStep::command(vec!["true".to_string()]));
+        spec.identity = Some("missing".to_string());
+        spec.run.identity = Some("missing".to_string());
+        resources.syncs.insert("s".to_string(), spec);
+        let errors = validate_identity_refs(&resources);
+        // Both references produce separate errors (same name, but each ref is validated independently).
+        assert_eq!(errors.len(), 2);
+    }
 
     #[test]
     fn format_multiple_errors_joins_with_newline() {
