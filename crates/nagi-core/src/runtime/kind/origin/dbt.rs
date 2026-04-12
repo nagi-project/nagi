@@ -72,7 +72,7 @@ fn run_dbt_compile(
     }
     cmd.env_clear();
     cmd.envs(
-        subprocess::build_subprocess_env(env)
+        subprocess::build_subprocess_env(None, env)
             .map_err(|e| CompileError::OriginFailed(format!("env resolution error: {e}")))?,
     );
     let output = cmd

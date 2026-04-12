@@ -24,7 +24,7 @@ pub async fn execute_step(stage: Stage, step: &SyncStep) -> Result<StageResult, 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     cmd.env_clear();
-    cmd.envs(subprocess::build_subprocess_env(&step.env)?);
+    cmd.envs(subprocess::build_subprocess_env(None, &step.env)?);
     let output = cmd
         .spawn()
         .map_err(|e| SyncError::SpawnFailed(format!("{program}: {e}")))?

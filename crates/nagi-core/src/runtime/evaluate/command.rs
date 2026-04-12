@@ -15,7 +15,7 @@ pub(super) async fn evaluate_command(
     let mut cmd = Command::new(program);
     cmd.args(args);
     cmd.env_clear();
-    cmd.envs(subprocess::build_subprocess_env(env)?);
+    cmd.envs(subprocess::build_subprocess_env(None, env)?);
     let status = cmd
         .status()
         .await
