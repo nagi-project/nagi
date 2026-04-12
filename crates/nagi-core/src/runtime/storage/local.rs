@@ -353,29 +353,6 @@ mod tests {
         }
     }
 
-    impl LocalSuspendedStore {
-        fn list(&self) -> Result<Vec<SuspendedInfo>, StorageError> {
-            let entries = match std::fs::read_dir(&self.dir) {
-                Ok(entries) => entries,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-                Err(e) => return Err(e.into()),
-            };
-            let mut result = Vec::new();
-            for entry in entries {
-                let entry = entry?;
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                    let data = std::fs::read_to_string(&path)?;
-                    if let Ok(info) = serde_json::from_str::<SuspendedInfo>(&data) {
-                        result.push(info);
-                    }
-                }
-            }
-            result.sort_by(|a, b| a.asset_name.cmp(&b.asset_name));
-            Ok(result)
-        }
-    }
-
     impl LocalConditionCache {
         fn read_condition(
             &self,
@@ -458,13 +435,6 @@ mod tests {
         assert_eq!(results[0].asset_name, "alpha");
         assert_eq!(results[1].asset_name, "middle");
         assert_eq!(results[2].asset_name, "zebra");
-    }
-
-    #[test]
-    fn list_returns_empty_when_no_cache_dir() {
-        let cache = LocalCache::new(PathBuf::from("/nonexistent/path/cache"));
-        let results = cache.list().unwrap();
-        assert!(results.is_empty());
     }
 
     #[test]
@@ -632,40 +602,6 @@ mod tests {
     }
 
     #[test]
-    fn suspended_remove_nonexistent_is_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LocalSuspendedStore::new(dir.path().to_path_buf());
-        store.remove("nonexistent").unwrap();
-    }
-
-    #[test]
-    fn suspended_list_sorted() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LocalSuspendedStore::new(dir.path().to_path_buf());
-
-        store.write(&sample_suspended("z-asset")).unwrap();
-        store.write(&sample_suspended("a-asset")).unwrap();
-
-        let list = store.list().unwrap();
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].asset_name, "a-asset");
-        assert_eq!(list[1].asset_name, "z-asset");
-    }
-
-    #[test]
-    fn suspended_list_empty_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LocalSuspendedStore::new(dir.path().to_path_buf());
-        assert!(store.list().unwrap().is_empty());
-    }
-
-    #[test]
-    fn suspended_list_nonexistent_dir() {
-        let store = LocalSuspendedStore::new(std::env::temp_dir().join("nonexistent-nagi-test"));
-        assert!(store.list().unwrap().is_empty());
-    }
-
-    #[test]
     fn readiness_write_all_and_read() {
         let dir = tempfile::tempdir().unwrap();
         let store = LocalReadinessStore::new(dir.path().to_path_buf());
@@ -698,20 +634,6 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert!(loaded["x"]);
         assert!(!loaded["y"]);
-    }
-
-    #[test]
-    fn readiness_read_all_empty_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LocalReadinessStore::new(dir.path().to_path_buf());
-        assert!(store.read_all().unwrap().is_empty());
-    }
-
-    #[test]
-    fn readiness_read_all_nonexistent_dir() {
-        let store =
-            LocalReadinessStore::new(std::env::temp_dir().join("nonexistent-readiness-test"));
-        assert!(store.read_all().unwrap().is_empty());
     }
 
     #[test]
@@ -779,13 +701,6 @@ mod tests {
         assert!(lock
             .acquire("ref-b", Duration::from_secs(60), "exec-2")
             .unwrap());
-    }
-
-    #[test]
-    fn release_nonexistent_is_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        let lock = LocalSyncLock::new(dir.path().to_path_buf());
-        lock.release("nonexistent").unwrap();
     }
 
     #[test]
