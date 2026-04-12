@@ -22,14 +22,23 @@ const ALLOWLIST: &[&str] = &[
 #[cfg(windows)]
 const ALLOWLIST: &[&str] = &[
     "SystemRoot",
+    "SystemDrive",
     "ComSpec",
     "PATH",
     "PATHEXT",
     "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
     "APPDATA",
     "LOCALAPPDATA",
     "TEMP",
     "TMP",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "COMPUTERNAME",
     "NUMBER_OF_PROCESSORS",
     "PROCESSOR_ARCHITECTURE",
 ];
@@ -310,11 +319,17 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_allowlist_contains_systemroot_and_pathext() {
+    fn windows_allowlist_contains_expected_keys() {
         assert!(ALLOWLIST.contains(&"SystemRoot"));
-        assert!(ALLOWLIST.contains(&"PATHEXT"));
+        assert!(ALLOWLIST.contains(&"SystemDrive"));
         assert!(ALLOWLIST.contains(&"PATH"));
+        assert!(ALLOWLIST.contains(&"PATHEXT"));
         assert!(ALLOWLIST.contains(&"USERPROFILE"));
+        assert!(ALLOWLIST.contains(&"HOMEDRIVE"));
+        assert!(ALLOWLIST.contains(&"HOMEPATH"));
+        assert!(ALLOWLIST.contains(&"ProgramData"));
+        assert!(ALLOWLIST.contains(&"ProgramFiles"));
+        assert!(ALLOWLIST.contains(&"COMPUTERNAME"));
     }
 
     // ── env key name validation ──────────────────────────────────────

@@ -34,14 +34,23 @@ Nagi passes through a minimal set of parent environment variables that are requi
 | Variable | Purpose |
 | --- | --- |
 | `SystemRoot` | Windows system directory |
+| `SystemDrive` | System drive letter |
 | `ComSpec` | Command processor path |
 | `PATH` | Executable search path |
 | `PATHEXT` | Executable file extensions |
 | `USERPROFILE` | User profile directory |
+| `HOMEDRIVE` | Home drive letter |
+| `HOMEPATH` | Home directory path |
 | `APPDATA` | Application data directory |
 | `LOCALAPPDATA` | Local application data directory |
 | `TEMP` | Temporary file directory |
 | `TMP` | Temporary file directory |
+| `ProgramData` | Shared application data |
+| `ProgramFiles` | Program installation directory |
+| `ProgramFiles(x86)` | 32-bit program installation directory |
+| `CommonProgramFiles` | Shared program components |
+| `CommonProgramFiles(x86)` | 32-bit shared program components |
+| `COMPUTERNAME` | Machine name |
 | `NUMBER_OF_PROCESSORS` | Number of processors |
 | `PROCESSOR_ARCHITECTURE` | Processor architecture |
 
