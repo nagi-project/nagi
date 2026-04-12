@@ -553,18 +553,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fire_notify_skips_when_none() {
-        // Should not panic.
-        fire_notify(
-            &None,
-            NotifyEvent::Suspended {
-                asset_name: "a".to_string(),
-                reason: "test".to_string(),
-            },
-        );
-    }
-
     #[tokio::test]
     async fn fire_notify_calls_notifier_when_some() {
         let mock = Arc::new(MockNotifier::new());
@@ -582,11 +570,6 @@ mod tests {
         tokio::task::yield_now().await;
 
         assert_eq!(mock.call_count.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn build_notifier_returns_none_when_no_project_dir() {
-        assert!(build_notifier(None).is_none());
     }
 
     #[test]

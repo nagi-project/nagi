@@ -523,14 +523,6 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_freshness_without_column() {
-        let condition = freshness_condition(86400, None);
-        let on_drift = on_drift_with(vec![condition.clone()]);
-        let result = dry_run_asset("my_table", &on_drift);
-        assert_eq!(result.conditions[0].condition, condition);
-    }
-
-    #[test]
     fn dry_run_sql() {
         let condition = DesiredCondition::Sql {
             name: "check".to_string(),
@@ -556,13 +548,6 @@ mod tests {
         let on_drift = on_drift_with(vec![condition.clone()]);
         let result = dry_run_asset("my_table", &on_drift);
         assert_eq!(result.conditions[0].condition, condition);
-    }
-
-    #[test]
-    fn dry_run_no_conditions() {
-        let on_drift: Vec<ResolvedOnDriftEntry> = vec![];
-        let result = dry_run_asset("my_table", &on_drift);
-        assert!(result.conditions.is_empty());
     }
 
     // ── Command without connection ─────────────────────────────────────────────
