@@ -47,19 +47,16 @@ pub async fn execute_step(stage: Stage, step: &SyncStep) -> Result<StageResult, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::kind::sync::StepType;
     use crate::runtime::subprocess::SubprocessEnvError;
     use std::collections::HashMap;
 
     fn step_with_env(args: Vec<&str>, env: &[(&str, &str)]) -> SyncStep {
-        SyncStep {
-            step_type: StepType::Command,
-            args: args.into_iter().map(String::from).collect(),
-            env: env
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        }
+        let mut step = SyncStep::command(args.into_iter().map(String::from).collect());
+        step.env = env
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        step
     }
 
     #[cfg(unix)]
@@ -146,11 +143,8 @@ mod tests {
         let args = vec!["sh".into(), "-c".into(), "true".into()];
         #[cfg(windows)]
         let args = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
-        let step = SyncStep {
-            step_type: StepType::Command,
-            args,
-            env,
-        };
+        let mut step = SyncStep::command(args);
+        step.env = env;
         let err = execute_step(Stage::Run, &step).await.unwrap_err();
         assert!(matches!(
             err,
