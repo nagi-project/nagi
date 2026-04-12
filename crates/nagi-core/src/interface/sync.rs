@@ -180,3 +180,143 @@ pub(crate) async fn sync_from_compiled(
 
     serialize(&result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::evaluate::{AssetEvalResult, ConditionResult, ConditionStatus};
+
+    // ── eval_result_to_proposal ──────────────────────────────────────────
+
+    #[test]
+    fn eval_result_to_proposal_ready_with_no_conditions() {
+        let result = AssetEvalResult {
+            asset_name: "a".to_string(),
+            ready: true,
+            conditions: vec![],
+            evaluation_id: None,
+        };
+        let proposal = eval_result_to_proposal(&result);
+        assert!(proposal.ready);
+        assert!(proposal.conditions.is_empty());
+        assert!(proposal.evaluation_id.is_none());
+    }
+
+    #[test]
+    fn eval_result_to_proposal_preserves_conditions_and_id() {
+        let result = AssetEvalResult {
+            asset_name: "a".to_string(),
+            ready: false,
+            conditions: vec![ConditionResult {
+                condition_name: "check".to_string(),
+                condition_type: "SQL".to_string(),
+                status: ConditionStatus::Drifted {
+                    reason: "stale".to_string(),
+                },
+            }],
+            evaluation_id: Some("eval-123".to_string()),
+        };
+        let proposal = eval_result_to_proposal(&result);
+        assert!(!proposal.ready);
+        assert_eq!(proposal.conditions.len(), 1);
+        assert_eq!(proposal.evaluation_id.as_deref(), Some("eval-123"));
+    }
+
+    // ── open_log_store ───────────────────────────────────────────────────
+
+    #[test]
+    fn open_log_store_none_none_returns_ok_none() {
+        let result = open_log_store(None, None).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn open_log_store_some_some_returns_ok_some() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("logs.db");
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let result = open_log_store(Some(&db), Some(&logs)).unwrap();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn open_log_store_partial_args_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("logs.db");
+        // Only db_path provided, logs_dir is None.
+        let result = open_log_store(Some(&db), None).unwrap();
+        assert!(result.is_none());
+    }
+
+    // ── sync_from_compiled dry_run ───────────────────────────────────────
+
+    const ASSET_WITH_SYNC_YAML: &str = "\
+apiVersion: nagi/v1alpha1
+metadata:
+  name: test-asset
+spec:
+  onDrift:
+    - conditions: []
+      conditionsRef: test-cond
+      sync:
+        run:
+          type: Command
+          args: [\"echo\", \"ok\"]
+      syncRefName: test-sync
+  autoSync: true
+";
+
+    #[tokio::test]
+    async fn sync_from_compiled_dry_run_returns_json() {
+        let params = SyncFromCompiledParams {
+            yaml: ASSET_WITH_SYNC_YAML,
+            sync_type: "sync",
+            stages: None,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            dry_run: true,
+            force: false,
+            evaluation_id: None,
+        };
+        let json = sync_from_compiled(params).await.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["assetName"], "test-asset");
+        assert!(value["stages"].is_array());
+    }
+
+    #[tokio::test]
+    async fn sync_from_compiled_invalid_yaml_returns_parse_error() {
+        let params = SyncFromCompiledParams {
+            yaml: "{{invalid",
+            sync_type: "sync",
+            stages: None,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            dry_run: true,
+            force: false,
+            evaluation_id: None,
+        };
+        let result = sync_from_compiled(params).await;
+        assert!(matches!(result, Err(SyncError::Parse(_))));
+    }
+
+    #[tokio::test]
+    async fn sync_from_compiled_invalid_sync_type_returns_error() {
+        let params = SyncFromCompiledParams {
+            yaml: ASSET_WITH_SYNC_YAML,
+            sync_type: "invalid_type",
+            stages: None,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            dry_run: true,
+            force: false,
+            evaluation_id: None,
+        };
+        let result = sync_from_compiled(params).await;
+        assert!(result.is_err());
+    }
+}

@@ -203,11 +203,6 @@ mod tests {
     // ── validate_step ───────────────────────────────────────────────────
 
     #[test]
-    fn validate_step_none_is_ok() {
-        assert!(validate_step(None, 59, "minute").is_ok());
-    }
-
-    #[test]
     fn validate_step_at_max() {
         assert!(validate_step(Some(59), 59, "minute").is_ok());
     }

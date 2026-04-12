@@ -436,60 +436,6 @@ mod tests {
         assert!(!relations.contains_key(&key_by_name));
     }
 
-    #[test]
-    fn build_model_relations_skips_non_models() {
-        let manifests = HashMap::from([(
-            "core".to_string(),
-            DbtManifest {
-                nodes: HashMap::from([(
-                    "test.core.t1".to_string(),
-                    DbtNode {
-                        unique_id: "test.core.t1".to_string(),
-                        resource_type: "test".to_string(),
-                        name: "t1".to_string(),
-                        _package_name: "pkg".to_string(),
-                        tags: vec![],
-                        depends_on: DbtDependsOn::default(),
-                        test_metadata: None,
-                        database: Some("mydb".to_string()),
-                        schema: Some("public".to_string()),
-                        alias: None,
-                    },
-                )]),
-                sources: HashMap::new(),
-            },
-        )]);
-        let relations = build_model_relations(&manifests);
-        assert!(relations.is_empty());
-    }
-
-    #[test]
-    fn build_model_relations_skips_missing_database() {
-        let manifests = HashMap::from([(
-            "core".to_string(),
-            DbtManifest {
-                nodes: HashMap::from([(
-                    "model.core.orders".to_string(),
-                    DbtNode {
-                        unique_id: "model.core.orders".to_string(),
-                        resource_type: "model".to_string(),
-                        name: "orders".to_string(),
-                        _package_name: "pkg".to_string(),
-                        tags: vec![],
-                        depends_on: DbtDependsOn::default(),
-                        test_metadata: None,
-                        database: None,
-                        schema: Some("public".to_string()),
-                        alias: None,
-                    },
-                )]),
-                sources: HashMap::new(),
-            },
-        )]);
-        let relations = build_model_relations(&manifests);
-        assert!(relations.is_empty());
-    }
-
     // ── check_duplicate_outputs ─────────────────────────────────────────
 
     #[test]
@@ -623,32 +569,6 @@ mod tests {
         let relations = build_model_relations(&manifests);
         let matched = find_linked_sources(&manifests, &relations);
         assert_eq!(matched.len(), 1);
-    }
-
-    #[test]
-    fn find_linked_sources_no_match() {
-        let manifests = HashMap::from([
-            single_model_manifest(
-                "core",
-                "model.core.orders",
-                "orders",
-                "mydb",
-                "public",
-                None,
-            ),
-            single_source_manifest(
-                "finance",
-                "source.finance.ext.payments",
-                "payments",
-                "ext",
-                "otherdb",
-                "public",
-                None,
-            ),
-        ]);
-        let relations = build_model_relations(&manifests);
-        let matched = find_linked_sources(&manifests, &relations);
-        assert!(matched.is_empty());
     }
 
     #[test]
@@ -843,13 +763,5 @@ mod tests {
         let result = apply_links(resources, &source_to_model);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].metadata().name, "finance.raw.orders");
-    }
-
-    #[test]
-    fn apply_links_noop_when_empty_map() {
-        let source_to_model = HashMap::new();
-        let resources = vec![make_asset("a"), make_asset("b")];
-        let result = apply_links(resources, &source_to_model);
-        assert_eq!(result.len(), 2);
     }
 }

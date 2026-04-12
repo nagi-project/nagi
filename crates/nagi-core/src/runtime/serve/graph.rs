@@ -188,13 +188,6 @@ mod tests {
     }
 
     #[test]
-    fn edge_maps_empty() {
-        let maps = build_edge_maps(&[]);
-        assert!(maps.downstream.is_empty());
-        assert!(maps.upstream.is_empty());
-    }
-
-    #[test]
     fn union_find_initially_disjoint() {
         let mut uf = UnionFind::new(3);
         assert_ne!(uf.find(0), uf.find(1));

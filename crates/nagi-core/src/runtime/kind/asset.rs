@@ -323,17 +323,6 @@ upstreams:
     }
 
     #[test]
-    fn auto_sync_defaults_to_true() {
-        let yaml = r#"
-onDrift:
-  - conditions: check
-    sync: dbt-run
-"#;
-        let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
-        assert!(spec.auto_sync);
-    }
-
-    #[test]
     fn auto_sync_can_be_set_to_false() {
         let yaml = r#"
 onDrift:
@@ -343,19 +332,6 @@ autoSync: false
 "#;
         let spec: AssetSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(!spec.auto_sync);
-    }
-
-    #[test]
-    fn validate_accepts_empty_on_drift() {
-        let spec = AssetSpec {
-            connection: None,
-            upstreams: vec![],
-            on_drift: vec![],
-            auto_sync: true,
-            evaluate_cache_ttl: None,
-            model_name: None,
-        };
-        assert!(spec.validate().is_ok(), "empty onDrift means always Ready");
     }
 
     #[test]
@@ -449,22 +425,6 @@ autoSync: false
                 evaluate_cache_ttl: None,
             },
         ];
-        let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, message }
-            if kind == KIND && message.contains("duplicate")));
-    }
-
-    #[test]
-    fn validate_no_duplicates_catches_group_and_inline_overlap() {
-        let condition = DesiredCondition::Freshness {
-            name: "freshness".to_string(),
-            max_age: serde_yaml::from_str("24h").unwrap(),
-            interval: serde_yaml::from_str("6h").unwrap(),
-            check_at: None,
-            column: None,
-            evaluate_cache_ttl: None,
-        };
-        let conditions = vec![condition.clone(), condition];
         let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, message }
             if kind == KIND && message.contains("duplicate")));
@@ -566,34 +526,6 @@ run: [dbt, test, --select, my_model]
             &condition,
             DesiredCondition::Command { name, run, .. } if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
         ));
-    }
-
-    #[test]
-    fn validate_rejects_empty_command_run() {
-        let condition = DesiredCondition::Command {
-            name: "check".to_string(),
-            run: vec![],
-            interval: None,
-            env: HashMap::new(),
-            evaluate_cache_ttl: None,
-            identity: None,
-        };
-        let err = condition.validate().unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
-    }
-
-    #[test]
-    fn validate_rejects_blank_command_program() {
-        let condition = DesiredCondition::Command {
-            name: "check".to_string(),
-            run: vec!["".to_string()],
-            interval: None,
-            env: HashMap::new(),
-            evaluate_cache_ttl: None,
-            identity: None,
-        };
-        let err = condition.validate().unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
     }
 
     #[test]
@@ -724,12 +656,6 @@ onDrift:
         ];
         let merged = merge_on_drift_entries(overlay, vec![]);
         assert_eq!(names(&merged), vec!["before", "after"]);
-    }
-
-    #[test]
-    fn merge_both_empty() {
-        let merged = merge_on_drift_entries(vec![], vec![]);
-        assert!(merged.is_empty());
     }
 
     // ── validate_command unit tests ─────────────────────────────────

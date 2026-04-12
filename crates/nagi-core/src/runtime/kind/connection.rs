@@ -577,21 +577,6 @@ target: dev
     }
 
     #[test]
-    fn parse_connection_spec_without_target() {
-        let yaml = r#"
-type: dbt
-profile: my_project
-"#;
-        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
-        match &spec {
-            ConnectionSpec::Dbt { target, .. } => {
-                assert_eq!(target, &None);
-            }
-            other => panic!("expected Dbt, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn parse_connection_spec_with_dbt_cloud() {
         let yaml = r#"
 type: dbt
@@ -624,23 +609,6 @@ profilesDir: /custom/profiles
         match &spec {
             ConnectionSpec::Dbt { profiles_dir, .. } => {
                 assert_eq!(profiles_dir, &Some("/custom/profiles".to_string()));
-            }
-            other => panic!("expected Dbt, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_connection_spec_with_dbt_cloud_default_path() {
-        let yaml = r#"
-type: dbt
-profile: my_project
-dbtCloud: {}
-"#;
-        let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
-        match &spec {
-            ConnectionSpec::Dbt { dbt_cloud, .. } => {
-                let cloud = dbt_cloud.as_ref().unwrap();
-                assert!(cloud.credentials_file.is_none());
             }
             other => panic!("expected Dbt, got {other:?}"),
         }

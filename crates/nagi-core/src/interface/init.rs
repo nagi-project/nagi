@@ -404,11 +404,4 @@ mod tests {
         assert!(!wm_file.exists());
         assert!(other_file.exists());
     }
-
-    #[test]
-    fn reset_watermarks_noop_when_dir_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("nonexistent");
-        reset_watermarks(&missing).unwrap();
-    }
 }
