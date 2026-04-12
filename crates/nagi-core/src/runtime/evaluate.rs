@@ -68,6 +68,8 @@ pub enum EvaluateError {
     Cache(String),
     #[error("serialization error: {0}")]
     Serialize(String),
+    #[error("subprocess env resolution error: {0}")]
+    EnvResolution(#[from] crate::runtime::subprocess::SubprocessEnvError),
 }
 
 fn evaluate_boolean(value: serde_json::Value) -> Result<ConditionStatus, EvaluateError> {

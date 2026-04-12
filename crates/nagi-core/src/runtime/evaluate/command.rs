@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tokio::process::Command;
 
 use super::{ConditionStatus, EvaluateError};
+use crate::runtime::subprocess;
 
 pub(super) async fn evaluate_command(
     run: &[String],
@@ -13,9 +14,8 @@ pub(super) async fn evaluate_command(
         .expect("run must not be empty; validated at parse time");
     let mut cmd = Command::new(program);
     cmd.args(args);
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
+    cmd.env_clear();
+    cmd.envs(subprocess::build_subprocess_env(env)?);
     let status = cmd
         .status()
         .await
@@ -82,5 +82,32 @@ mod tests {
         env.insert("NAGI_TEST_VAR".to_string(), "hello".to_string());
         let status = evaluate_command(&run, &env).await.unwrap();
         assert_eq!(status, ConditionStatus::Ready);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_allowlisted_parent_env_does_not_leak() {
+        // CARGO is set by `cargo test` and is not in the allow-list.
+        assert!(std::env::var("CARGO").is_ok());
+        let run = vec![
+            "sh".into(),
+            "-c".into(),
+            "test -z \"$CARGO\"".into(), // succeeds when CARGO is unset/empty
+        ];
+        let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
+        assert_eq!(status, ConditionStatus::Ready);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn undefined_template_var_returns_env_resolution_error() {
+        let run = vec!["true".to_string()];
+        let mut env = HashMap::new();
+        env.insert(
+            "X".to_string(),
+            "${NAGI_DEFINITELY_UNSET_12345}".to_string(),
+        );
+        let err = evaluate_command(&run, &env).await.unwrap_err();
+        assert!(matches!(err, EvaluateError::EnvResolution(_)));
     }
 }
