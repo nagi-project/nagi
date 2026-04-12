@@ -12,42 +12,15 @@ pub enum SubprocessEnvError {
 
     #[error("invalid environment variable name '{0}': must match [A-Za-z_][A-Za-z0-9_]*")]
     InvalidKeyName(String),
+
+    #[error("failed to build environment block: {0}")]
+    #[cfg(windows)]
+    EnvironmentBlockFailed(String),
 }
 
 #[cfg(unix)]
 const ALLOWLIST: &[&str] = &[
     "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
-];
-
-#[cfg(windows)]
-const ALLOWLIST: &[&str] = &[
-    "SystemRoot",
-    "SystemDrive",
-    "ComSpec",
-    "PATH",
-    "PATHEXT",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "TEMP",
-    "TMP",
-    "ProgramData",
-    "ProgramFiles",
-    "ProgramFiles(x86)",
-    "ProgramW6432",
-    "CommonProgramFiles",
-    "CommonProgramFiles(x86)",
-    "CommonProgramW6432",
-    "ALLUSERSPROFILE",
-    "COMPUTERNAME",
-    "LOGONSERVER",
-    "PUBLIC",
-    "USERDOMAIN",
-    "USERDOMAIN_ROAMINGPROFILE",
-    "NUMBER_OF_PROCESSORS",
-    "PROCESSOR_ARCHITECTURE",
 ];
 
 /// Validates that an env var name matches POSIX rules `[A-Za-z_][A-Za-z0-9_]*`.
@@ -116,12 +89,21 @@ fn expand_template(
     Ok(out)
 }
 
+#[cfg(unix)]
 pub(crate) fn compose_subprocess_env(
     parent_env: &HashMap<String, String>,
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
+    compose_subprocess_env_with_allowlist(ALLOWLIST, parent_env, declared)
+}
+
+pub(crate) fn compose_subprocess_env_with_allowlist(
+    allowlist: &[&str],
+    parent_env: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+) -> Result<HashMap<String, String>, SubprocessEnvError> {
     let mut out = HashMap::new();
-    for key in ALLOWLIST {
+    for key in allowlist {
         if let Some(value) = parent_env.get(*key) {
             out.insert((*key).to_string(), value.clone());
         }
@@ -137,11 +119,97 @@ pub(crate) fn compose_subprocess_env(
 /// Call immediately before spawning a subprocess and drop the returned map as
 /// soon as the subprocess has received the values, so that credentials
 /// referenced via `${VAR}` are not retained beyond the spawn point.
+#[cfg(unix)]
 pub fn build_subprocess_env(
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
     let parent_env: HashMap<String, String> = std::env::vars().collect();
     compose_subprocess_env(&parent_env, declared)
+}
+
+/// Windows version: uses `CreateEnvironmentBlock` to obtain the full
+/// user-profile environment, then overlays declared values with `${VAR}`
+/// expansion. The profile environment contains all logon-synthesized
+/// variables that PowerShell and .NET CLR require to start.
+#[cfg(windows)]
+pub fn build_subprocess_env(
+    declared: &HashMap<String, String>,
+) -> Result<HashMap<String, String>, SubprocessEnvError> {
+    let base_env = create_environment_block_map()?;
+    let parent_env: HashMap<String, String> = std::env::vars().collect();
+    let mut out = base_env;
+    for (key, value) in declared {
+        validate_env_key(key)?;
+        let expanded = expand_template(value, &parent_env)?;
+        out.insert(key.clone(), expanded);
+    }
+    Ok(out)
+}
+
+/// Calls the Windows `CreateEnvironmentBlock` API to get the current user's
+/// full environment as a `HashMap`.
+#[cfg(windows)]
+fn create_environment_block_map() -> Result<HashMap<String, String>, SubprocessEnvError> {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    struct HandleGuard(HANDLE);
+    impl Drop for HandleGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    struct EnvBlockGuard(*mut core::ffi::c_void);
+    impl Drop for EnvBlockGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DestroyEnvironmentBlock(self.0);
+            }
+        }
+    }
+
+    unsafe {
+        let mut raw_token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token).map_err(|e| {
+            SubprocessEnvError::EnvironmentBlockFailed(format!("OpenProcessToken: {e}"))
+        })?;
+        let _token = HandleGuard(raw_token);
+
+        let mut raw_block: *mut core::ffi::c_void = std::ptr::null_mut();
+        CreateEnvironmentBlock(&mut raw_block, Some(raw_token), false).map_err(|e| {
+            SubprocessEnvError::EnvironmentBlockFailed(format!("CreateEnvironmentBlock: {e}"))
+        })?;
+        let _block = EnvBlockGuard(raw_block);
+
+        Ok(parse_environment_block(raw_block as *const u16))
+    }
+}
+
+/// Parses a Windows environment block (null-separated, double-null terminated
+/// UTF-16 strings) into a `HashMap`.
+#[cfg(windows)]
+unsafe fn parse_environment_block(block: *const u16) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    let mut ptr = block;
+    loop {
+        if *ptr == 0 {
+            break;
+        }
+        let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
+        let s = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
+        if let Some((key, value)) = s.split_once('=') {
+            if !key.is_empty() {
+                env.insert(key.to_string(), value.to_string());
+            }
+        }
+        ptr = ptr.add(len + 1);
+    }
+    env
 }
 
 #[cfg(test)]
@@ -157,6 +225,8 @@ mod tests {
 
     // ── allow-list selection ─────────────────────────────────────────
 
+    const TEST_ALLOWLIST: &[&str] = &["PATH", "HOME"];
+
     macro_rules! allowlist_test {
         ($($name:ident: parent=$parent:expr, declared=$declared:expr => $expected:expr;)*) => {
             $(
@@ -164,15 +234,15 @@ mod tests {
                 fn $name() {
                     let parent = hm(&$parent);
                     let declared = hm(&$declared);
-                    let result = compose_subprocess_env(&parent, &declared).unwrap();
+                    let result = compose_subprocess_env_with_allowlist(
+                        TEST_ALLOWLIST, &parent, &declared,
+                    ).unwrap();
                     assert_eq!(result, hm(&$expected));
                 }
             )*
         };
     }
 
-    // `PATH` is in the allow-list on both Unix and Windows; `MY_SECRET` is on
-    // neither. These tests therefore run cross-platform.
     allowlist_test! {
         allowlisted_parent_passes_through:
             parent=[("PATH", "/usr/bin")], declared=[] => [("PATH", "/usr/bin")];
@@ -200,7 +270,9 @@ mod tests {
                 fn $name() {
                     let parent = hm(&$parent);
                     let declared = hm(&[("X", $value)]);
-                    let result = compose_subprocess_env(&parent, &declared).unwrap();
+                    let result = compose_subprocess_env_with_allowlist(
+                        TEST_ALLOWLIST, &parent, &declared,
+                    ).unwrap();
                     assert_eq!(result.get("X").map(String::as_str), Some($expected));
                 }
             )*
@@ -233,7 +305,8 @@ mod tests {
     fn undefined_var_errors() {
         let parent = hm(&[]);
         let declared = hm(&[("X", "${FOO}")]);
-        let err = compose_subprocess_env(&parent, &declared).unwrap_err();
+        let err =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
         assert_eq!(err, SubprocessEnvError::UndefinedVar("FOO".to_string()));
     }
 
@@ -241,7 +314,8 @@ mod tests {
     fn unclosed_template_errors() {
         let parent = hm(&[]);
         let declared = hm(&[("X", "${FOO")]);
-        let err = compose_subprocess_env(&parent, &declared).unwrap_err();
+        let err =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
         assert!(matches!(err, SubprocessEnvError::InvalidTemplate { .. }));
     }
 
@@ -249,7 +323,8 @@ mod tests {
     fn empty_template_errors() {
         let parent = hm(&[]);
         let declared = hm(&[("X", "${}")]);
-        let err = compose_subprocess_env(&parent, &declared).unwrap_err();
+        let err =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
         assert!(matches!(err, SubprocessEnvError::InvalidTemplate { .. }));
     }
 
@@ -257,7 +332,8 @@ mod tests {
     fn invalid_var_name_in_template_errors() {
         let parent = hm(&[("FOO-BAR", "x")]);
         let declared = hm(&[("X", "${FOO-BAR}")]);
-        let err = compose_subprocess_env(&parent, &declared).unwrap_err();
+        let err =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
         assert!(matches!(err, SubprocessEnvError::InvalidTemplate { .. }));
     }
 
@@ -270,7 +346,7 @@ mod tests {
                 fn $name() {
                     let parent = hm(&$parent);
                     let declared = hm(&$declared);
-                    let result = compose_subprocess_env(&parent, &declared).unwrap();
+                    let result = compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap();
                     assert_eq!(result, hm(&$expected));
                 }
             )*
@@ -289,27 +365,15 @@ mod tests {
 
     #[test]
     fn declared_references_allowlisted_parent_via_template() {
-        // On Unix HOME is allowlisted; on Windows USERPROFILE is. Use the
-        // platform's own home-equivalent to keep the test cross-platform.
-        #[cfg(unix)]
-        let home_key = "HOME";
-        #[cfg(windows)]
-        let home_key = "USERPROFILE";
-
-        let parent = hm(&[(home_key, "/root")]);
-        let declared = hm(&[("DBT_PROFILES_DIR", "${HOME_REF}/.dbt")]);
-        // Replace the placeholder with the actual key name per-platform.
-        let declared: HashMap<String, String> = declared
-            .into_iter()
-            .map(|(k, v)| (k, v.replace("HOME_REF", home_key)))
-            .collect();
-
-        let result = compose_subprocess_env(&parent, &declared).unwrap();
+        let parent = hm(&[("HOME", "/root")]);
+        let declared = hm(&[("DBT_PROFILES_DIR", "${HOME}/.dbt")]);
+        let result =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap();
         assert_eq!(
             result.get("DBT_PROFILES_DIR").map(String::as_str),
             Some("/root/.dbt")
         );
-        assert_eq!(result.get(home_key).map(String::as_str), Some("/root"));
+        assert_eq!(result.get("HOME").map(String::as_str), Some("/root"));
     }
 
     // ── platform allow-list content ──────────────────────────────────
@@ -322,28 +386,6 @@ mod tests {
         assert!(ALLOWLIST.contains(&"LANG"));
         assert!(!ALLOWLIST.contains(&"SHELL"));
         assert!(!ALLOWLIST.contains(&"SSH_AUTH_SOCK"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_allowlist_contains_expected_keys() {
-        assert!(ALLOWLIST.contains(&"SystemRoot"));
-        assert!(ALLOWLIST.contains(&"SystemDrive"));
-        assert!(ALLOWLIST.contains(&"PATH"));
-        assert!(ALLOWLIST.contains(&"PATHEXT"));
-        assert!(ALLOWLIST.contains(&"USERPROFILE"));
-        assert!(ALLOWLIST.contains(&"HOMEDRIVE"));
-        assert!(ALLOWLIST.contains(&"HOMEPATH"));
-        assert!(ALLOWLIST.contains(&"ProgramData"));
-        assert!(ALLOWLIST.contains(&"ProgramFiles"));
-        assert!(ALLOWLIST.contains(&"ProgramW6432"));
-        assert!(ALLOWLIST.contains(&"CommonProgramW6432"));
-        assert!(ALLOWLIST.contains(&"ALLUSERSPROFILE"));
-        assert!(ALLOWLIST.contains(&"COMPUTERNAME"));
-        assert!(ALLOWLIST.contains(&"LOGONSERVER"));
-        assert!(ALLOWLIST.contains(&"PUBLIC"));
-        assert!(ALLOWLIST.contains(&"USERDOMAIN"));
-        assert!(ALLOWLIST.contains(&"USERDOMAIN_ROAMINGPROFILE"));
     }
 
     // ── env key name validation ──────────────────────────────────────
@@ -408,7 +450,8 @@ mod tests {
     fn invalid_declared_key_errors_during_build() {
         let parent = hm(&[]);
         let declared = hm(&[("FOO-BAR", "x")]);
-        let err = compose_subprocess_env(&parent, &declared).unwrap_err();
+        let err =
+            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, &declared).unwrap_err();
         assert_eq!(
             err,
             SubprocessEnvError::InvalidKeyName("FOO-BAR".to_string())
