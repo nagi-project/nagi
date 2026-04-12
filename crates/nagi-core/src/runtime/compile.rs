@@ -214,7 +214,7 @@ fn parse_yaml_file(
 }
 
 use crate::runtime::kind::connection::{
-    resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
+    connection_identity_ref, resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
 };
 
 #[derive(Debug)]
@@ -223,6 +223,7 @@ struct CategorizedResources {
     conditions_groups: HashMap<String, Vec<DesiredCondition>>,
     syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
+    identities: HashMap<String, kind::identity::IdentitySpec>,
 }
 
 fn check_dup(
@@ -260,6 +261,7 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         conditions_groups: HashMap::new(),
         syncs: HashMap::new(),
         assets: Vec::new(),
+        identities: HashMap::new(),
     };
     // Track Asset names separately for overlay merge (max 2 allowed).
     let mut asset_indices: HashMap<String, usize> = HashMap::new();
@@ -296,6 +298,11 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                 }
             }
             NagiKind::Origin { .. } => {}
+            NagiKind::Identity { spec, .. } => {
+                if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
+                    result.identities.insert(name, spec);
+                }
+            }
         }
     }
 
@@ -336,6 +343,7 @@ fn expand_step(
             .map(|arg| expand_template_string(arg, asset_name, model_name, with))
             .collect(),
         env: step.env.clone(),
+        identity: step.identity.clone(),
     }
 }
 
@@ -355,6 +363,7 @@ fn expand_sync_templates(
             .post
             .as_ref()
             .map(|s| expand_step(s, asset_name, model_name, with)),
+        identity: sync_spec.identity.clone(),
     }
 }
 
@@ -372,6 +381,7 @@ fn expand_condition_templates(
             interval,
             env,
             evaluate_cache_ttl,
+            identity,
         } => DesiredCondition::Command {
             name: name.clone(),
             run: run
@@ -381,6 +391,7 @@ fn expand_condition_templates(
             interval: interval.clone(),
             env: env.clone(),
             evaluate_cache_ttl: evaluate_cache_ttl.clone(),
+            identity: identity.clone(),
         },
         other => other.clone(),
     }
@@ -462,30 +473,22 @@ fn warn_asset_readiness(assets: &[ResolvedAsset]) {
 
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
-    let CategorizedResources {
-        connections,
-        conditions_groups,
-        syncs,
-        assets,
-    } = categorize(resources)?;
+    let mut categorized = categorize(resources)?;
 
-    syncs
+    categorized
+        .syncs
         .iter()
         .for_each(|(name, spec)| warn_multi_asset_sync(name, spec));
 
+    let assets = std::mem::take(&mut categorized.assets);
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
-    let mut errors: Vec<CompileError> = Vec::new();
+    let mut errors = validate_identity_refs(&categorized);
+    warn_unsupported_identity_connections(&categorized);
+
     let mut resolved_assets = Vec::new();
     for (metadata, spec) in assets {
-        match resolve_asset(
-            metadata,
-            spec,
-            &asset_names,
-            &connections,
-            &conditions_groups,
-            &syncs,
-        ) {
+        match resolve_asset(metadata, spec, &asset_names, &categorized) {
             Ok(asset) => resolved_assets.push(asset),
             Err(e) => errors.push(e),
         }
@@ -509,10 +512,15 @@ fn resolve_asset(
     metadata: Metadata,
     spec: AssetSpec,
     asset_names: &HashSet<String>,
-    connections: &HashMap<String, ConnectionSpec>,
-    conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
-    syncs: &HashMap<String, SyncSpec>,
+    resources: &CategorizedResources,
 ) -> Result<ResolvedAsset, CompileError> {
+    let CategorizedResources {
+        connections,
+        conditions_groups,
+        syncs,
+        identities,
+        ..
+    } = resources;
     let mut errors: Vec<CompileError> = Vec::new();
 
     errors.extend(collect_unresolved_upstream_errors(
@@ -538,10 +546,27 @@ fn resolve_asset(
             Vec::new()
         }
     };
+    errors.extend(
+        resolved_on_drift
+            .iter()
+            .flat_map(|entry| &entry.conditions)
+            .filter_map(|c| match c {
+                DesiredCondition::Command {
+                    identity: Some(id), ..
+                } => Some(id),
+                _ => None,
+            })
+            .filter(|id| !identities.contains_key(*id))
+            .map(|id| CompileError::UnresolvedRef {
+                kind: "Identity".to_string(),
+                name: id.clone(),
+            }),
+    );
+
     let connection = match spec
         .connection
         .as_deref()
-        .map(|name| resolve_connection_by_name(name, connections))
+        .map(|name| resolve_connection_by_name(name, connections, identities))
         .transpose()
     {
         Ok(v) => v,
@@ -575,6 +600,56 @@ fn collect_unresolved_upstream_errors(
             name: name.clone(),
         })
         .collect()
+}
+
+/// Validates that all Identity references in Syncs and Connections point to existing Identities.
+fn validate_identity_refs(resources: &CategorizedResources) -> Vec<CompileError> {
+    let identities = &resources.identities;
+
+    let sync_refs = resources.syncs.values().flat_map(|spec| {
+        [
+            spec.identity.as_deref(),
+            Some(&spec.run).and_then(|s| s.identity.as_deref()),
+            spec.pre.as_ref().and_then(|s| s.identity.as_deref()),
+            spec.post.as_ref().and_then(|s| s.identity.as_deref()),
+        ]
+        .into_iter()
+        .flatten()
+    });
+
+    let connection_refs = resources
+        .connections
+        .values()
+        .filter_map(|spec| connection_identity_ref(spec));
+
+    sync_refs
+        .chain(connection_refs)
+        .filter(|id| !identities.contains_key(*id))
+        .map(|id| CompileError::UnresolvedRef {
+            kind: "Identity".to_string(),
+            name: id.to_string(),
+        })
+        .collect()
+}
+
+fn warn_unsupported_identity_connections(resources: &CategorizedResources) {
+    resources
+        .connections
+        .iter()
+        .filter(|(_, spec)| {
+            matches!(
+                spec,
+                ConnectionSpec::DuckDb { .. } | ConnectionSpec::Snowflake { .. }
+            )
+        })
+        .filter_map(|(name, spec)| connection_identity_ref(spec).map(|id| (name, id)))
+        .for_each(|(conn_name, id)| {
+            tracing::warn!(
+                connection = conn_name,
+                identity = id,
+                "identity on DuckDB/Snowflake Connection is not yet supported and will be ignored"
+            );
+        });
 }
 
 /// Resolves on_drift entries: validates conditions/sync refs and expands templates.
@@ -985,8 +1060,10 @@ spec:
                 step_type: crate::runtime::kind::sync::StepType::Command,
                 args: vec!["true".to_string()],
                 env: HashMap::new(),
+                identity: None,
             },
             post: None,
+            identity: None,
         }
     }
 
@@ -1085,8 +1162,10 @@ spec:
                         "{{ asset.name }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )])
     }
@@ -1159,6 +1238,7 @@ spec:
                     interval: None,
                     env: HashMap::new(),
                     evaluate_cache_ttl: None,
+                    identity: None,
                 }],
             ),
             (
@@ -1169,6 +1249,7 @@ spec:
                     interval: None,
                     env: HashMap::new(),
                     evaluate_cache_ttl: None,
+                    identity: None,
                 }],
             ),
         ]);
@@ -1205,8 +1286,10 @@ spec:
                         "{{ sync.selector }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )]);
         let entry = asset::OnDriftEntry {
@@ -1240,6 +1323,7 @@ spec:
                 interval: None,
                 env: HashMap::new(),
                 evaluate_cache_ttl: None,
+                identity: None,
             }],
         )]);
         let entry = asset::OnDriftEntry {
@@ -1278,8 +1362,10 @@ spec:
                         "{{ asset.modelName }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )]);
         // Origin-generated Asset: model_name differs from asset name
@@ -1318,8 +1404,10 @@ spec:
                         "{{ asset.modelName }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )]);
         // User-defined Asset: model_name equals asset name
@@ -2173,6 +2261,7 @@ spec: {}",
                 "{{ asset.name }}".into(),
             ],
             env: HashMap::new(),
+            identity: None,
         };
         let result = expand_step(&step, "origin.model", "model", &HashMap::new());
         assert_eq!(result.args, vec!["dbt", "run", "--select", "origin.model"]);
@@ -2186,6 +2275,7 @@ spec: {}",
             step_type: crate::runtime::kind::sync::StepType::Command,
             args: vec!["echo".into()],
             env: env.clone(),
+            identity: None,
         };
         let result = expand_step(&step, "a", "b", &HashMap::new());
         assert_eq!(result.env, env);
@@ -2197,6 +2287,7 @@ spec: {}",
             step_type: crate::runtime::kind::sync::StepType::Command,
             args: vec!["{{ sync.target }}".into()],
             env: HashMap::new(),
+            identity: None,
         };
         let mut with = HashMap::new();
         with.insert("target".into(), "prod".into());
@@ -2519,7 +2610,161 @@ spec: {}",
         }
     }
 
+    // ── Identity reference validation ─────────────────────────────────
+
+    const IDENTITY_BQ_EVAL: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Identity
+metadata:
+  name: bq-evaluator
+spec:
+  type: env
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: /path/to/key.json";
+
+    const SYNC_WITH_IDENTITY: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: bq-evaluator
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
+
+    const SYNC_WITH_BAD_IDENTITY: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: nonexistent
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
+
+    #[test]
+    fn compile_rejects_unresolved_identity_in_sync() {
+        let yaml = yaml_docs(&[
+            CONNECTION_MY_BQ,
+            DESIRED_GROUP_DAILY_SLA,
+            SYNC_WITH_BAD_IDENTITY,
+            ASSET_RAW_SALES,
+        ]);
+        let resources = parse_kinds(&yaml).unwrap();
+        let result = resolve(resources);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "expected error mentioning 'nonexistent', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn compile_accepts_valid_identity_ref_in_sync() {
+        let yaml = yaml_docs(&[
+            CONNECTION_MY_BQ,
+            DESIRED_GROUP_DAILY_SLA,
+            IDENTITY_BQ_EVAL,
+            SYNC_WITH_IDENTITY,
+            ASSET_RAW_SALES,
+        ]);
+        let resources = parse_kinds(&yaml).unwrap();
+        let result = resolve(resources);
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+    }
+
     // ── format_multiple_errors ─────────────────────────────────────────
+
+    fn empty_categorized() -> CategorizedResources {
+        CategorizedResources {
+            connections: HashMap::new(),
+            conditions_groups: HashMap::new(),
+            syncs: HashMap::new(),
+            assets: Vec::new(),
+            identities: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn validate_identity_refs_returns_empty_when_no_refs() {
+        let resources = empty_categorized();
+        assert!(validate_identity_refs(&resources).is_empty());
+    }
+
+    #[test]
+    fn validate_identity_refs_accepts_existing_identity_in_sync() {
+        let mut resources = empty_categorized();
+        resources.identities.insert(
+            "bq-eval".to_string(),
+            kind::identity::IdentitySpec::Env {
+                env: HashMap::new(),
+            },
+        );
+        resources.syncs.insert(
+            "s".to_string(),
+            SyncSpec {
+                identity: Some("bq-eval".to_string()),
+                ..SyncSpec::new(SyncStep::command(vec!["true".to_string()]))
+            },
+        );
+        assert!(validate_identity_refs(&resources).is_empty());
+    }
+
+    #[test]
+    fn validate_identity_refs_rejects_missing_identity_in_sync() {
+        let mut resources = empty_categorized();
+        resources.syncs.insert(
+            "s".to_string(),
+            SyncSpec {
+                identity: Some("nonexistent".to_string()),
+                ..SyncSpec::new(SyncStep::command(vec!["true".to_string()]))
+            },
+        );
+        let errors = validate_identity_refs(&resources);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], CompileError::UnresolvedRef { kind, name }
+            if kind == "Identity" && name == "nonexistent")
+        );
+    }
+
+    #[test]
+    fn validate_identity_refs_rejects_missing_identity_in_connection() {
+        let mut resources = empty_categorized();
+        resources.connections.insert(
+            "c".to_string(),
+            ConnectionSpec::BigQuery {
+                project: "p".to_string(),
+                dataset: "d".to_string(),
+                execution_project: None,
+                method: None,
+                keyfile: None,
+                timeout_seconds: None,
+                identity: Some("nonexistent".to_string()),
+            },
+        );
+        let errors = validate_identity_refs(&resources);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], CompileError::UnresolvedRef { kind, name }
+            if kind == "Identity" && name == "nonexistent")
+        );
+    }
+
+    #[test]
+    fn validate_identity_refs_deduplicates_across_sync_stages() {
+        let mut resources = empty_categorized();
+        let mut spec = SyncSpec::new(SyncStep::command(vec!["true".to_string()]));
+        spec.identity = Some("missing".to_string());
+        spec.run.identity = Some("missing".to_string());
+        resources.syncs.insert("s".to_string(), spec);
+        let errors = validate_identity_refs(&resources);
+        // Both references produce separate errors (same name, but each ref is validated independently).
+        assert_eq!(errors.len(), 2);
+    }
 
     #[test]
     fn format_multiple_errors_joins_with_newline() {

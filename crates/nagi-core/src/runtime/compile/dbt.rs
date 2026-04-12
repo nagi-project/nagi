@@ -153,6 +153,7 @@ mod tests {
             target: None,
             profiles_dir: None,
             dbt_cloud_credentials_file: Some("/home/user/.dbt/dbt_cloud.yml".to_string()),
+            identity_env: None,
         });
 
         let output = make_output(vec![asset]);
@@ -171,6 +172,7 @@ mod tests {
             target: None,
             profiles_dir: None,
             dbt_cloud_credentials_file: None,
+            identity_env: None,
         });
 
         let output = make_output(vec![asset]);
@@ -194,6 +196,7 @@ mod tests {
             method: None,
             keyfile: None,
             timeout_seconds: None,
+            identity_env: None,
         });
 
         let output = make_output(vec![asset]);
@@ -211,6 +214,7 @@ mod tests {
             method: None,
             keyfile: None,
             timeout_seconds: None,
+            identity_env: None,
         });
 
         let mut dbt_asset = make_resolved_asset("daily_sales");
@@ -220,6 +224,7 @@ mod tests {
             target: None,
             profiles_dir: None,
             dbt_cloud_credentials_file: Some("/home/user/.dbt/dbt_cloud.yml".to_string()),
+            identity_env: None,
         });
 
         let output = make_output(vec![bq_asset, dbt_asset]);

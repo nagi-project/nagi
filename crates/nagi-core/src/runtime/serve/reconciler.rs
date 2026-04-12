@@ -495,7 +495,7 @@ mod tests {
         conditions: Vec<crate::runtime::kind::asset::DesiredCondition>,
     ) -> CompiledAsset {
         use crate::runtime::compile::ResolvedOnDriftEntry;
-        use crate::runtime::kind::sync::{StepType, SyncSpec, SyncStep};
+        use crate::runtime::kind::sync::{SyncSpec, SyncStep};
         CompiledAsset {
             _api_version: "v1".to_string(),
             metadata: Metadata::new("test-asset"),
@@ -504,15 +504,7 @@ mod tests {
                 on_drift: vec![ResolvedOnDriftEntry {
                     conditions,
                     conditions_ref: "test-cond".to_string(),
-                    sync: SyncSpec {
-                        pre: None,
-                        run: SyncStep {
-                            step_type: StepType::Command,
-                            args: vec!["true".to_string()],
-                            env: std::collections::HashMap::new(),
-                        },
-                        post: None,
-                    },
+                    sync: SyncSpec::new(SyncStep::command(vec!["true".to_string()])),
                     sync_ref_name: "test-sync".to_string(),
                 }],
                 auto_sync: true,

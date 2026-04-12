@@ -407,26 +407,19 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
             )),
             env: Default::default(),
             evaluate_cache_ttl: None,
+            identity: None,
         }]),
     };
 
     let sync_resource = NagiKind::Sync {
         api_version: kind::API_VERSION.to_string(),
         metadata: kind::Metadata::new(sync_name),
-        spec: kind::SyncSpec {
-            pre: None,
-            run: kind::sync::SyncStep {
-                step_type: kind::sync::StepType::Command,
-                args: vec![
-                    "nagi".to_string(),
-                    "export".to_string(),
-                    "--select".to_string(),
-                    "{{ sync.table }}".to_string(),
-                ],
-                env: Default::default(),
-            },
-            post: None,
-        },
+        spec: kind::SyncSpec::new(kind::sync::SyncStep::command(vec![
+            "nagi".to_string(),
+            "export".to_string(),
+            "--select".to_string(),
+            "{{ sync.table }}".to_string(),
+        ])),
     };
 
     let mut resources = vec![conditions, sync_resource];
@@ -478,9 +471,12 @@ pub fn resolve_export_connection(
         })
         .collect();
 
-    let resolved =
-        crate::runtime::kind::connection::resolve_connection_by_name(connection_name, &connections)
-            .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
+    let resolved = crate::runtime::kind::connection::resolve_connection_by_name(
+        connection_name,
+        &connections,
+        &std::collections::HashMap::new(),
+    )
+    .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
     resolved.connect().map_err(ExportError::Connection)
 }

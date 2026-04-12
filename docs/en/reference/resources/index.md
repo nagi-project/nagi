@@ -83,6 +83,7 @@ Each kind has a different role within the reconciliation loop.
 | [Sync](./sync.md) | Sync procedure definition. Three stages: pre, run, post |
 | [Conditions](./conditions.md) | A resource that groups desired state definitions. Can be shared across multiple Assets |
 | [Origin](./origin.md) | Auto-generates Assets from data structure information managed by other software |
+| [Identity](./identity.md) | Declares an authentication scope. Referenced from Connection, Sync, and Command conditions to control which credentials are used |
 
 ## Template Variables
 
