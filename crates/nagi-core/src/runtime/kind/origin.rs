@@ -37,29 +37,25 @@ pub enum OriginSpec {
         /// Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`).
         #[serde(default)]
         auto_sync: Option<bool>,
+        /// Environment variables passed to the `dbt compile` subprocess.
+        /// Values may reference the parent process env via `${VAR}`.
+        #[serde(default)]
+        env: HashMap<String, String>,
     },
 }
 
 impl OriginSpec {
     pub fn validate(&self) -> Result<(), KindError> {
-        let require_non_empty = |field: &str, value: &str| {
-            if value.is_empty() {
-                return Err(KindError::InvalidSpec {
-                    kind: KIND.to_string(),
-                    message: format!("{field} must not be empty"),
-                });
-            }
-            Ok(())
-        };
-
         match self {
             OriginSpec::Dbt {
                 connection,
                 project_dir,
+                env,
                 ..
             } => {
-                require_non_empty("connection", connection)?;
-                require_non_empty("projectDir", project_dir)?;
+                KindError::require_non_empty(connection, KIND, "connection")?;
+                KindError::require_non_empty(project_dir, KIND, "projectDir")?;
+                crate::runtime::subprocess::validate_env_keys(env, KIND, "env")?;
                 Ok(())
             }
         }
@@ -86,7 +82,7 @@ projectDir: ../dbt-project
 "#;
         let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(
-            matches!(&spec, OriginSpec::Dbt { connection, project_dir, default_sync, auto_sync }
+            matches!(&spec, OriginSpec::Dbt { connection, project_dir, default_sync, auto_sync, .. }
             if connection == "my-bigquery" && project_dir == "../dbt-project" && default_sync.is_none() && auto_sync.is_none())
         );
     }
@@ -138,12 +134,50 @@ defaultSync:
     }
 
     #[test]
+    fn parse_origin_spec_with_env() {
+        let yaml = r#"
+type: DBT
+connection: my-bigquery
+projectDir: ../dbt-project
+env:
+  GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+  DBT_PROFILES_DIR: /custom/profiles
+"#;
+        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            OriginSpec::Dbt { env, .. } => {
+                assert_eq!(
+                    env.get("GOOGLE_APPLICATION_CREDENTIALS").unwrap(),
+                    "${GOOGLE_APPLICATION_CREDENTIALS}"
+                );
+                assert_eq!(env.get("DBT_PROFILES_DIR").unwrap(), "/custom/profiles");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_origin_spec_env_defaults_to_empty() {
+        let yaml = r#"
+type: DBT
+connection: my-bigquery
+projectDir: ../dbt-project
+"#;
+        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
+        match &spec {
+            OriginSpec::Dbt { env, .. } => {
+                assert!(env.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn validate_rejects_empty_connection() {
         let spec = OriginSpec::Dbt {
             connection: String::new(),
             project_dir: "../dbt".to_string(),
             default_sync: None,
             auto_sync: None,
+            env: HashMap::new(),
         };
         let err = spec.validate().unwrap_err();
         assert!(err.to_string().contains("connection must not be empty"));
@@ -156,6 +190,7 @@ defaultSync:
             project_dir: String::new(),
             default_sync: None,
             auto_sync: None,
+            env: HashMap::new(),
         };
         let err = spec.validate().unwrap_err();
         assert!(err.to_string().contains("projectDir must not be empty"));
@@ -194,5 +229,21 @@ projectDir: ../dbt-project
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_env_key() {
+        let mut env = HashMap::new();
+        env.insert("123BAD".to_string(), "x".to_string());
+        let spec = OriginSpec::Dbt {
+            connection: "my-bq".to_string(),
+            project_dir: "../dbt".to_string(),
+            default_sync: None,
+            auto_sync: None,
+            env,
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, message }
+            if kind == KIND && message.contains("123BAD")));
     }
 }

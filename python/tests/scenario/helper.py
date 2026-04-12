@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from tests.helper import ARGS_SLEEP_2, CMD_TRUE
 
@@ -42,7 +42,38 @@ def write_project(
         (resources_dir / filename).write_text(content)
 
 
-def start_serve(project: Path) -> subprocess.Popen[bytes]:
+class ServeProcess:
+    """Wraps a serve subprocess and its stderr log file."""
+
+    def __init__(
+        self,
+        proc: subprocess.Popen[bytes],
+        stderr_file: IO[str],
+    ) -> None:
+        self.proc = proc
+        self._stderr_file = stderr_file
+
+    def stop(self) -> None:
+        if self.proc.poll() is None:
+            try:
+                if sys.platform == "win32":
+                    self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
+                self.proc.wait(timeout=10)
+            except (subprocess.TimeoutExpired, ProcessLookupError):
+                try:
+                    if sys.platform == "win32":
+                        self.proc.kill()
+                    else:
+                        os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.proc.wait(timeout=5)
+        self._stderr_file.close()
+
+
+def start_serve(project: Path) -> ServeProcess:
     args = [
         "uv",
         "run",
@@ -57,40 +88,74 @@ def start_serve(project: Path) -> subprocess.Popen[bytes]:
         "--project-dir",
         str(project),
     ]
+    stderr_path = project / "serve_stderr.log"
+    stderr_file = open(stderr_path, "w")  # noqa: SIM115
     if sys.platform == "win32":
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_file,
             cwd=project,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
-    return subprocess.Popen(
-        args,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        cwd=project,
-        start_new_session=True,
-    )
+    else:
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            cwd=project,
+            start_new_session=True,
+        )
+    return ServeProcess(proc, stderr_file)
 
 
-def stop_serve(proc: subprocess.Popen[bytes]) -> None:
-    if proc.poll() is None:
-        try:
-            if sys.platform == "win32":
-                proc.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-            proc.wait(timeout=10)
-        except (subprocess.TimeoutExpired, ProcessLookupError):
+def _dump_debug_info(project: Path, asset_name: str) -> str:
+    """Collect cache files and recent logs for debugging timeout failures."""
+    import json
+
+    lines = [f"=== Debug info for {asset_name} timeout ==="]
+
+    cache_dir = project / "cache"
+    if cache_dir.exists():
+        for p in sorted(cache_dir.glob("*.json")):
             try:
-                if sys.platform == "win32":
-                    proc.kill()
-                else:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait(timeout=5)
+                data = json.loads(p.read_text())
+                lines.append(f"  cache/{p.name}: ready={data.get('ready')}")
+            except Exception as e:
+                lines.append(f"  cache/{p.name}: read error: {e}")
+    else:
+        lines.append("  cache/ directory does not exist")
+
+    db_path = project / "target" / "logs.db"
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(str(db_path))
+            for table in ["evaluate_logs", "sync_logs"]:
+                rows = conn.execute(
+                    f"SELECT * FROM {table} ORDER BY rowid DESC LIMIT 10"
+                ).fetchall()
+                cur = conn.execute(f"SELECT * FROM {table} LIMIT 0")
+                cols = [d[0] for d in cur.description]
+                lines.append(f"  {table} (last 10):")
+                for row in rows:
+                    lines.append(f"    {dict(zip(cols, row))}")
+            conn.close()
+        except Exception as e:
+            lines.append(f"  logs.db read error: {e}")
+    else:
+        lines.append("  logs.db does not exist")
+
+    stderr_path = project / "serve_stderr.log"
+    if stderr_path.exists():
+        try:
+            content = stderr_path.read_text()
+            lines.append("  serve stderr (last 50 lines):")
+            for line in content.splitlines()[-50:]:
+                lines.append(f"    {line}")
+        except Exception as e:
+            lines.append(f"  serve_stderr.log read error: {e}")
+
+    return "\n".join(lines)
 
 
 def wait_for_asset_ready(
@@ -111,7 +176,8 @@ def wait_for_asset_ready(
             if data.get("ready") is True:
                 return
         time.sleep(1)
-    raise TimeoutError(f"{asset_name} did not become ready within {timeout}s")
+    debug = _dump_debug_info(project, asset_name)
+    raise TimeoutError(f"{asset_name} did not become ready within {timeout}s\n{debug}")
 
 
 def wait_for_sync_count(
