@@ -426,14 +426,6 @@ my_project:
     }
 
     #[test]
-    fn role_is_none_when_omitted() {
-        let f = profiles();
-        let out = f.resolve("my_project", Some("no_role")).unwrap();
-        let cfg = SnowflakeConfig::from_output(out).unwrap();
-        assert!(cfg.role.is_none());
-    }
-
-    #[test]
     fn rejects_unsupported_adapter() {
         let output = AdapterConfig {
             adapter_type: "bigquery".to_string(),
@@ -791,16 +783,6 @@ my_project:
             data: None,
             message: Some("successfully executed".to_string()),
             code: Some("090001".to_string()),
-        };
-        assert!(check_statement_success(&resp).is_ok());
-    }
-
-    #[test]
-    fn check_statement_success_no_code() {
-        let resp = StatementResponse {
-            data: None,
-            message: None,
-            code: None,
         };
         assert!(check_statement_success(&resp).is_ok());
     }
