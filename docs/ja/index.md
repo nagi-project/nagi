@@ -54,7 +54,7 @@ graph LR
 
 ## Principles
 
-- Declarative — Define the desired state; let the engine converge.
+- Declarative — Define the desired state; let Nagi handle convergence.
 - Composable — Use with your existing tools, or let Nagi take the wheel.
 - AI-collaborative — Designed for humans and AI agents to work as one.
 
