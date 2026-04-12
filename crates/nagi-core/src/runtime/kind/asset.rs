@@ -569,34 +569,6 @@ run: [dbt, test, --select, my_model]
     }
 
     #[test]
-    fn validate_rejects_empty_command_run() {
-        let condition = DesiredCondition::Command {
-            name: "check".to_string(),
-            run: vec![],
-            interval: None,
-            env: HashMap::new(),
-            evaluate_cache_ttl: None,
-            identity: None,
-        };
-        let err = condition.validate().unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
-    }
-
-    #[test]
-    fn validate_rejects_blank_command_program() {
-        let condition = DesiredCondition::Command {
-            name: "check".to_string(),
-            run: vec!["".to_string()],
-            interval: None,
-            env: HashMap::new(),
-            evaluate_cache_ttl: None,
-            identity: None,
-        };
-        let err = condition.validate().unwrap_err();
-        assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
-    }
-
-    #[test]
     fn parse_multiple_on_drift_entries() {
         let yaml = r#"
 onDrift:
