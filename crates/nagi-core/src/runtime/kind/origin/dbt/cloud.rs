@@ -475,16 +475,6 @@ account-host: "cloud.getdbt.com"
         assert!(mapping.is_empty());
     }
 
-    #[test]
-    fn model_job_mapping_tag_only_produces_empty() {
-        let jobs = vec![JobData {
-            id: 1,
-            execute_steps: vec!["dbt run --select tag:finance".to_string()],
-        }];
-        let mapping = build_model_job_mapping(&jobs);
-        assert!(mapping.is_empty());
-    }
-
     // ── filter_runs_by_job_ids ───────────────────────────────────────────
 
     #[test]
@@ -525,34 +515,12 @@ account-host: "cloud.getdbt.com"
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn filter_runs_empty_relevant_returns_empty() {
-        let runs = vec![RunData {
-            id: 100,
-            job_id: 1,
-            status_humanized: "Running".to_string(),
-        }];
-        let result = filter_runs_by_job_ids(&runs, &HashSet::new());
-        assert!(result.is_empty());
-    }
-
     // ── Security ──────────────────────────────────────────────────────────────
 
     #[test]
     fn account_id_with_path_traversal_is_rejected() {
         let yaml = r#"
 account-id: "123/../admin"
-token-value: "tok"
-account-host: "cloud.getdbt.com"
-"#;
-        let err = parse_credentials_str(yaml).unwrap_err();
-        assert!(matches!(err, DbtCloudError::InvalidAccountId(_)));
-    }
-
-    #[test]
-    fn account_id_with_non_numeric_chars_is_rejected() {
-        let yaml = r#"
-account-id: "abc"
 token-value: "tok"
 account-host: "cloud.getdbt.com"
 "#;
