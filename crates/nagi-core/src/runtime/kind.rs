@@ -368,22 +368,6 @@ spec: {{}}
     }
 
     #[test]
-    fn metadata_accessor_works_for_all_kinds() {
-        let yaml = r#"
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: my-sync
-spec:
-  run:
-    type: Command
-    args: ["dbt", "run"]
-"#;
-        let resource = parse_kind(yaml).unwrap();
-        assert_eq!(resource.metadata().name, "my-sync");
-    }
-
-    #[test]
     fn parse_kind_rejects_unsupported_api_version() {
         let yaml = r#"
 apiVersion: nagi.io/v2

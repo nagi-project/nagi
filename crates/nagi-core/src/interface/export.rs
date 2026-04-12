@@ -112,3 +112,58 @@ pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
         tracing::warn!(%e, "export: failed to update marker");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::config::{NagiConfig, NagiDir};
+
+    fn config_with_tmpdir(dir: &std::path::Path) -> NagiConfig {
+        NagiConfig {
+            nagi_dir: NagiDir::new(dir.to_path_buf()),
+            ..NagiConfig::default()
+        }
+    }
+
+    #[test]
+    fn dry_run_for_config_no_select_returns_all_tables() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs_dir = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        let config = config_with_tmpdir(tmp.path());
+
+        let results = dry_run_for_config(&config, None).unwrap();
+        // With no select filter, all 3 export tables are included.
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn dry_run_for_config_with_select_returns_single_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs_dir = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        let config = config_with_tmpdir(tmp.path());
+
+        let results = dry_run_for_config(&config, Some("evaluate_logs")).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn dry_run_for_config_invalid_table_name_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config_with_tmpdir(tmp.path());
+
+        let result = dry_run_for_config(&config, Some("nonexistent_table"));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn export_for_config_without_export_config_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config_with_tmpdir(tmp.path());
+        // config.export is None by default.
+
+        let result = export_for_config(&config, tmp.path(), None).await;
+        assert!(result.is_err());
+    }
+}

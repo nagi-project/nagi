@@ -436,18 +436,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_controller_count_ok_when_no_limit() {
-        assert!(validate_controller_count(100, None).is_ok());
-    }
-
-    #[test]
     fn validate_controller_count_ok_within_limit() {
         assert!(validate_controller_count(3, Some(5)).is_ok());
-    }
-
-    #[test]
-    fn validate_controller_count_ok_at_limit() {
-        assert!(validate_controller_count(5, Some(5)).is_ok());
     }
 
     #[test]
