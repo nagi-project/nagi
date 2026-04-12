@@ -53,8 +53,8 @@ Asset 名は `{Origin名}.{model名}` の形式で生成されます。
 
 Evaluate は Nagi が直接実行します。
 
-- Freshness / SQL 条件: Nagi が Connection の接続情報でデータウェアハウスに直接クエリを発行します
-- Command 条件（dbt test）: dbt CLI をサブプロセスとして実行します
+- Freshness / SQL: Nagi が Connection の接続情報でデータウェアハウスに直接クエリを発行します
+- `type: Command`（dbt test）: dbt CLI をサブプロセスとして実行します
 
 ## Sync
 

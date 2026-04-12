@@ -61,6 +61,23 @@ spec:
 
 When `defaultSync` is specified, the `{origin}-dbt-run` Sync is not generated.
 
+## Environment Variables
+
+`type: DBT` Origins can declare environment variables via the `env` field. These are passed to the `dbt compile` subprocess. Only declared values and a minimal set of OS essentials reach the subprocess — the parent shell's environment is not inherited. Values can reference the Nagi process's own environment using `${VAR}` syntax.
+
+If your `profiles.yml` uses `{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}` or similar, declare the referenced variable in `env`:
+
+```yaml
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+```
+
+See [Environment Variables](../environment-variables.md) for details.
+
 <!-- schema:auto-generated:start:OriginSpec -->
 
 ## Attributes
