@@ -36,9 +36,16 @@ const ALLOWLIST: &[&str] = &[
     "ProgramData",
     "ProgramFiles",
     "ProgramFiles(x86)",
+    "ProgramW6432",
     "CommonProgramFiles",
     "CommonProgramFiles(x86)",
+    "CommonProgramW6432",
+    "ALLUSERSPROFILE",
     "COMPUTERNAME",
+    "LOGONSERVER",
+    "PUBLIC",
+    "USERDOMAIN",
+    "USERDOMAIN_ROAMINGPROFILE",
     "NUMBER_OF_PROCESSORS",
     "PROCESSOR_ARCHITECTURE",
 ];
@@ -329,7 +336,14 @@ mod tests {
         assert!(ALLOWLIST.contains(&"HOMEPATH"));
         assert!(ALLOWLIST.contains(&"ProgramData"));
         assert!(ALLOWLIST.contains(&"ProgramFiles"));
+        assert!(ALLOWLIST.contains(&"ProgramW6432"));
+        assert!(ALLOWLIST.contains(&"CommonProgramW6432"));
+        assert!(ALLOWLIST.contains(&"ALLUSERSPROFILE"));
         assert!(ALLOWLIST.contains(&"COMPUTERNAME"));
+        assert!(ALLOWLIST.contains(&"LOGONSERVER"));
+        assert!(ALLOWLIST.contains(&"PUBLIC"));
+        assert!(ALLOWLIST.contains(&"USERDOMAIN"));
+        assert!(ALLOWLIST.contains(&"USERDOMAIN_ROAMINGPROFILE"));
     }
 
     // ── env key name validation ──────────────────────────────────────

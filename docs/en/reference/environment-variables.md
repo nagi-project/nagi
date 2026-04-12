@@ -48,9 +48,16 @@ Nagi passes through a minimal set of parent environment variables that are requi
 | `ProgramData` | Shared application data |
 | `ProgramFiles` | Program installation directory |
 | `ProgramFiles(x86)` | 32-bit program installation directory |
+| `ProgramW6432` | 64-bit program installation directory |
 | `CommonProgramFiles` | Shared program components |
 | `CommonProgramFiles(x86)` | 32-bit shared program components |
+| `CommonProgramW6432` | 64-bit shared program components |
+| `ALLUSERSPROFILE` | All-users profile directory |
 | `COMPUTERNAME` | Machine name |
+| `LOGONSERVER` | Logon server |
+| `PUBLIC` | Public profile directory |
+| `USERDOMAIN` | User domain |
+| `USERDOMAIN_ROAMINGPROFILE` | User domain for roaming profile |
 | `NUMBER_OF_PROCESSORS` | Number of processors |
 | `PROCESSOR_ARCHITECTURE` | Processor architecture |
 
