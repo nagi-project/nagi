@@ -84,24 +84,32 @@ mod tests {
         assert_eq!(status, ConditionStatus::Ready);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn non_allowlisted_parent_env_does_not_leak() {
         // CARGO is set by `cargo test` and is not in the allow-list.
         assert!(std::env::var("CARGO").is_ok());
+        #[cfg(not(windows))]
         let run = vec![
             "sh".into(),
             "-c".into(),
             "test -z \"$CARGO\"".into(), // succeeds when CARGO is unset/empty
         ];
+        #[cfg(windows)]
+        let run = vec![
+            "powershell".into(),
+            "-Command".into(),
+            "if ($env:CARGO) { exit 1 } else { exit 0 }".into(),
+        ];
         let status = evaluate_command(&run, &HashMap::new()).await.unwrap();
         assert_eq!(status, ConditionStatus::Ready);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn undefined_template_var_returns_env_resolution_error() {
+        #[cfg(not(windows))]
         let run = vec!["true".to_string()];
+        #[cfg(windows)]
+        let run = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
         let mut env = HashMap::new();
         env.insert(
             "X".to_string(),

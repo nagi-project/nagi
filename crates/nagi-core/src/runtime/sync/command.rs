@@ -62,10 +62,6 @@ mod tests {
         }
     }
 
-    // Runs `sh -c "echo $VAR"` and returns stdout trimmed. Unix-only because
-    // these tests exercise the sync subprocess wiring, and duplicating them
-    // for Windows cmd.exe does not add coverage over the cross-platform pure
-    // function tests in runtime::subprocess.
     #[cfg(unix)]
     async fn run_echo_var(var_name: &str, step_env: &[(&str, &str)]) -> StageResult {
         let step = step_with_env(
@@ -75,7 +71,19 @@ mod tests {
         execute_step(Stage::Run, &step).await.unwrap()
     }
 
-    #[cfg(unix)]
+    #[cfg(windows)]
+    async fn run_echo_var(var_name: &str, step_env: &[(&str, &str)]) -> StageResult {
+        let step = step_with_env(
+            vec![
+                "powershell",
+                "-Command",
+                &format!("[Console]::Write($env:{var_name})"),
+            ],
+            step_env,
+        );
+        execute_step(Stage::Run, &step).await.unwrap()
+    }
+
     #[tokio::test]
     async fn declared_env_reaches_subprocess() {
         let result = run_echo_var("FOO", &[("FOO", "bar")]).await;
@@ -83,12 +91,9 @@ mod tests {
         assert_eq!(result.stdout, "bar");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn non_allowlisted_parent_env_does_not_leak() {
-        // `CARGO` is set by `cargo test` in the parent process and is not in
-        // the allow-list. Without declaring it in `env`, it must not reach
-        // the subprocess.
+        // CARGO is set by `cargo test` and is not in the allow-list.
         assert!(
             std::env::var("CARGO").is_ok(),
             "test harness invariant: CARGO should be set under `cargo test`"
@@ -98,23 +103,30 @@ mod tests {
         assert_eq!(result.stdout, "");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn template_expansion_reads_parent_env() {
-        // `HOME` is in the Unix allow-list and is reliably set in any
-        // reasonable shell environment. Declare a new key that references it
-        // via ${HOME}; the subprocess should see the expanded value.
-        let home = std::env::var("HOME").expect("HOME must be set");
-        let result = run_echo_var("CUSTOM_HOME", &[("CUSTOM_HOME", "${HOME}")]).await;
+        #[cfg(unix)]
+        let home_key = "HOME";
+        #[cfg(windows)]
+        let home_key = "USERPROFILE";
+
+        let home = std::env::var(home_key).expect("home dir env must be set");
+        let template = format!("${{{home_key}}}");
+        let result = run_echo_var("CUSTOM_HOME", &[("CUSTOM_HOME", &template)]).await;
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stdout, home);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn undefined_template_var_returns_env_resolution_error() {
+        #[cfg(unix)]
         let step = step_with_env(
             vec!["sh", "-c", "true"],
+            &[("X", "${NAGI_DEFINITELY_UNSET_12345}")],
+        );
+        #[cfg(windows)]
+        let step = step_with_env(
+            vec!["powershell", "-Command", "exit 0"],
             &[("X", "${NAGI_DEFINITELY_UNSET_12345}")],
         );
         let err = execute_step(Stage::Run, &step).await.unwrap_err();
@@ -126,14 +138,17 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn invalid_declared_key_returns_env_resolution_error() {
         let mut env = HashMap::new();
         env.insert("FOO-BAR".to_string(), "x".to_string());
+        #[cfg(unix)]
+        let args = vec!["sh".into(), "-c".into(), "true".into()];
+        #[cfg(windows)]
+        let args = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
         let step = SyncStep {
             step_type: StepType::Command,
-            args: vec!["sh".into(), "-c".into(), "true".into()],
+            args,
             env,
         };
         let err = execute_step(Stage::Run, &step).await.unwrap_err();
