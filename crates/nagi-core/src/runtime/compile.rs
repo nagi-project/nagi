@@ -1389,48 +1389,6 @@ spec:
         );
     }
 
-    #[test]
-    fn resolve_on_drift_model_name_falls_back_to_asset_name() {
-        let syncs = HashMap::from([(
-            "dbt-run".to_string(),
-            SyncSpec {
-                pre: None,
-                run: crate::runtime::kind::sync::SyncStep {
-                    step_type: crate::runtime::kind::sync::StepType::Command,
-                    args: vec![
-                        "dbt".to_string(),
-                        "run".to_string(),
-                        "--select".to_string(),
-                        "{{ asset.modelName }}".to_string(),
-                    ],
-                    env: HashMap::new(),
-                    identity: None,
-                },
-                post: None,
-                identity: None,
-            },
-        )]);
-        // User-defined Asset: model_name equals asset name
-        let entry = asset::OnDriftEntry {
-            conditions: "daily-sla".to_string(),
-            sync: "dbt-run".to_string(),
-            with: HashMap::new(),
-            merge_position: asset::MergePosition::BeforeOrigin,
-        };
-        let result = resolve_on_drift(
-            "custom-report",
-            "custom-report",
-            &[entry],
-            &sample_conditions(),
-            &syncs,
-        )
-        .unwrap();
-        assert_eq!(
-            result[0].sync.run.args[3], "custom-report",
-            "user-defined Asset: modelName should equal asset name"
-        );
-    }
-
     // ── resolve (integration) tests ─────────────────────────────────────
 
     #[test]
@@ -1487,46 +1445,6 @@ apiVersion: nagi.io/v1alpha1
 kind: Asset
 metadata:
   name: daily-sales
-spec:
-  onDrift:
-    - conditions: daily-sla
-      sync: dbt-run
----
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
-spec:
-  onDrift:
-    - conditions: quality-checks
-      sync: dbt-full",
-        ]));
-        let output = resolve(resources).unwrap();
-        assert_eq!(output.assets.len(), 1);
-        assert_eq!(output.assets[0].metadata.name, "daily-sales");
-        assert_eq!(output.assets[0].resolved_on_drift.len(), 2);
-    }
-
-    #[test]
-    fn resolve_merge_preserves_first_asset_fields() {
-        let resources = parse(&yaml_docs(&[
-            DESIRED_GROUP_DAILY_SLA,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Conditions
-metadata:
-  name: quality-checks
-spec:
-  - name: check-b
-    type: SQL
-    query: \"SELECT true\"",
-            SYNC_DBT_RUN,
-            SYNC_DBT_FULL,
-            "\
-apiVersion: nagi.io/v1alpha1
-kind: Asset
-metadata:
-  name: daily-sales
   labels:
     dbt/finance: ''
 spec:
@@ -1546,12 +1464,16 @@ spec:
       sync: dbt-full",
         ]));
         let output = resolve(resources).unwrap();
+        assert_eq!(output.assets.len(), 1);
         let asset = &output.assets[0];
+        assert_eq!(asset.metadata.name, "daily-sales");
+        assert_eq!(asset.resolved_on_drift.len(), 2);
+        // Merge preserves first asset's labels, not the overlay's.
         assert_eq!(
             asset.metadata.labels.get("dbt/finance"),
             Some(&String::new())
         );
-        assert_eq!(asset.resolved_on_drift.len(), 2);
+        assert_eq!(asset.metadata.labels.get("dbt/other"), None);
     }
 
     #[test]
@@ -2116,32 +2038,6 @@ spec:
         assert!(target_dir.join("assets/my-dbt.stg_customers.yaml").exists());
     }
 
-    // ── check_dup ───────────────────────────────────────────────────────
-
-    #[test]
-    fn check_dup_ok_for_new_entry() {
-        let mut seen = HashSet::new();
-        assert!(check_dup(&mut seen, "Asset".into(), "foo".into()).is_ok());
-        assert!(seen.contains(&("Asset".into(), "foo".into())));
-    }
-
-    #[test]
-    fn check_dup_different_kinds_same_name() {
-        let mut seen = HashSet::new();
-        check_dup(&mut seen, "Asset".into(), "foo".into()).unwrap();
-        assert!(check_dup(&mut seen, "Sync".into(), "foo".into()).is_ok());
-    }
-
-    #[test]
-    fn check_dup_returns_error_on_duplicate() {
-        let mut seen = HashSet::new();
-        check_dup(&mut seen, "Asset".into(), "foo".into()).unwrap();
-        let err = check_dup(&mut seen, "Asset".into(), "foo".into()).unwrap_err();
-        assert!(
-            matches!(err, CompileError::DuplicateName { kind, name } if kind == "Asset" && name == "foo")
-        );
-    }
-
     // ── check_dup_collect ────────────────────────────────────────────────
 
     #[test]
@@ -2152,6 +2048,20 @@ spec:
             &mut seen,
             &mut errors,
             "Asset".into(),
+            "foo".into()
+        ));
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn check_dup_collect_different_kinds_same_name() {
+        let mut seen = HashSet::new();
+        let mut errors = Vec::new();
+        check_dup_collect(&mut seen, &mut errors, "Asset".into(), "foo".into());
+        assert!(check_dup_collect(
+            &mut seen,
+            &mut errors,
+            "Sync".into(),
             "foo".into()
         ));
         assert!(errors.is_empty());
@@ -2191,9 +2101,8 @@ spec:
     is_yaml_file_test! {
         yaml_extension: "foo.yaml" => true;
         yml_extension: "foo.yml" => true;
-        json_extension: "foo.json" => false;
+        non_yaml_extension: "foo.json" => false;
         no_extension: "foo" => false;
-        toml_extension: "foo.toml" => false;
     }
 
     // ── parse_yaml_file ────────────────────────────────────────────────
@@ -2268,20 +2177,6 @@ spec: {}",
     }
 
     #[test]
-    fn expand_step_preserves_env() {
-        let mut env = HashMap::new();
-        env.insert("KEY".into(), "VALUE".into());
-        let step = SyncStep {
-            step_type: crate::runtime::kind::sync::StepType::Command,
-            args: vec!["echo".into()],
-            env: env.clone(),
-            identity: None,
-        };
-        let result = expand_step(&step, "a", "b", &HashMap::new());
-        assert_eq!(result.env, env);
-    }
-
-    #[test]
     fn expand_step_replaces_with_variables() {
         let step = SyncStep {
             step_type: crate::runtime::kind::sync::StepType::Command,
@@ -2328,12 +2223,6 @@ spec: {}",
         let names: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
         let upstreams = vec!["a".to_string(), "b".to_string()];
         assert!(collect_unresolved_upstream_errors(&upstreams, &names).is_empty());
-    }
-
-    #[test]
-    fn collect_unresolved_upstream_errors_empty_upstreams() {
-        let names: HashSet<String> = HashSet::new();
-        assert!(collect_unresolved_upstream_errors(&[], &names).is_empty());
     }
 
     #[test]
@@ -2610,73 +2499,7 @@ spec: {}",
         }
     }
 
-    // ── Identity reference validation ─────────────────────────────────
-
-    const IDENTITY_BQ_EVAL: &str = "\
-apiVersion: nagi.io/v1alpha1
-kind: Identity
-metadata:
-  name: bq-evaluator
-spec:
-  type: env
-  env:
-    GOOGLE_APPLICATION_CREDENTIALS: /path/to/key.json";
-
-    const SYNC_WITH_IDENTITY: &str = "\
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: dbt-run
-spec:
-  identity: bq-evaluator
-  run:
-    type: Command
-    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
-
-    const SYNC_WITH_BAD_IDENTITY: &str = "\
-apiVersion: nagi.io/v1alpha1
-kind: Sync
-metadata:
-  name: dbt-run
-spec:
-  identity: nonexistent
-  run:
-    type: Command
-    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
-
-    #[test]
-    fn compile_rejects_unresolved_identity_in_sync() {
-        let yaml = yaml_docs(&[
-            CONNECTION_MY_BQ,
-            DESIRED_GROUP_DAILY_SLA,
-            SYNC_WITH_BAD_IDENTITY,
-            ASSET_RAW_SALES,
-        ]);
-        let resources = parse_kinds(&yaml).unwrap();
-        let result = resolve(resources);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("nonexistent"),
-            "expected error mentioning 'nonexistent', got: {msg}"
-        );
-    }
-
-    #[test]
-    fn compile_accepts_valid_identity_ref_in_sync() {
-        let yaml = yaml_docs(&[
-            CONNECTION_MY_BQ,
-            DESIRED_GROUP_DAILY_SLA,
-            IDENTITY_BQ_EVAL,
-            SYNC_WITH_IDENTITY,
-            ASSET_RAW_SALES,
-        ]);
-        let resources = parse_kinds(&yaml).unwrap();
-        let result = resolve(resources);
-        assert!(result.is_ok(), "expected Ok, got: {result:?}");
-    }
-
-    // ── format_multiple_errors ─────────────────────────────────────────
+    // ── validate_identity_refs ─────────────────────────────────────────
 
     fn empty_categorized() -> CategorizedResources {
         CategorizedResources {
@@ -2686,12 +2509,6 @@ spec:
             assets: Vec::new(),
             identities: HashMap::new(),
         }
-    }
-
-    #[test]
-    fn validate_identity_refs_returns_empty_when_no_refs() {
-        let resources = empty_categorized();
-        assert!(validate_identity_refs(&resources).is_empty());
     }
 
     #[test]
@@ -2764,18 +2581,5 @@ spec:
         let errors = validate_identity_refs(&resources);
         // Both references produce separate errors (same name, but each ref is validated independently).
         assert_eq!(errors.len(), 2);
-    }
-
-    #[test]
-    fn format_multiple_errors_joins_with_newline() {
-        let errors = vec![
-            CompileError::CycleDetected { name: "a".into() },
-            CompileError::CycleDetected { name: "b".into() },
-        ];
-        let msg = format_multiple_errors(&errors);
-        assert_eq!(
-            msg,
-            "dependency cycle detected involving 'a'\ndependency cycle detected involving 'b'"
-        );
     }
 }

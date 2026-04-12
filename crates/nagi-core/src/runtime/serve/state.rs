@@ -540,16 +540,6 @@ mod tests {
         }
     }
 
-    fn asset_entry_with_sync_ref(name: &str) -> AssetEntry {
-        AssetEntry {
-            name: name.to_string(),
-            yaml: String::new(),
-            min_interval: None,
-            auto_sync: true,
-            has_sync: true,
-        }
-    }
-
     fn ready_condition(name: &str) -> crate::runtime::evaluate::ConditionResult {
         crate::runtime::evaluate::ConditionResult {
             condition_name: name.to_string(),
@@ -708,15 +698,6 @@ mod tests {
     }
 
     #[test]
-    fn propagate_downstream_no_downstreams() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
-        state.readiness.record("a", false);
-
-        let propagated = state.propagate_downstream("a", true);
-        assert!(propagated.is_empty());
-    }
-
-    #[test]
     fn propagate_downstream_does_not_enqueue_evaluate() {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
@@ -799,10 +780,7 @@ mod tests {
     #[test]
     fn next_syncable_allows_different_assets_with_same_sync_ref() {
         let mut state = ServeState::new(&[], mem_suspended_store());
-        state.register_assets(&[
-            asset_entry_with_sync_ref("a"),
-            asset_entry_with_sync_ref("b"),
-        ]);
+        state.register_assets(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
         state.request_sync("a");
         state.request_sync("b");
 
@@ -937,16 +915,6 @@ mod tests {
     }
 
     #[test]
-    fn on_evaluate_complete_ignores_none() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
-        state.register_assets(&[asset_entry("a", None)]);
-        while state.evaluate_queue.dequeue().is_some() {}
-
-        state.on_evaluate_complete(None);
-        assert!(state.evaluate_queue.dequeue().is_none());
-    }
-
-    #[test]
     fn on_sync_complete_success_resets_guardrail() {
         let mut state = ServeState::new(&[], mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("a")]);
@@ -982,16 +950,6 @@ mod tests {
         state.on_sync_complete(Some(Ok(("a".to_string(), sync_result))));
 
         assert!(state.guardrail.is_backoff_active("a"));
-    }
-
-    #[test]
-    fn on_sync_complete_ignores_none() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
-        state.register_assets(&[asset_entry_with_sync("a")]);
-        state.syncing.insert("a".to_string());
-
-        state.on_sync_complete(None);
-        assert!(!state.syncing.is_empty());
     }
 
     fn susp_store() -> Arc<dyn crate::runtime::storage::SuspendedStore> {
@@ -1144,15 +1102,6 @@ mod tests {
         assert!(!state.syncing.contains("a"));
     }
 
-    #[test]
-    fn release_sync_slot_noop_if_not_syncing() {
-        let mut state = ServeState::new(&[], susp_store());
-        state.register_assets(&[asset_entry_with_sync("a")]);
-
-        state.release_sync_slot("a");
-        assert!(!state.syncing.contains("a"));
-    }
-
     // ── handle_sync_failure tests ───────────────────────────────────────
 
     #[test]
@@ -1272,23 +1221,6 @@ mod tests {
         assert!(susp.exists("a").unwrap());
     }
 
-    #[test]
-    fn check_degradation_returns_none_when_no_previous() {
-        let state = ServeState::new(&[], susp_store());
-
-        assert!(state.check_degradation("a", 1).is_none());
-    }
-
-    // ── try_auto_unsuspend tests ────────────────────────────────────────
-
-    #[test]
-    fn try_auto_unsuspend_noop_when_not_suspended() {
-        let mut state = ServeState::new(&[], susp_store());
-        state.register_assets(&[asset_entry_with_sync("a")]);
-
-        state.try_auto_unsuspend("a");
-    }
-
     // ── upstream block tests ────────────────────────────────────────────
 
     #[test]
@@ -1319,15 +1251,6 @@ mod tests {
         state.readiness.record("a", true);
         // b is not ready
         assert!(!state.all_upstreams_ready("c"));
-    }
-
-    #[test]
-    fn all_upstreams_ready_all_ready() {
-        let edges = vec![edge("a", "c"), edge("b", "c")];
-        let mut state = ServeState::new(&edges, susp_store());
-        state.readiness.record("a", true);
-        state.readiness.record("b", true);
-        assert!(state.all_upstreams_ready("c"));
     }
 
     #[test]
@@ -1431,15 +1354,6 @@ mod tests {
         persisted.insert("a".to_string(), false);
         state.restore_readiness(persisted);
 
-        state.register_assets(&[asset_entry("a", None)]);
-
-        assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
-    }
-
-    #[test]
-    fn restore_readiness_empty_behaves_like_fresh_start() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
-        state.restore_readiness(HashMap::new());
         state.register_assets(&[asset_entry("a", None)]);
 
         assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));

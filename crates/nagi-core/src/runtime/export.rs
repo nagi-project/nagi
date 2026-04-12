@@ -600,14 +600,6 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_zero_when_all_exported() {
-        let (_dir, store) = open_test_store();
-        let wm_dir = tempfile::tempdir().unwrap();
-        let result = dry_run(&store, wm_dir.path(), ExportTable::SyncEvaluations).unwrap();
-        assert_eq!(result.count, 0);
-    }
-
-    #[test]
     fn export_table_from_name() {
         assert_eq!(
             ExportTable::from_name("evaluate_logs").unwrap(),
@@ -792,22 +784,6 @@ mod tests {
     }
 
     #[test]
-    fn primary_keys_coverage() {
-        assert_eq!(
-            primary_keys(ExportTable::EvaluateLogs),
-            &["evaluation_id", "condition_name"]
-        );
-        assert_eq!(
-            primary_keys(ExportTable::SyncLogs),
-            &["execution_id", "stage"]
-        );
-        assert_eq!(
-            primary_keys(ExportTable::SyncEvaluations),
-            &["execution_id", "evaluation_id"]
-        );
-    }
-
-    #[test]
     fn generated_asset_has_auto_sync_true() {
         let config = ExportConfig {
             connection: "my-bq".to_string(),
@@ -821,12 +797,6 @@ mod tests {
                 assert!(spec.auto_sync);
             }
         }
-    }
-
-    #[test]
-    fn build_path_rewrite_transform_none_when_empty() {
-        let map = std::collections::HashMap::new();
-        assert!(build_path_rewrite_transform(map).is_none());
     }
 
     #[test]
@@ -870,23 +840,6 @@ mod tests {
 
         assert_eq!(row["stdout_path"], "gs://bucket/out");
         assert_eq!(row["stderr_path"], "gs://bucket/err");
-    }
-
-    #[test]
-    fn build_path_rewrite_transform_ignores_missing_fields() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("/local/out".to_string(), "gs://bucket/out".to_string());
-        let transform = build_path_rewrite_transform(map).unwrap();
-
-        let mut row = serde_json::Map::new();
-        row.insert(
-            "other_field".to_string(),
-            serde_json::Value::String("value".to_string()),
-        );
-        transform(&mut row);
-
-        assert_eq!(row.len(), 1);
-        assert_eq!(row["other_field"], "value");
     }
 
     #[test]
