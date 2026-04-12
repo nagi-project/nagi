@@ -225,21 +225,13 @@ impl DesiredCondition {
         }
     }
 
-    fn require_non_empty(value: &str, field: &str) -> Result<(), KindError> {
-        if value.is_empty() {
-            return Err(KindError::InvalidSpec {
-                kind: KIND.to_string(),
-                message: format!("{field} must not be empty"),
-            });
-        }
-        Ok(())
-    }
-
     pub(crate) fn validate(&self) -> Result<(), KindError> {
-        Self::require_non_empty(self.name(), "condition name")?;
+        KindError::require_non_empty(self.name(), KIND, "condition name")?;
         match self {
             DesiredCondition::Freshness { .. } => {}
-            DesiredCondition::Sql { query, .. } => Self::require_non_empty(query, "SQL.query")?,
+            DesiredCondition::Sql { query, .. } => {
+                KindError::require_non_empty(query, KIND, "SQL.query")?;
+            }
             DesiredCondition::Command { run, env, .. } => {
                 Self::validate_command(run, env)?;
             }
@@ -254,7 +246,7 @@ impl DesiredCondition {
                 message: "Command.run must not be empty".to_string(),
             });
         }
-        Self::require_non_empty(&run[0], "Command.run[0]")?;
+        KindError::require_non_empty(&run[0], KIND, "Command.run[0]")?;
         crate::runtime::subprocess::validate_env_keys(env, KIND, "Command.env")?;
         Ok(())
     }

@@ -46,16 +46,6 @@ pub enum OriginSpec {
 
 impl OriginSpec {
     pub fn validate(&self) -> Result<(), KindError> {
-        let require_non_empty = |field: &str, value: &str| {
-            if value.is_empty() {
-                return Err(KindError::InvalidSpec {
-                    kind: KIND.to_string(),
-                    message: format!("{field} must not be empty"),
-                });
-            }
-            Ok(())
-        };
-
         match self {
             OriginSpec::Dbt {
                 connection,
@@ -63,8 +53,8 @@ impl OriginSpec {
                 env,
                 ..
             } => {
-                require_non_empty("connection", connection)?;
-                require_non_empty("projectDir", project_dir)?;
+                KindError::require_non_empty(connection, KIND, "connection")?;
+                KindError::require_non_empty(project_dir, KIND, "projectDir")?;
                 crate::runtime::subprocess::validate_env_keys(env, KIND, "env")?;
                 Ok(())
             }
