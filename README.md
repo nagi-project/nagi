@@ -4,9 +4,22 @@ Nagi monitors your data, detects drift from the desired state, and automatically
 
 ## Motivation
 
-A successful job does not guarantee that data is as expected. Even when a job completes normally, data can be stale, contain NULLs, or have inconsistent aggregations.
+State evaluation, routine ELT, and data incident response are often carried out as separate activities — different tools, different runbooks, different moments. When a scheduled job succeeds but the data is stale, the gap between "the pipeline ran" and "the data is correct" surfaces as an incident that lives outside the pipeline itself.
 
-Nagi starts by evaluating whether data is as expected. Declare the desired state, pair it with a convergence operation, and Nagi continuously evaluates and auto-converges — unifying state evaluation, routine ELT, and incident response into a single loop.
+These activities are points on the same continuum: observe state, decide it needs correction, and correct it. Nagi places them in a single reconciliation loop so you can move between monitoring, manual recovery, and automated convergence without changing tools or vocabulary.
+
+```mermaid
+graph LR
+    A["Monitoring"] --> B["Manual Recovery"]
+    B --> C["Manual Sync"]
+    C --> D
+    subgraph Guardrails
+        D["Auto Sync"]
+    end
+    B --> A
+    C --> A
+    D --> A
+```
 
 ## Install
 
