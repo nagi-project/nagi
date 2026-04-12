@@ -47,7 +47,7 @@ graph LR
     C["C (interval あり)"] --> X
 ```
 
-A, B, C が近いタイミングで Ready に遷移した例です。**X の sync は2回、evaluate は2回（sync 後の re-evaluate のみ）**です。B の伝播は X が sync 中のため無視されます。C の伝播は X の sync 完了後に受理され、2回目の sync が実行されます。これは C のデータ変更を X に反映するために必要な実行です。
+A, B, C が近いタイミングで Ready に遷移した例です。**X の sync は2回、evaluate は2回（sync 後の re-evaluate のみ）**です。B の伝播は X が sync 中のため、実行中の sync が B の分も兼ねます。C の伝播は X の sync 完了後に受理され、2回目の sync が実行されます。これは C のデータ変更を X に反映するために必要な実行です。
 
 ```mermaid
 sequenceDiagram
@@ -63,7 +63,7 @@ sequenceDiagram
 
     Note over B: Ready に遷移
     B->>X: upstream Ready
-    Note over X: (sync 中のため無視)
+    Note over X: (sync 中 → 実行中の sync が代替)
 
     Note over X: sync 完了
     Note over X: re-evaluate → Ready
@@ -163,7 +163,7 @@ graph LR
     A --> C["C (interval なし)"] --> X
 ```
 
-Fan-out と Fan-in の組み合わせです。A が Ready に遷移すると B と C の sync が直接起動されます。B と C が Ready に遷移すると、それぞれ X の sync を直接起動します。**X の sync は1回、evaluate は1回（re-evaluate のみ）**です。X の sync 中に C が Ready になっても、sync は再要求されません。
+Fan-out と Fan-in の組み合わせです。A が Ready に遷移すると B と C の sync が直接起動されます。B と C が Ready に遷移すると、それぞれ X の sync を直接起動します。**X の sync は1回、evaluate は1回（re-evaluate のみ）**です。X の sync 中に C が Ready になった場合、実行中の sync が C の分も兼ねます。
 
 ```mermaid
 sequenceDiagram
@@ -193,14 +193,14 @@ sequenceDiagram
     Note over C: re-evaluate → Ready
     deactivate C
     C->>X: upstream Ready
-    Note over X: (sync 中のため無視)
+    Note over X: (sync 中 → 実行中の sync が代替)
 
     Note over X: sync 完了
     Note over X: re-evaluate → Ready
     deactivate X
 ```
 
-B と C の sync 完了が近いタイミングであっても、X の sync が実行中であれば重複実行は発生しません。
+B と C の sync 完了が近いタイミングであっても、X の sync が実行中であれば実行中の sync が後続の伝播も兼ねるため、重複実行は発生しません。
 
 ## Scenario 6: Interval with Upstream Propagation
 
