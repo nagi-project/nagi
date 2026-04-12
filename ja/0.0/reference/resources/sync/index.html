@@ -1064,6 +1064,8 @@
       
         
       
+        
+      
     
     
     
@@ -1336,6 +1338,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attributes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1414,6 +1427,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1738,6 +1779,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attributes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1785,6 +1837,8 @@
 <span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
 <span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;post.py&quot;</span><span class="p p-Indicator">]</span>
 </code></pre></div>
+<h2 id="environment-variables">Environment Variables</h2>
+<p>各ステップ（pre, run, post）は <code>env</code> フィールドで環境変数を宣言できます。サブプロセスには、ここで宣言した値と OS 動作に必要な最小セットのみが渡されます。親シェルの環境変数は引き継がれません。値は <code>${VAR}</code> 形式で Nagi プロセスの環境変数を参照できます。詳細は<a href="../../environment-variables/">環境変数</a>を参照してください。</p>
 <!-- schema:auto-generated:start:SyncSpec -->
 
 <h2 id="attributes">Attributes</h2>

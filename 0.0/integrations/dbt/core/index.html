@@ -1062,6 +1062,8 @@
       
         
       
+        
+      
     
     
     
@@ -1356,6 +1358,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1952,8 +1982,8 @@ The Origin's <code>projectDir</code> is used as the <code>--project-dir</code> o
 <h2 id="evaluate">Evaluate</h2>
 <p>Evaluate is executed directly by Nagi.</p>
 <ul>
-<li>Freshness / SQL conditions: Nagi issues queries directly to the data warehouse using the Connection</li>
-<li>Command conditions (dbt test): Executes dbt CLI as a subprocess</li>
+<li>Freshness / SQL: Nagi issues queries directly to the data warehouse using the Connection</li>
+<li><code>type: Command</code> (dbt test): Executes dbt CLI as a subprocess</li>
 </ul>
 <h2 id="sync">Sync</h2>
 <p>Executes dbt CLI as a subprocess (e.g., <code>dbt run --select daily_sales</code>).</p>

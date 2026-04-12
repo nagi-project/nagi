@@ -14,7 +14,7 @@
         <link rel="prev" href="../conditions/">
       
       
-        <link rel="next" href="../../cli/">
+        <link rel="next" href="../../environment-variables/">
       
       
         
@@ -1064,6 +1064,8 @@
       
         
       
+        
+      
     
     
     
@@ -1425,6 +1427,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attributes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1464,6 +1477,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1821,6 +1862,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attributes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1915,6 +1967,17 @@
 <span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;+{{</span><span class="nv"> </span><span class="s">asset.modelName</span><span class="nv"> </span><span class="s">}}&quot;</span>
 </code></pre></div>
 <p>When <code>defaultSync</code> is specified, the <code>{origin}-dbt-run</code> Sync is not generated.</p>
+<h2 id="environment-variables">Environment Variables</h2>
+<p><code>type: DBT</code> Origins can declare environment variables via the <code>env</code> field. These are passed to the <code>dbt compile</code> subprocess. Only declared values and a minimal set of OS essentials reach the subprocess — the parent shell's environment is not inherited. Values can reference the Nagi process's own environment using <code>${VAR}</code> syntax.</p>
+<p>If your <code>profiles.yml</code> uses <code>{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}</code> or similar, declare the referenced variable in <code>env</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
+<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
+<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
+<span class="w">  </span><span class="nt">env</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${GOOGLE_APPLICATION_CREDENTIALS}</span>
+</code></pre></div>
+<p>See <a href="../../environment-variables/">Environment Variables</a> for details.</p>
 <!-- schema:auto-generated:start:OriginSpec -->
 
 <h2 id="attributes">Attributes</h2>
@@ -1957,6 +2020,13 @@
 <td>—</td>
 <td>-</td>
 <td>User-defined Sync to override the auto-generated Sync (e.g. <code>my-project-dbt-run</code> for Origin named <code>my-project</code>).</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>map[string, string]</td>
+<td>—</td>
+<td>{}</td>
+<td>Environment variables passed to the <code>dbt compile</code> subprocess. Values may reference the parent process env via <code>${VAR}</code>.</td>
 </tr>
 </tbody>
 </table>

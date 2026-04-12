@@ -1064,6 +1064,8 @@
       
         
       
+        
+      
     
     
     
@@ -1414,6 +1416,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#command-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#command-without-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1514,6 +1527,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1888,6 +1929,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#command-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#command-without-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2006,6 +2058,8 @@
 <p>タイムスタンプ列がないテーブルや、列の値がデータの鮮度と関連しない場合は <code>column</code> を省略してください。</p>
 <h2 id="sql-read-only-constraint">SQL Read-Only Constraint</h2>
 <p><code>SQL</code> および <code>Freshness</code> の Conditions に適用されます。Nagi は SQL クエリを読み取り専用に制限します。SELECT 以外の文（INSERT, UPDATE, DELETE, DDL 等）やmulti-statement query は拒否されます。</p>
+<h2 id="command-environment-variables">Command Environment Variables</h2>
+<p><code>type: Command</code> は <code>env</code> フィールドで環境変数を宣言できます。サブプロセスには、ここで宣言した値と OS 動作に必要な最小セットのみが渡されます。親シェルの環境変数は引き継がれません。値は <code>${VAR}</code> 形式で Nagi プロセスの環境変数を参照できます。詳細は<a href="../../environment-variables/">環境変数</a>を参照してください。</p>
 <h2 id="command-without-shell">Command Without Shell</h2>
 <p>シェルを経由しないため、メタキャラクタ（<code>;</code>, <code>&amp;&amp;</code>, <code>|</code> 等）はそのまま引数として渡されます。<code>dbt test --select</code> のように既存のデータ検証ツールを期待状態としてマッピングする用途を想定しています。</p>
 <!-- schema:auto-generated:start:ConditionsSpec -->

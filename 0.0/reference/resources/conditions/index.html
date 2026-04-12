@@ -1064,6 +1064,8 @@
       
         
       
+        
+      
     
     
     
@@ -1414,6 +1416,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#command-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#command-without-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1514,6 +1527,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1888,6 +1929,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#command-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#command-without-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2006,6 +2058,8 @@
 <p>Omit <code>column</code> for tables without a timestamp column or where column values are not related to data freshness.</p>
 <h2 id="sql-read-only-constraint">SQL Read-Only Constraint</h2>
 <p>Applies to <code>SQL</code> and <code>Freshness</code> conditions. Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.</p>
+<h2 id="command-environment-variables">Command Environment Variables</h2>
+<p><code>type: Command</code> can declare environment variables via the <code>env</code> field. Only these declared values and a minimal set of OS essentials are passed to the subprocess — the parent shell's environment is not inherited. Values can reference the Nagi process's own environment using <code>${VAR}</code> syntax. See <a href="../../environment-variables/">Environment Variables</a> for details.</p>
 <h2 id="command-without-shell">Command Without Shell</h2>
 <p>Because no shell is used, metacharacters (<code>;</code>, <code>&amp;&amp;</code>, <code>|</code>, etc.) are passed as-is as arguments. This is intended for wrapping existing data validation tools (e.g. <code>dbt test --select</code>) as desired state checks.</p>
 <!-- schema:auto-generated:start:ConditionsSpec -->
