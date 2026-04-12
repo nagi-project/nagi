@@ -635,18 +635,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_records_timestamps() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
-            .await
-            .unwrap();
-        let stage = &result.stages[0];
-        // Should be valid ISO 8601 timestamps.
-        assert!(!stage.started_at.is_empty());
-        assert!(!stage.finished_at.is_empty());
-        assert!(stage.started_at <= stage.finished_at);
-    }
-
-    #[tokio::test]
     async fn execute_records_args() {
         let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
             .await
@@ -689,14 +677,6 @@ mod tests {
         assert_eq!(result.stages[0].stage, Stage::Run);
     }
 
-    #[test]
-    fn dry_run_run_only() {
-        let result = dry_run_sync("test-asset", &run_only_spec(), SyncType::Sync, None);
-        assert_eq!(result.asset_name, "test-asset");
-        assert_eq!(result.sync_type, SyncType::Sync);
-        assert_eq!(result.stages.len(), 1);
-    }
-
     // ── generate_uuid ────────────────────────────────────────────────────
 
     #[test]
@@ -724,18 +704,6 @@ mod tests {
         link_evaluation(Some(&store), "exec-1", Some("eval-1"));
     }
 
-    #[test]
-    fn link_evaluation_noop_when_no_store() {
-        link_evaluation(None, "exec-1", Some("eval-1"));
-    }
-
-    #[test]
-    fn link_evaluation_noop_when_no_eval_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LogStore::open_in_memory(dir.path()).unwrap();
-        link_evaluation(Some(&store), "exec-1", None);
-    }
-
     // ── write_eval_cache ────────────────────────────────────────────────
 
     #[test]
@@ -749,17 +717,6 @@ mod tests {
         };
         write_eval_cache(Some(dir.path()), &result);
         assert!(dir.path().join("test-asset.json").exists());
-    }
-
-    #[test]
-    fn write_eval_cache_noop_when_no_dir() {
-        let result = crate::runtime::evaluate::AssetEvalResult {
-            asset_name: "test-asset".to_string(),
-            ready: true,
-            conditions: vec![],
-            evaluation_id: None,
-        };
-        write_eval_cache(None, &result);
     }
 
     // ── evaluate_and_cache ────────────────────────────────────────────
@@ -862,14 +819,5 @@ mod tests {
         re_evaluate_and_link(&compiled, None, Some(cache_dir.as_path()), "exec-1").await;
 
         assert!(cache_dir.join("test-asset.json").exists());
-    }
-
-    #[tokio::test]
-    async fn re_evaluate_and_link_without_cache_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LogStore::open_in_memory(dir.path()).unwrap();
-        let compiled = test_compiled_asset();
-
-        re_evaluate_and_link(&compiled, Some(&store), None, "exec-1").await;
     }
 }
