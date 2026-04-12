@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.scenario.helper import ServeProcess, init_nagi_dir, start_serve, write_project
+from tests.scenario.helper import (
+    ServeProcess,
+    init_nagi_dir,
+    start_serve,
+    write_project,
+)
 
 StartServe = Callable[[dict[str, str]], Path]
 

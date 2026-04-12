@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from tests.helper import ARGS_SLEEP_2, CMD_TRUE
 
@@ -48,7 +48,7 @@ class ServeProcess:
     def __init__(
         self,
         proc: subprocess.Popen[bytes],
-        stderr_file: Any,
+        stderr_file: IO[str],
     ) -> None:
         self.proc = proc
         self._stderr_file = stderr_file
