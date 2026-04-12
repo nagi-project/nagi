@@ -4,18 +4,11 @@ Nagi runs external commands as subprocesses in three contexts: Sync stages (pre 
 
 ## What Reaches the Subprocess
 
-A subprocess receives environment variables from exactly two sources:
+The subprocess environment is constructed from a platform base plus user-declared values. The parent shell's environment is not inherited directly.
 
-- OS essentials that Nagi inherits from the parent process. This is a fixed set per platform
-- Values declared in the `env` field of the YAML resource
+### Unix
 
-Environment variables outside these two sources are not passed to the subprocess, even if they exist in the shell that started Nagi.
-
-### OS Essentials
-
-Nagi passes through a minimal set of parent environment variables that are required for basic OS operation:
-
-#### Unix
+Nagi clears the parent environment and passes through only the following fixed set:
 
 | Variable | Purpose |
 | --- | --- |
@@ -29,39 +22,15 @@ Nagi passes through a minimal set of parent environment variables that are requi
 | `TZ` | Timezone |
 | `TMPDIR` | Temporary file directory |
 
-#### Windows
+This list is fixed and cannot be changed by configuration. All other parent environment variables are excluded.
 
-| Variable | Purpose |
-| --- | --- |
-| `SystemRoot` | Windows system directory |
-| `SystemDrive` | System drive letter |
-| `ComSpec` | Command processor path |
-| `PATH` | Executable search path |
-| `PATHEXT` | Executable file extensions |
-| `USERPROFILE` | User profile directory |
-| `HOMEDRIVE` | Home drive letter |
-| `HOMEPATH` | Home directory path |
-| `APPDATA` | Application data directory |
-| `LOCALAPPDATA` | Local application data directory |
-| `TEMP` | Temporary file directory |
-| `TMP` | Temporary file directory |
-| `ProgramData` | Shared application data |
-| `ProgramFiles` | Program installation directory |
-| `ProgramFiles(x86)` | 32-bit program installation directory |
-| `ProgramW6432` | 64-bit program installation directory |
-| `CommonProgramFiles` | Shared program components |
-| `CommonProgramFiles(x86)` | 32-bit shared program components |
-| `CommonProgramW6432` | 64-bit shared program components |
-| `ALLUSERSPROFILE` | All-users profile directory |
-| `COMPUTERNAME` | Machine name |
-| `LOGONSERVER` | Logon server |
-| `PUBLIC` | Public profile directory |
-| `USERDOMAIN` | User domain |
-| `USERDOMAIN_ROAMINGPROFILE` | User domain for roaming profile |
-| `NUMBER_OF_PROCESSORS` | Number of processors |
-| `PROCESSOR_ARCHITECTURE` | Processor architecture |
+### Windows
 
-This list is fixed and cannot be changed by configuration. If you need to pass additional environment variables to a subprocess, declare them in the `env` field.
+Nagi constructs the base environment using the Windows `CreateEnvironmentBlock` API. This provides the complete set of environment variables from the user's profile, including system variables and logon-synthesized variables that PowerShell and the .NET runtime require to start.
+
+The base does not include variables that exist only in the parent shell's session. If the shell that started Nagi has custom variables set via `set` or `$env:`, those are not passed through unless declared in `env`.
+
+If the user profile has cloud credentials registered as persistent user environment variables, those will be present in the base. To exclude them, avoid registering credentials as persistent user environment variables. Use `env` with `${VAR}` to pass credentials from the Nagi process explicitly.
 
 ## Declaring Environment Variables
 
