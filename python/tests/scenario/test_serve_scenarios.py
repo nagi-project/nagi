@@ -209,9 +209,9 @@ class TestScenario5Diamond:
     A becomes Ready, B and C sync. C uses a slow sync to ensure B finishes
     first: B ready → X syncs → X completes → C ready → X syncs again.
     X syncs twice because each upstream Ready transition is a valid trigger.
-    The concurrent dedup case (X still syncing when the second upstream
-    propagates) is covered by the unit test
-    propagate_downstream_diamond_syncs_once_when_concurrent.
+    The concurrent case (X still syncing when the second upstream propagates)
+    is covered by the unit test
+    propagate_downstream_diamond_concurrent_sync_subsumes_propagation.
     """
 
     def test_diamond_syncs_twice_with_time_gap(self, run_serve: StartServe) -> None:
@@ -243,8 +243,8 @@ class TestScenario5Diamond:
         assert query_sync_count(project, "b") == 1
         assert query_sync_count(project, "c") == 1
         # X syncs twice: once from B's propagation, once from C's.
-        # Concurrent dedup is covered by unit test
-        # propagate_downstream_diamond_syncs_once_when_concurrent.
+        # Concurrent case is covered by unit test
+        # propagate_downstream_diamond_concurrent_sync_subsumes_propagation.
         assert query_sync_count(project, "x") == 2
 
 
