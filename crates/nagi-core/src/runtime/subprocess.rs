@@ -272,9 +272,6 @@ mod tests {
             parent=[("PATH", "/usr/bin"), ("MY_SECRET", "hunter2")], declared=[]
             => [("PATH", "/usr/bin")];
 
-        allowlist_key_absent_in_parent_is_omitted:
-            parent=[], declared=[] => [];
-
         declared_only_no_parent:
             parent=[], declared=[("FOO", "bar")] => [("FOO", "bar")];
     }
@@ -502,19 +499,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.get("MY_VAR").map(String::as_str), Some("overridden"));
-    }
-
-    #[test]
-    fn none_identity_env_behaves_like_no_identity() {
-        let parent = hm(&[("PATH", "/usr/bin")]);
-        let declared = hm(&[("FOO", "bar")]);
-        let with_none =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
-                .unwrap();
-        let without =
-            compose_subprocess_env_with_allowlist(TEST_ALLOWLIST, &parent, None, &declared)
-                .unwrap();
-        assert_eq!(with_none, without);
     }
 
     #[test]
