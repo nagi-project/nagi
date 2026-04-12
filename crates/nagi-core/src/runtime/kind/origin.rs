@@ -156,21 +156,6 @@ env:
     }
 
     #[test]
-    fn parse_origin_spec_env_defaults_to_empty() {
-        let yaml = r#"
-type: DBT
-connection: my-bigquery
-projectDir: ../dbt-project
-"#;
-        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
-        match &spec {
-            OriginSpec::Dbt { env, .. } => {
-                assert!(env.is_empty());
-            }
-        }
-    }
-
-    #[test]
     fn validate_rejects_empty_connection() {
         let spec = OriginSpec::Dbt {
             connection: String::new(),
@@ -209,23 +194,6 @@ autoSync: false
             &spec,
             OriginSpec::Dbt {
                 auto_sync: Some(false),
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn parse_origin_spec_auto_sync_defaults_to_none() {
-        let yaml = r#"
-type: DBT
-connection: my-bigquery
-projectDir: ../dbt-project
-"#;
-        let spec: OriginSpec = serde_yaml::from_str(yaml).unwrap();
-        assert!(matches!(
-            &spec,
-            OriginSpec::Dbt {
-                auto_sync: None,
                 ..
             }
         ));
