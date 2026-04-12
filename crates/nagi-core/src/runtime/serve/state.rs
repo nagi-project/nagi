@@ -363,7 +363,7 @@ impl ServeState {
         };
         let mut propagated = Vec::new();
         for ds in &downstreams {
-            if self.request_sync(ds) {
+            if self.request_sync(ds) || self.syncing.contains(ds.as_str()) {
                 propagated.push(ds.clone());
             }
         }
@@ -686,7 +686,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_downstream_skips_when_already_syncing() {
+    fn propagate_downstream_subsumes_when_already_syncing() {
         let edges = vec![edge("a", "b")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("b")]);
@@ -694,7 +694,7 @@ mod tests {
         state.syncing.insert("b".to_string());
 
         let propagated = state.propagate_downstream("a", true);
-        assert!(propagated.is_empty());
+        assert_eq!(propagated, vec!["b".to_string()]);
     }
 
     #[test]
@@ -714,8 +714,11 @@ mod tests {
     }
 
     #[test]
-    fn propagate_downstream_diamond_syncs_once_when_concurrent() {
+    fn propagate_downstream_diamond_concurrent_sync_subsumes_propagation() {
         // A → B → X, A → C → X
+        // When C becomes Ready while X is already syncing (triggered by B),
+        // the running sync subsumes C's propagation: X is not re-enqueued,
+        // but propagation reports X as handled.
         let edges = vec![edge("b", "x"), edge("c", "x")];
         let mut state = ServeState::new(&edges, mem_suspended_store());
         state.register_assets(&[asset_entry_with_sync("x")]);
@@ -729,10 +732,13 @@ mod tests {
         // Start X's sync
         assert_eq!(state.next_syncable(None), Some("x".to_string()));
 
-        // C becomes Ready while X is syncing → X sync rejected
+        // C becomes Ready while X is syncing → running sync subsumes
         state.readiness.record("c", false);
         let propagated = state.propagate_downstream("c", true);
-        assert!(propagated.is_empty());
+        assert_eq!(propagated, vec!["x".to_string()]);
+
+        // X is not enqueued again (the running sync covers it)
+        assert_eq!(state.next_syncable(None), None);
     }
 
     // ── Sync management tests ─────────────────────────────────────────
