@@ -296,6 +296,7 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                 }
             }
             NagiKind::Origin { .. } => {}
+            NagiKind::Identity { .. } => {}
         }
     }
 

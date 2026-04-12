@@ -7,12 +7,14 @@ use thiserror::Error;
 pub mod asset;
 pub mod condition;
 pub mod connection;
+pub mod identity;
 pub mod origin;
 pub mod sync;
 
 pub use asset::AssetSpec;
 pub use condition::ConditionsSpec;
 pub use connection::ConnectionSpec;
+pub use identity::IdentitySpec;
 pub use origin::OriginSpec;
 pub use sync::SyncSpec;
 
@@ -96,6 +98,12 @@ pub enum NagiKind {
         metadata: Metadata,
         spec: OriginSpec,
     },
+    Identity {
+        #[serde(rename = "apiVersion")]
+        api_version: String,
+        metadata: Metadata,
+        spec: IdentitySpec,
+    },
 }
 
 impl NagiKind {
@@ -106,6 +114,7 @@ impl NagiKind {
             NagiKind::Conditions { api_version, .. } => api_version,
             NagiKind::Sync { api_version, .. } => api_version,
             NagiKind::Origin { api_version, .. } => api_version,
+            NagiKind::Identity { api_version, .. } => api_version,
         }
     }
 
@@ -116,6 +125,7 @@ impl NagiKind {
             NagiKind::Conditions { metadata, .. } => metadata,
             NagiKind::Sync { metadata, .. } => metadata,
             NagiKind::Origin { metadata, .. } => metadata,
+            NagiKind::Identity { metadata, .. } => metadata,
         }
     }
 
@@ -126,6 +136,7 @@ impl NagiKind {
             NagiKind::Conditions { .. } => condition::KIND,
             NagiKind::Sync { .. } => sync::KIND,
             NagiKind::Origin { .. } => origin::KIND,
+            NagiKind::Identity { .. } => identity::KIND,
         }
     }
 
@@ -161,6 +172,7 @@ impl NagiKind {
             NagiKind::Conditions { spec, .. } => spec.validate(),
             NagiKind::Sync { spec, .. } => spec.validate(),
             NagiKind::Origin { spec, .. } => spec.validate(),
+            NagiKind::Identity { spec, .. } => spec.validate(),
         }
     }
 }
@@ -382,6 +394,45 @@ spec: {}
 "#;
         let err = parse_kind(yaml).unwrap_err();
         assert!(matches!(err, KindError::YamlParse(_)));
+    }
+
+    #[test]
+    fn parse_identity_resource() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Identity
+metadata:
+  name: bq-evaluator
+spec:
+  type: env
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: /path/to/key.json
+"#;
+        let resource = parse_kind(yaml).unwrap();
+        assert_eq!(resource.kind(), identity::KIND);
+        assert_eq!(resource.metadata().name, "bq-evaluator");
+        assert!(matches!(
+            &resource,
+            NagiKind::Identity { spec: IdentitySpec::Env { env }, .. }
+                if env.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    == Some(&"/path/to/key.json".to_string())
+        ));
+    }
+
+    #[test]
+    fn parse_identity_resource_with_missing_name_fails() {
+        let yaml = r#"
+apiVersion: nagi.io/v1alpha1
+kind: Identity
+metadata:
+  name: ""
+spec:
+  type: env
+  env:
+    KEY: value
+"#;
+        let err = parse_kind(yaml).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { .. }));
     }
 
     #[test]
