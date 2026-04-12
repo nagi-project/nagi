@@ -105,9 +105,6 @@ pub(crate) fn compose_subprocess_env(
 /// Call immediately before spawning a subprocess and drop the returned map as
 /// soon as the subprocess has received the values, so that credentials
 /// referenced via `${VAR}` are not retained beyond the spawn point.
-// Call sites are added in Step 2 (Sync / Command condition) and Step 4
-// (dbt compile). The allow is removed once the first caller lands.
-#[allow(dead_code)]
 pub fn build_subprocess_env(
     declared: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SubprocessEnvError> {
