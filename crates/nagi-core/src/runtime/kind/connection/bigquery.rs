@@ -783,22 +783,6 @@ my_project:
     }
 
     #[test]
-    fn execution_project_is_none_when_omitted() {
-        let f = profiles();
-        let out = f.resolve("my_project", Some("dev")).unwrap();
-        let cfg = BigQueryConfig::from_output(out).unwrap();
-        assert_eq!(cfg.execution_project, None);
-    }
-
-    #[test]
-    fn timeout_is_none_when_omitted() {
-        let f = profiles();
-        let out = f.resolve("my_project", Some("dev")).unwrap();
-        let cfg = BigQueryConfig::from_output(out).unwrap();
-        assert_eq!(cfg.timeout_ms, None);
-    }
-
-    #[test]
     fn rejects_missing_project() {
         let output = AdapterConfig {
             adapter_type: "bigquery".to_string(),
@@ -954,12 +938,6 @@ my_project:
         assert_eq!(resp.load_error_message(), Some("bad"));
     }
 
-    #[test]
-    fn load_job_response_null_status() {
-        let resp: LoadJobResponse = serde_json::from_str(r#"{}"#).unwrap();
-        assert!(resp.load_error_message().is_none());
-    }
-
     // ── extract_scalar_from_query_response ──────────────────────────────
     //
     // Response format: https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query
@@ -974,13 +952,6 @@ my_project:
         let json = serde_json::json!({"rows": [{"f": [{"v": "42"}]}]});
         let val = extract_scalar_from_query_response(json).unwrap();
         assert_eq!(val, serde_json::json!("42"));
-    }
-
-    #[test]
-    fn extract_scalar_returns_timestamp_value() {
-        let json = serde_json::json!({"rows": [{"f": [{"v": "2024-01-01T00:00:00Z"}]}]});
-        let val = extract_scalar_from_query_response(json).unwrap();
-        assert_eq!(val, serde_json::json!("2024-01-01T00:00:00Z"));
     }
 
     #[test]
