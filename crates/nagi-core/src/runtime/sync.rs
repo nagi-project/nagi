@@ -9,6 +9,7 @@ use crate::runtime::compile::CompiledAsset;
 use crate::runtime::kind::sync::{SyncSpec, SyncStep};
 use crate::runtime::log::{LogError, LogStore};
 use crate::runtime::storage::Cache;
+use crate::runtime::subprocess::SubprocessEnvError;
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -47,6 +48,9 @@ pub enum SyncError {
 
     #[error("invalid sync_type: {0}")]
     InvalidSyncType(String),
+
+    #[error("subprocess env resolution error: {0}")]
+    EnvResolution(#[from] SubprocessEnvError),
 }
 
 /// Which type of sync operation is being executed.

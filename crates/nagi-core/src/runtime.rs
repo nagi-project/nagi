@@ -11,4 +11,5 @@ pub mod select;
 pub mod serve;
 pub mod status;
 pub mod storage;
+pub mod subprocess;
 pub mod sync;

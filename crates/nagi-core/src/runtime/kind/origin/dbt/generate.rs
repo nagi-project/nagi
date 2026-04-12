@@ -14,6 +14,7 @@ pub(crate) struct DbtOriginConfig {
     pub(crate) profile: String,
     pub(crate) target: Option<String>,
     pub(crate) profiles_dir: Option<String>,
+    pub(crate) env: HashMap<String, String>,
 }
 
 fn extract_dbt_connection(r: &NagiKind) -> Option<(&str, &str, Option<&str>, Option<&str>)> {
@@ -49,6 +50,7 @@ fn resolve_origin_config(
                 OriginSpec::Dbt {
                     connection,
                     project_dir,
+                    env,
                     ..
                 },
             ..
@@ -69,6 +71,7 @@ fn resolve_origin_config(
                 profile,
                 target,
                 profiles_dir,
+                env: env.clone(),
             })
         }
         _ => None,
@@ -110,6 +113,7 @@ pub fn generate(resources: Vec<NagiKind>) -> Result<Vec<NagiKind>, CompileError>
             &config.profile,
             config.target.as_deref(),
             config.profiles_dir.as_deref(),
+            &config.env,
         )?;
         manifests.insert(config.origin_name.clone(), manifest_json);
     }

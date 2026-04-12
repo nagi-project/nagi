@@ -663,6 +663,7 @@ mod tests {
                 with: HashMap::new(),
             }),
             auto_sync: None,
+            env: HashMap::new(),
         }
     }
 
@@ -972,6 +973,7 @@ mod tests {
             project_dir: "../dbt-project".to_string(),
             default_sync: None,
             auto_sync: None,
+            env: HashMap::new(),
         };
         let resources =
             manifest_to_resources(&manifest, &origin, ORIGIN_NAME, &DbtCliContext::default());
@@ -1019,6 +1021,7 @@ mod tests {
             project_dir: "../dbt-project".to_string(),
             default_sync: None,
             auto_sync: None,
+            env: HashMap::new(),
         };
         let cli_ctx = DbtCliContext {
             profiles_dir: Some("/path/to/profiles"),
@@ -1407,6 +1410,7 @@ mod tests {
                 with: HashMap::new(),
             }),
             auto_sync: Some(false),
+            env: HashMap::new(),
         };
         let resources =
             manifest_to_resources(&manifest, &origin, ORIGIN_NAME, &DbtCliContext::default());

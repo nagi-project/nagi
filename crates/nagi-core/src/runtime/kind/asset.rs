@@ -228,31 +228,29 @@ impl DesiredCondition {
         }
     }
 
-    fn require_non_empty(value: &str, field: &str) -> Result<(), KindError> {
-        if value.is_empty() {
-            return Err(KindError::InvalidSpec {
-                kind: KIND.to_string(),
-                message: format!("{field} must not be empty"),
-            });
+    pub(crate) fn validate(&self) -> Result<(), KindError> {
+        KindError::require_non_empty(self.name(), KIND, "condition name")?;
+        match self {
+            DesiredCondition::Freshness { .. } => {}
+            DesiredCondition::Sql { query, .. } => {
+                KindError::require_non_empty(query, KIND, "SQL.query")?;
+            }
+            DesiredCondition::Command { run, env, .. } => {
+                Self::validate_command(run, env)?;
+            }
         }
         Ok(())
     }
 
-    pub(crate) fn validate(&self) -> Result<(), KindError> {
-        Self::require_non_empty(self.name(), "condition name")?;
-        match self {
-            DesiredCondition::Freshness { .. } => {}
-            DesiredCondition::Sql { query, .. } => Self::require_non_empty(query, "SQL.query")?,
-            DesiredCondition::Command { run, .. } => {
-                if run.is_empty() {
-                    return Err(KindError::InvalidSpec {
-                        kind: KIND.to_string(),
-                        message: "Command.run must not be empty".to_string(),
-                    });
-                }
-                Self::require_non_empty(&run[0], "Command.run[0]")?;
-            }
+    fn validate_command(run: &[String], env: &HashMap<String, String>) -> Result<(), KindError> {
+        if run.is_empty() {
+            return Err(KindError::InvalidSpec {
+                kind: KIND.to_string(),
+                message: "Command.run must not be empty".to_string(),
+            });
         }
+        KindError::require_non_empty(&run[0], KIND, "Command.run[0]")?;
+        crate::runtime::subprocess::validate_env_keys(env, KIND, "Command.env")?;
         Ok(())
     }
 }
@@ -732,5 +730,40 @@ onDrift:
     fn merge_both_empty() {
         let merged = merge_on_drift_entries(vec![], vec![]);
         assert!(merged.is_empty());
+    }
+
+    // ── validate_command unit tests ─────────────────────────────────
+
+    #[test]
+    fn validate_command_rejects_empty_run() {
+        let err = DesiredCondition::validate_command(&[], &HashMap::new()).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { message, .. }
+            if message.contains("run must not be empty")));
+    }
+
+    #[test]
+    fn validate_command_rejects_blank_program() {
+        let run = vec!["".to_string()];
+        let err = DesiredCondition::validate_command(&run, &HashMap::new()).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { message, .. }
+            if message.contains("Command.run[0]")));
+    }
+
+    #[test]
+    fn validate_command_rejects_invalid_env_key() {
+        let run = vec!["true".to_string()];
+        let mut env = HashMap::new();
+        env.insert("MY-VAR".to_string(), "x".to_string());
+        let err = DesiredCondition::validate_command(&run, &env).unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { message, .. }
+            if message.contains("MY-VAR")));
+    }
+
+    #[test]
+    fn validate_command_accepts_valid_input() {
+        let run = vec!["dbt".to_string(), "test".to_string()];
+        let mut env = HashMap::new();
+        env.insert("FOO".to_string(), "bar".to_string());
+        assert!(DesiredCondition::validate_command(&run, &env).is_ok());
     }
 }

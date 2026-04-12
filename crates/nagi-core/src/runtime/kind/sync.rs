@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::KindError;
+use crate::runtime::subprocess;
 
 pub const KIND: &str = "Sync";
 
@@ -60,6 +61,7 @@ impl SyncStep {
                 message: format!("{step_name}.args must not be empty"),
             });
         }
+        subprocess::validate_env_keys(&self.env, KIND, &format!("{step_name}.env"))?;
         Ok(())
     }
 }
@@ -176,6 +178,44 @@ run:
             "dbt".to_string(),
             "run".to_string(),
         ]));
+        assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_env_key_in_run() {
+        let mut env = HashMap::new();
+        env.insert("FOO-BAR".to_string(), "x".to_string());
+        let spec = SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: vec!["dbt".to_string()],
+                env,
+            },
+            post: None,
+        };
+        let err = spec.validate().unwrap_err();
+        assert!(matches!(err, KindError::InvalidSpec { kind, message }
+            if kind == KIND && message.contains("run.env") && message.contains("FOO-BAR")));
+    }
+
+    #[test]
+    fn validate_accepts_valid_env_keys() {
+        let mut env = HashMap::new();
+        env.insert(
+            "GOOGLE_APPLICATION_CREDENTIALS".to_string(),
+            "${GAC}".to_string(),
+        );
+        env.insert("_PRIVATE".to_string(), "value".to_string());
+        let spec = SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: vec!["dbt".to_string()],
+                env,
+            },
+            post: None,
+        };
         assert!(spec.validate().is_ok());
     }
 }

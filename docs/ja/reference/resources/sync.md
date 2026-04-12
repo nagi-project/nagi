@@ -19,6 +19,10 @@ spec:
     args: ["python", "post.py"]
 ```
 
+## Environment Variables
+
+各ステップ（pre, run, post）は `env` フィールドで環境変数を宣言できます。サブプロセスには、ここで宣言した値と OS 動作に必要な最小セットのみが渡されます。親シェルの環境変数は引き継がれません。値は `${VAR}` 形式で Nagi プロセスの環境変数を参照できます。詳細は[環境変数](../environment-variables.md)を参照してください。
+
 <!-- schema:auto-generated:start:SyncSpec -->
 
 ## Attributes

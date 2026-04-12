@@ -61,6 +61,23 @@ spec:
 
 `defaultSync` を指定した場合、`{origin}-dbt-run` Sync は生成されません。
 
+## Environment Variables
+
+`type: DBT` の Origin は `env` フィールドで環境変数を宣言できます。これらは `dbt compile` のサブプロセスに渡されます。サブプロセスには、ここで宣言した値と OS 動作に必要な最小セットのみが渡されます。親シェルの環境変数は引き継がれません。値は `${VAR}` 形式で Nagi プロセスの環境変数を参照できます。
+
+`profiles.yml` で `{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}` のように環境変数を参照している場合は、`env` に宣言してください。
+
+```yaml
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+```
+
+詳細は[環境変数](../environment-variables.md)を参照してください。
+
 <!-- schema:auto-generated:start:OriginSpec -->
 
 ## Attributes
@@ -73,5 +90,6 @@ spec:
 | `projectDir` | string | Yes | - | Local path to the dbt project directory (relative or absolute). |
 | `autoSync` | boolean | — | - | Override `autoSync` for all auto-generated Assets. When `None`, each Asset uses its own default (`true`). |
 | `defaultSync` | DefaultSync | — | - | User-defined Sync to override the auto-generated Sync (e.g. `my-project-dbt-run` for Origin named `my-project`). |
+| `env` | map[string, string] | — | {} | Environment variables passed to the `dbt compile` subprocess. Values may reference the parent process env via `${VAR}`. |
 
 <!-- schema:auto-generated:end:OriginSpec -->
