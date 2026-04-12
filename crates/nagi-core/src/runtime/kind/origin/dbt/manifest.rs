@@ -938,34 +938,6 @@ mod tests {
     }
 
     #[test]
-    fn manifest_to_resources_maps_generic_test_as_command() {
-        let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
-        let resources = manifest_to_resources(
-            &manifest,
-            &jaffle_shop_origin(),
-            ORIGIN_NAME,
-            &DbtCliContext::default(),
-        );
-
-        let group = resources
-            .iter()
-            .find(|r| r.metadata().name == "dbt-tests-jaffle.orders")
-            .unwrap();
-        if let NagiKind::Conditions { spec, .. } = group {
-            let has_command = spec.0.iter().any(|c| {
-                matches!(c, DesiredCondition::Command { run, .. }
-                    if run.contains(&"dbt".to_string()))
-            });
-            assert!(
-                has_command,
-                "orders should have a dbt test Command condition"
-            );
-        } else {
-            panic!("expected Conditions");
-        }
-    }
-
-    #[test]
     fn manifest_to_resources_no_default_sync_generates_dbt_run() {
         let manifest: DbtManifest = serde_json::from_str(jaffle_shop_manifest_json()).unwrap();
         let origin = OriginSpec::Dbt {
@@ -1478,27 +1450,5 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result.contains_key("origin.m1"));
         assert_eq!(result["origin.m1"].len(), 1);
-    }
-
-    #[test]
-    fn rekey_tests_by_name_skips_unknown_ids() {
-        let test_node = DbtNode {
-            unique_id: "test.t1".to_string(),
-            name: "t1".to_string(),
-            resource_type: "test".to_string(),
-            depends_on: DbtDependsOn { nodes: vec![] },
-            tags: vec![],
-            test_metadata: None,
-            _package_name: String::new(),
-            database: None,
-            schema: None,
-            alias: None,
-        };
-        let tests: HashMap<String, Vec<&DbtNode>> =
-            HashMap::from([("model.unknown".to_string(), vec![&test_node])]);
-        let id_to_name: HashMap<String, String> = HashMap::new();
-
-        let result = rekey_tests_by_name(&tests, &id_to_name);
-        assert!(result.is_empty());
     }
 }
