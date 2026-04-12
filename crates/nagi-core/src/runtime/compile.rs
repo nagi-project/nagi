@@ -223,6 +223,7 @@ struct CategorizedResources {
     conditions_groups: HashMap<String, Vec<DesiredCondition>>,
     syncs: HashMap<String, SyncSpec>,
     assets: Vec<(Metadata, AssetSpec)>,
+    identity_names: HashSet<String>,
 }
 
 fn check_dup(
@@ -260,6 +261,7 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
         conditions_groups: HashMap::new(),
         syncs: HashMap::new(),
         assets: Vec::new(),
+        identity_names: HashSet::new(),
     };
     // Track Asset names separately for overlay merge (max 2 allowed).
     let mut asset_indices: HashMap<String, usize> = HashMap::new();
@@ -296,7 +298,11 @@ fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResources, CompileE
                 }
             }
             NagiKind::Origin { .. } => {}
-            NagiKind::Identity { .. } => {}
+            NagiKind::Identity { .. } => {
+                if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
+                    result.identity_names.insert(name);
+                }
+            }
         }
     }
 
@@ -472,6 +478,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
         conditions_groups,
         syncs,
         assets,
+        identity_names,
     } = categorize(resources)?;
 
     syncs
@@ -481,6 +488,38 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
     let asset_names: HashSet<String> = assets.iter().map(|(m, _)| m.name.clone()).collect();
 
     let mut errors: Vec<CompileError> = Vec::new();
+
+    // Validate Identity references in Syncs.
+    for (name, spec) in &syncs {
+        errors.extend(collect_unresolved_identity_errors_sync(
+            name,
+            spec,
+            &identity_names,
+        ));
+    }
+
+    // Validate Identity references in Connections.
+    for (conn_name, spec) in &connections {
+        if let Some(id) = connection_identity(spec) {
+            if !identity_names.contains(id) {
+                errors.push(CompileError::UnresolvedRef {
+                    kind: "Identity".to_string(),
+                    name: id.to_string(),
+                });
+            }
+            if matches!(
+                spec,
+                ConnectionSpec::DuckDb { .. } | ConnectionSpec::Snowflake { .. }
+            ) {
+                tracing::warn!(
+                    connection = conn_name,
+                    identity = id,
+                    "identity on DuckDB/Snowflake Connection is not yet supported and will be ignored"
+                );
+            }
+        }
+    }
+
     let mut resolved_assets = Vec::new();
     for (metadata, spec) in assets {
         match resolve_asset(
@@ -490,6 +529,7 @@ pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> 
             &connections,
             &conditions_groups,
             &syncs,
+            &identity_names,
         ) {
             Ok(asset) => resolved_assets.push(asset),
             Err(e) => errors.push(e),
@@ -517,6 +557,7 @@ fn resolve_asset(
     connections: &HashMap<String, ConnectionSpec>,
     conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
     syncs: &HashMap<String, SyncSpec>,
+    identity_names: &HashSet<String>,
 ) -> Result<ResolvedAsset, CompileError> {
     let mut errors: Vec<CompileError> = Vec::new();
 
@@ -543,6 +584,23 @@ fn resolve_asset(
             Vec::new()
         }
     };
+    errors.extend(
+        resolved_on_drift
+            .iter()
+            .flat_map(|entry| &entry.conditions)
+            .filter_map(|c| match c {
+                DesiredCondition::Command {
+                    identity: Some(id), ..
+                } => Some(id),
+                _ => None,
+            })
+            .filter(|id| !identity_names.contains(*id))
+            .map(|id| CompileError::UnresolvedRef {
+                kind: "Identity".to_string(),
+                name: id.clone(),
+            }),
+    );
+
     let connection = match spec
         .connection
         .as_deref()
@@ -580,6 +638,38 @@ fn collect_unresolved_upstream_errors(
             name: name.clone(),
         })
         .collect()
+}
+
+fn collect_unresolved_identity_errors_sync(
+    _sync_name: &str,
+    spec: &SyncSpec,
+    identity_names: &HashSet<String>,
+) -> Vec<CompileError> {
+    let mut errors = Vec::new();
+    let refs: Vec<Option<&String>> = vec![
+        spec.identity.as_ref(),
+        spec.run.identity.as_ref(),
+        spec.pre.as_ref().and_then(|s| s.identity.as_ref()),
+        spec.post.as_ref().and_then(|s| s.identity.as_ref()),
+    ];
+    for id in refs.into_iter().flatten() {
+        if !identity_names.contains(id) {
+            errors.push(CompileError::UnresolvedRef {
+                kind: "Identity".to_string(),
+                name: id.clone(),
+            });
+        }
+    }
+    errors
+}
+
+fn connection_identity(spec: &ConnectionSpec) -> Option<&str> {
+    match spec {
+        ConnectionSpec::Dbt { identity, .. }
+        | ConnectionSpec::BigQuery { identity, .. }
+        | ConnectionSpec::DuckDb { identity, .. }
+        | ConnectionSpec::Snowflake { identity, .. } => identity.as_deref(),
+    }
 }
 
 /// Resolves on_drift entries: validates conditions/sync refs and expands templates.
@@ -2538,6 +2628,72 @@ spec: {}",
             }
             other => panic!("expected Multiple, got: {other}"),
         }
+    }
+
+    // ── Identity reference validation ─────────────────────────────────
+
+    const IDENTITY_BQ_EVAL: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Identity
+metadata:
+  name: bq-evaluator
+spec:
+  type: env
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: /path/to/key.json";
+
+    const SYNC_WITH_IDENTITY: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: bq-evaluator
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
+
+    const SYNC_WITH_BAD_IDENTITY: &str = "\
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: nonexistent
+  run:
+    type: Command
+    args: [\"dbt\", \"run\", \"--select\", \"{{ asset.name }}\"]";
+
+    #[test]
+    fn compile_rejects_unresolved_identity_in_sync() {
+        let yaml = yaml_docs(&[
+            CONNECTION_MY_BQ,
+            DESIRED_GROUP_DAILY_SLA,
+            SYNC_WITH_BAD_IDENTITY,
+            ASSET_RAW_SALES,
+        ]);
+        let resources = parse_kinds(&yaml).unwrap();
+        let result = resolve(resources);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "expected error mentioning 'nonexistent', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn compile_accepts_valid_identity_ref_in_sync() {
+        let yaml = yaml_docs(&[
+            CONNECTION_MY_BQ,
+            DESIRED_GROUP_DAILY_SLA,
+            IDENTITY_BQ_EVAL,
+            SYNC_WITH_IDENTITY,
+            ASSET_RAW_SALES,
+        ]);
+        let resources = parse_kinds(&yaml).unwrap();
+        let result = resolve(resources);
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
     }
 
     // ── format_multiple_errors ─────────────────────────────────────────
