@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use thiserror::Error;
 
 use crate::runtime::compile::CompileError;
+use crate::runtime::subprocess;
 
 pub mod cloud;
 pub mod generate;
@@ -45,8 +47,9 @@ pub fn load_manifest(
     profile: &str,
     target: Option<&str>,
     profiles_dir: Option<&str>,
+    env: &HashMap<String, String>,
 ) -> Result<String, CompileError> {
-    run_dbt_compile(project_dir, profile, target, profiles_dir)?;
+    run_dbt_compile(project_dir, profile, target, profiles_dir, env)?;
     read_manifest(&project_dir.join("target/manifest.json"))
 }
 
@@ -55,6 +58,7 @@ fn run_dbt_compile(
     profile: &str,
     target: Option<&str>,
     profiles_dir: Option<&str>,
+    env: &HashMap<String, String>,
 ) -> Result<(), CompileError> {
     let mut cmd = std::process::Command::new("dbt");
     cmd.arg("compile");
@@ -66,6 +70,11 @@ fn run_dbt_compile(
     if let Some(d) = profiles_dir {
         cmd.args(["--profiles-dir", d]);
     }
+    cmd.env_clear();
+    cmd.envs(
+        subprocess::build_subprocess_env(env)
+            .map_err(|e| CompileError::OriginFailed(format!("env resolution error: {e}")))?,
+    );
     let output = cmd
         .output()
         .map_err(|e| CompileError::OriginFailed(format!("failed to execute dbt: {e}")))?;
@@ -127,7 +136,7 @@ mod tests {
         // If dbt IS installed but with empty PATH, it may also fail.
         // Either way, run_dbt_compile should produce DbtCompileFailed.
         if result.is_err() {
-            let err = run_dbt_compile(Path::new("."), "default", None, None);
+            let err = run_dbt_compile(Path::new("."), "default", None, None, &HashMap::new());
             // Only assert if dbt is truly not on the system PATH.
             if let Err(e) = err {
                 assert!(matches!(e, CompileError::OriginFailed(_)));

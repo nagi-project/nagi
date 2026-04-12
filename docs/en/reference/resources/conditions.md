@@ -55,6 +55,10 @@ Omit `column` for tables without a timestamp column or where column values are n
 
 Applies to `SQL` and `Freshness` conditions. Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.
 
+## Command Environment Variables
+
+`type: Command` can declare environment variables via the `env` field. Only these declared values and a minimal set of OS essentials are passed to the subprocess — the parent shell's environment is not inherited. Values can reference the Nagi process's own environment using `${VAR}` syntax. See [Environment Variables](../environment-variables.md) for details.
+
 ## Command Without Shell
 
 Because no shell is used, metacharacters (`;`, `&&`, `|`, etc.) are passed as-is as arguments. This is intended for wrapping existing data validation tools (e.g. `dbt test --select`) as desired state checks.

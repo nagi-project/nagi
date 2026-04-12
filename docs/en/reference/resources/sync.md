@@ -19,6 +19,10 @@ spec:
     args: ["python", "post.py"]
 ```
 
+## Environment Variables
+
+Each step (pre, run, post) can declare environment variables via the `env` field. Only these declared values and a minimal set of OS essentials are passed to the subprocess — the parent shell's environment is not inherited. Values can reference the Nagi process's own environment using `${VAR}` syntax. See [Environment Variables](../environment-variables.md) for details.
+
 <!-- schema:auto-generated:start:SyncSpec -->
 
 ## Attributes
