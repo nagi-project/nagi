@@ -44,7 +44,7 @@ impl IdentitySpec {
 /// Runtime error raised when an Identity's env template cannot be expanded.
 #[allow(dead_code)] // wired up in the subprocess-env step
 #[derive(Debug, Error, PartialEq)]
-pub enum IdentityError {
+pub(crate) enum IdentityError {
     #[error(
         "identity '{identity}': environment variable '{var}' referenced by key '{key}' is not set"
     )]
@@ -62,8 +62,8 @@ pub enum IdentityError {
 /// the point of use. Credentials produced by expansion never live on this struct.
 #[allow(dead_code)] // wired up in the subprocess-env step
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedIdentity {
-    pub name: String,
+pub(crate) struct ResolvedIdentity {
+    pub(crate) name: String,
     template: IdentityTemplate,
 }
 
@@ -75,7 +75,7 @@ enum IdentityTemplate {
 
 #[allow(dead_code)]
 impl ResolvedIdentity {
-    pub fn from_spec(name: impl Into<String>, spec: &IdentitySpec) -> Self {
+    pub(crate) fn from_spec(name: impl Into<String>, spec: &IdentitySpec) -> Self {
         let template = match spec {
             IdentitySpec::Env { env } => IdentityTemplate::Env { env: env.clone() },
         };
@@ -88,7 +88,7 @@ impl ResolvedIdentity {
     /// Expand `${VAR}` references using the supplied lookup. The returned map is the
     /// caller's responsibility: use it immediately and drop at the end of the enclosing
     /// scope. Expanded values are never stored on `self`.
-    pub fn expand_env<F>(&self, lookup: F) -> Result<HashMap<String, String>, IdentityError>
+    pub(crate) fn expand_env<F>(&self, lookup: F) -> Result<HashMap<String, String>, IdentityError>
     where
         F: Fn(&str) -> Option<String>,
     {

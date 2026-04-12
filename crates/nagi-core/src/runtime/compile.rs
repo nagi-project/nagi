@@ -337,6 +337,7 @@ fn expand_step(
             .map(|arg| expand_template_string(arg, asset_name, model_name, with))
             .collect(),
         env: step.env.clone(),
+        identity: step.identity.clone(),
     }
 }
 
@@ -356,6 +357,7 @@ fn expand_sync_templates(
             .post
             .as_ref()
             .map(|s| expand_step(s, asset_name, model_name, with)),
+        identity: sync_spec.identity.clone(),
     }
 }
 
@@ -373,6 +375,7 @@ fn expand_condition_templates(
             interval,
             env,
             evaluate_cache_ttl,
+            identity,
         } => DesiredCondition::Command {
             name: name.clone(),
             run: run
@@ -382,6 +385,7 @@ fn expand_condition_templates(
             interval: interval.clone(),
             env: env.clone(),
             evaluate_cache_ttl: evaluate_cache_ttl.clone(),
+            identity: identity.clone(),
         },
         other => other.clone(),
     }
@@ -986,8 +990,10 @@ spec:
                 step_type: crate::runtime::kind::sync::StepType::Command,
                 args: vec!["true".to_string()],
                 env: HashMap::new(),
+                identity: None,
             },
             post: None,
+            identity: None,
         }
     }
 
@@ -1086,8 +1092,10 @@ spec:
                         "{{ asset.name }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )])
     }
@@ -1160,6 +1168,7 @@ spec:
                     interval: None,
                     env: HashMap::new(),
                     evaluate_cache_ttl: None,
+                    identity: None,
                 }],
             ),
             (
@@ -1170,6 +1179,7 @@ spec:
                     interval: None,
                     env: HashMap::new(),
                     evaluate_cache_ttl: None,
+                    identity: None,
                 }],
             ),
         ]);
@@ -1206,8 +1216,10 @@ spec:
                         "{{ sync.selector }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )]);
         let entry = asset::OnDriftEntry {
@@ -1241,6 +1253,7 @@ spec:
                 interval: None,
                 env: HashMap::new(),
                 evaluate_cache_ttl: None,
+                identity: None,
             }],
         )]);
         let entry = asset::OnDriftEntry {
@@ -1279,8 +1292,10 @@ spec:
                         "{{ asset.modelName }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )]);
         // Origin-generated Asset: model_name differs from asset name
@@ -1319,8 +1334,10 @@ spec:
                         "{{ asset.modelName }}".to_string(),
                     ],
                     env: HashMap::new(),
+                    identity: None,
                 },
                 post: None,
+                identity: None,
             },
         )]);
         // User-defined Asset: model_name equals asset name
@@ -2174,6 +2191,7 @@ spec: {}",
                 "{{ asset.name }}".into(),
             ],
             env: HashMap::new(),
+            identity: None,
         };
         let result = expand_step(&step, "origin.model", "model", &HashMap::new());
         assert_eq!(result.args, vec!["dbt", "run", "--select", "origin.model"]);
@@ -2187,6 +2205,7 @@ spec: {}",
             step_type: crate::runtime::kind::sync::StepType::Command,
             args: vec!["echo".into()],
             env: env.clone(),
+            identity: None,
         };
         let result = expand_step(&step, "a", "b", &HashMap::new());
         assert_eq!(result.env, env);
@@ -2198,6 +2217,7 @@ spec: {}",
             step_type: crate::runtime::kind::sync::StepType::Command,
             args: vec!["{{ sync.target }}".into()],
             env: HashMap::new(),
+            identity: None,
         };
         let mut with = HashMap::new();
         with.insert("target".into(), "prod".into());

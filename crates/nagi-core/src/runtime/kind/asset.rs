@@ -125,6 +125,9 @@ pub enum DesiredCondition {
         /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
         #[serde(default, rename = "evaluateCacheTtl")]
         evaluate_cache_ttl: Option<Duration>,
+        /// Reference to a `kind: Identity` resource for authentication scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<String>,
     },
 }
 
@@ -575,6 +578,7 @@ run: [dbt, test, --select, my_model]
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            identity: None,
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -588,6 +592,7 @@ run: [dbt, test, --select, my_model]
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            identity: None,
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));

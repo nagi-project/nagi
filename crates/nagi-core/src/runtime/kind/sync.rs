@@ -17,6 +17,9 @@ pub struct SyncSpec {
     pub run: SyncStep,
     /// Optional step executed after the main sync command.
     pub post: Option<SyncStep>,
+    /// Reference to a `kind: Identity` resource. Applied to all stages unless overridden per-stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -29,6 +32,9 @@ pub struct SyncStep {
     /// Environment variables to set for the subprocess.
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
 }
 
 /// Currently only `Command` (subprocess execution) is supported.
@@ -38,6 +44,15 @@ pub enum StepType {
 }
 
 impl SyncStep {
+    pub fn command(args: Vec<String>) -> Self {
+        Self {
+            step_type: StepType::Command,
+            args,
+            env: HashMap::new(),
+            identity: None,
+        }
+    }
+
     fn validate(&self, step_name: &str) -> Result<(), KindError> {
         if self.args.is_empty() {
             return Err(KindError::InvalidSpec {
@@ -50,6 +65,15 @@ impl SyncStep {
 }
 
 impl SyncSpec {
+    pub fn new(run: SyncStep) -> Self {
+        Self {
+            pre: None,
+            run,
+            post: None,
+            identity: None,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), KindError> {
         if let Some(pre) = &self.pre {
             pre.validate("pre")?;
@@ -123,34 +147,15 @@ run:
 
     #[test]
     fn validate_rejects_empty_run_args() {
-        let spec = SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec![],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let spec = SyncSpec::new(SyncStep::command(vec![]));
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
     }
 
     #[test]
     fn validate_rejects_empty_pre_args() {
-        let spec = SyncSpec {
-            pre: Some(SyncStep {
-                step_type: StepType::Command,
-                args: vec![],
-                env: HashMap::new(),
-            }),
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["dbt".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let mut spec = SyncSpec::new(SyncStep::command(vec!["dbt".to_string()]));
+        spec.pre = Some(SyncStep::command(vec![]));
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, message }
             if kind == KIND && message.contains("pre")));
@@ -158,19 +163,8 @@ run:
 
     #[test]
     fn validate_rejects_empty_post_args() {
-        let spec = SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["dbt".to_string()],
-                env: HashMap::new(),
-            },
-            post: Some(SyncStep {
-                step_type: StepType::Command,
-                args: vec![],
-                env: HashMap::new(),
-            }),
-        };
+        let mut spec = SyncSpec::new(SyncStep::command(vec!["dbt".to_string()]));
+        spec.post = Some(SyncStep::command(vec![]));
         let err = spec.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, message }
             if kind == KIND && message.contains("post")));
@@ -178,15 +172,10 @@ run:
 
     #[test]
     fn validate_accepts_valid_spec() {
-        let spec = SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["dbt".to_string(), "run".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        };
+        let spec = SyncSpec::new(SyncStep::command(vec![
+            "dbt".to_string(),
+            "run".to_string(),
+        ]));
         assert!(spec.validate().is_ok());
     }
 }

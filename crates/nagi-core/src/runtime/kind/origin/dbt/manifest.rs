@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::runtime::kind::asset::{AssetSpec, DesiredCondition, MergePosition, OnDriftEntry};
 use crate::runtime::kind::origin::{DefaultSync, OriginSpec};
-use crate::runtime::kind::sync::{StepType, SyncSpec, SyncStep};
+use crate::runtime::kind::sync::{SyncSpec, SyncStep};
 use crate::runtime::kind::{Metadata, NagiKind, API_VERSION};
 
 /// Minimal representation of dbt's `manifest.json`.
@@ -195,15 +195,7 @@ fn make_dbt_run_sync(name: &str, dbt_extra_args: &[String]) -> NagiKind {
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
         metadata: Metadata::new(name),
-        spec: SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args,
-                env: HashMap::new(),
-            },
-            post: None,
-        },
+        spec: SyncSpec::new(SyncStep::command(args)),
     }
 }
 
@@ -212,15 +204,7 @@ fn make_skip_sync() -> NagiKind {
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
         metadata: Metadata::new(SKIP_SYNC_NAME),
-        spec: SyncSpec {
-            pre: None,
-            run: SyncStep {
-                step_type: StepType::Command,
-                args: vec!["true".to_string()],
-                env: HashMap::new(),
-            },
-            post: None,
-        },
+        spec: SyncSpec::new(SyncStep::command(vec!["true".to_string()])),
     }
 }
 
@@ -513,6 +497,7 @@ fn tests_to_conditions(tests: &[&DbtNode], dbt_extra_args: &[String]) -> Vec<Des
                 interval: None,
                 env: HashMap::new(),
                 evaluate_cache_ttl: None,
+                identity: None,
             });
         }
     }
