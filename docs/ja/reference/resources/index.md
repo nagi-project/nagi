@@ -83,6 +83,7 @@ kind ごとに reconciliation loop の中での役割が異なります。
 | [Sync](./sync.md) | sync の手順定義。pre → run → post の3ステージ |
 | [Conditions](./conditions.md) | 期待状態の定義をまとめたリソース。複数の Asset で共有できる |
 | [Origin](./origin.md) | 他のソフトウェアが持つデータの構成情報から Asset を自動生成する |
+| [Identity](./identity.md) | 認証スコープを宣言する。Connection、Sync、Command 条件から参照し、操作ごとに使用するクレデンシャルを制御する |
 
 ## Template Variables
 
