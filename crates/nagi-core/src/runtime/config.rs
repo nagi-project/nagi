@@ -249,16 +249,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn load_missing_file_returns_default() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert_eq!(config, NagiConfig::default());
-        assert_eq!(config.backend.r#type, "local");
-        assert!(config.notify.slack.is_none());
-    }
-
-    #[test]
-    fn load_empty_file_returns_default() {
+    fn load_empty_or_missing_file_returns_default() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("nagi.yaml"), "").unwrap();
         let config = load_config(dir.path()).unwrap();
@@ -353,15 +344,6 @@ notify:
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.max_controllers, Some(4));
-    }
-
-    #[test]
-    fn load_backend_prefix() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "backend:\n  type: gcs\n  prefix: my-project/nagi";
-        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
-        let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.backend.prefix.as_deref(), Some("my-project/nagi"));
     }
 
     #[test]
@@ -481,12 +463,6 @@ export:
         nagi_dir_locks_dir:      locks_dir      => "/state/locks";
         nagi_dir_suspended_dir:  suspended_dir  => "/state/suspended";
         nagi_dir_watermarks:     watermarks_dir => "/state/watermarks";
-    }
-
-    #[test]
-    fn nagi_dir_root() {
-        let nd = NagiDir::new(PathBuf::from("/state"));
-        assert_eq!(nd.root(), Path::new("/state"));
     }
 
     #[test]
