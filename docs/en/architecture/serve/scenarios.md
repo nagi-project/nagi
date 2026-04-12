@@ -47,7 +47,7 @@ graph LR
     C["C (has interval)"] --> X
 ```
 
-An example where A, B, and C transition to Ready in close succession. X has 2 Syncs and 2 evaluations (re-evaluate after Sync only). B's propagation is ignored because X is mid-Sync. C's propagation is accepted after X's Sync completes, and a second Sync is executed. This execution is necessary to reflect C's data changes into X.
+An example where A, B, and C transition to Ready in close succession. X has 2 Syncs and 2 evaluations (re-evaluate after Sync only). B's propagation arrives while X is mid-Sync, so the running Sync subsumes B's propagation. C's propagation is accepted after X's Sync completes, and a second Sync is executed. This execution is necessary to reflect C's data changes into X.
 
 ```mermaid
 sequenceDiagram
@@ -63,7 +63,7 @@ sequenceDiagram
 
     Note over B: Transition to Ready
     B->>X: upstream Ready
-    Note over X: (ignored, mid-sync)
+    Note over X: (mid-sync → running sync subsumes)
 
     Note over X: sync complete
     Note over X: re-evaluate → Ready
@@ -163,7 +163,7 @@ graph LR
     A --> C["C (no interval)"] --> X
 ```
 
-A combination of fan-out and fan-in. When A transitions to Ready, Sync for B and C is directly triggered. When B and C transition to Ready, they each directly trigger X's Sync. X has 1 Sync and 1 evaluation (re-evaluate only). Even if C becomes Ready while X is mid-Sync, Sync is not re-requested.
+A combination of fan-out and fan-in. When A transitions to Ready, Sync for B and C is directly triggered. When B and C transition to Ready, they each directly trigger X's Sync. X has 1 Sync and 1 evaluation (re-evaluate only). If C becomes Ready while X is mid-Sync, the running Sync subsumes C's propagation.
 
 ```mermaid
 sequenceDiagram
@@ -193,14 +193,14 @@ sequenceDiagram
     Note over C: re-evaluate → Ready
     deactivate C
     C->>X: upstream Ready
-    Note over X: (ignored, mid-sync)
+    Note over X: (mid-sync → running sync subsumes)
 
     Note over X: sync complete
     Note over X: re-evaluate → Ready
     deactivate X
 ```
 
-Even if Syncs for B and C complete at nearly the same time, duplicate execution does not occur as long as X's Sync is already running.
+Even if Syncs for B and C complete at nearly the same time, the running Sync subsumes subsequent propagations, so duplicate execution does not occur.
 
 ## Scenario 6: Interval with Upstream Propagation
 
