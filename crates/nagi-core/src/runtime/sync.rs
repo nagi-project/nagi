@@ -51,6 +51,9 @@ pub enum SyncError {
 
     #[error("subprocess env resolution error: {0}")]
     EnvResolution(#[from] SubprocessEnvError),
+
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 /// Which type of sync operation is being executed.

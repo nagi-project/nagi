@@ -1,10 +1,12 @@
 //! Controller logic for the reconciliation loop.
 
 use std::collections::{HashMap, HashSet};
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
+use futures_util::FutureExt;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
@@ -186,7 +188,27 @@ fn spawn_evaluates(
                     Some(s) => Some(s.acquire().await.expect("semaphore closed")),
                     None => None,
                 };
-                reconciler::spawn_evaluate(name, yaml_owned, cache, skip_cache).await
+                let asset_name = name.clone();
+                match AssertUnwindSafe(reconciler::spawn_evaluate(
+                    name, yaml_owned, cache, skip_cache,
+                ))
+                .catch_unwind()
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        tracing::error!(asset = %asset_name, "evaluate task panicked");
+                        let now = chrono::Utc::now().to_rfc3339();
+                        (
+                            asset_name,
+                            reconciler::EvaluateOutcome {
+                                result: Err(EvaluateError::Internal("task panicked".to_string())),
+                                started_at: now.clone(),
+                                finished_at: now,
+                            },
+                        )
+                    }
+                }
             });
         }
     }
@@ -224,7 +246,26 @@ fn spawn_syncs(
                     Some(s) => Some(s.acquire().await.expect("semaphore closed")),
                     None => None,
                 };
-                reconciler::spawn_sync(name, yaml_owned, sync_lock, lock_config, notifier).await
+                let asset_name = name.clone();
+                match AssertUnwindSafe(reconciler::spawn_sync(
+                    name,
+                    yaml_owned,
+                    sync_lock,
+                    lock_config,
+                    notifier,
+                ))
+                .catch_unwind()
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        tracing::error!(asset = %asset_name, "sync task panicked");
+                        (
+                            asset_name,
+                            Err(SyncError::Internal("task panicked".to_string())),
+                        )
+                    }
+                }
             });
         }
     }
@@ -923,5 +964,109 @@ mod tests {
         assert!(!state.syncing.contains("a"));
         // Re-evaluate enqueued after sync completion.
         assert_eq!(state.evaluate_queue.dequeue(), Some("a".to_string()));
+    }
+
+    // ── catch_unwind panic recovery tests ────────────────────────────────
+
+    #[tokio::test]
+    async fn evaluate_panic_recovered_as_internal_error() {
+        use std::panic::AssertUnwindSafe;
+
+        let mut tasks: JoinSet<(String, reconciler::EvaluateOutcome)> = JoinSet::new();
+        let asset_name = "panicking-asset".to_string();
+        tasks.spawn(async move {
+            let name = asset_name.clone();
+            match AssertUnwindSafe(async {
+                panic!("simulated evaluate panic");
+            })
+            .catch_unwind()
+            .await
+            {
+                Ok(()) => unreachable!(),
+                Err(_) => {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    (
+                        name,
+                        reconciler::EvaluateOutcome {
+                            result: Err(EvaluateError::Internal("task panicked".to_string())),
+                            started_at: now.clone(),
+                            finished_at: now,
+                        },
+                    )
+                }
+            }
+        });
+
+        let result = tasks.join_next().await.unwrap().unwrap();
+        assert_eq!(result.0, "panicking-asset");
+        assert!(matches!(result.1.result, Err(EvaluateError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn sync_panic_recovered_as_internal_error() {
+        use std::panic::AssertUnwindSafe;
+
+        let mut tasks: JoinSet<(
+            String,
+            Result<crate::runtime::sync::SyncExecutionResult, SyncError>,
+        )> = JoinSet::new();
+        let asset_name = "panicking-asset".to_string();
+        tasks.spawn(async move {
+            let name = asset_name.clone();
+            match AssertUnwindSafe(async {
+                panic!("simulated sync panic");
+            })
+            .catch_unwind()
+            .await
+            {
+                Ok(()) => unreachable!(),
+                Err(_) => (name, Err(SyncError::Internal("task panicked".to_string()))),
+            }
+        });
+
+        let result = tasks.join_next().await.unwrap().unwrap();
+        assert_eq!(result.0, "panicking-asset");
+        assert!(matches!(result.1, Err(SyncError::Internal(_))));
+    }
+
+    #[test]
+    fn evaluate_panic_result_clears_in_flight() {
+        let mut state = make_state();
+        state.register_assets(&[AssetEntry {
+            name: "a".to_string(),
+            yaml: String::new(),
+            min_interval: None,
+            auto_sync: false,
+            has_sync: false,
+        }]);
+        state.in_flight.insert("a".to_string());
+
+        let evaluate_result: Result<crate::runtime::evaluate::AssetEvalResult, EvaluateError> =
+            Err(EvaluateError::Internal("task panicked".to_string()));
+        let join_result: crate::runtime::serve::state::EvaluateJoinResult =
+            Some(Ok(("a".to_string(), evaluate_result)));
+        state.on_evaluate_complete(join_result);
+
+        assert!(!state.in_flight.contains("a"));
+    }
+
+    #[test]
+    fn sync_panic_result_clears_syncing() {
+        let mut state = make_state();
+        state.register_assets(&[AssetEntry {
+            name: "a".to_string(),
+            yaml: String::new(),
+            min_interval: None,
+            auto_sync: true,
+            has_sync: true,
+        }]);
+        state.syncing.insert("a".to_string());
+
+        let sync_result: Result<crate::runtime::sync::SyncExecutionResult, SyncError> =
+            Err(SyncError::Internal("task panicked".to_string()));
+        let join_result = Some(Ok(("a".to_string(), sync_result)));
+        state.on_sync_complete(join_result);
+
+        assert!(!state.syncing.contains("a"));
     }
 }
