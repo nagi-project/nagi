@@ -1286,6 +1286,8 @@
       
         
       
+        
+      
     
     
     
@@ -1466,6 +1468,34 @@
     
   
     kind: Origin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/resources/identity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kind: Identity
   
 
     
@@ -1964,7 +1994,7 @@
     A["A (has interval)"] --&gt; X["X (no interval)"]
     B["B (has interval)"] --&gt; X
     C["C (has interval)"] --&gt; X</code></pre>
-<p>An example where A, B, and C transition to Ready in close succession. X has 2 Syncs and 2 evaluations (re-evaluate after Sync only). B's propagation is ignored because X is mid-Sync. C's propagation is accepted after X's Sync completes, and a second Sync is executed. This execution is necessary to reflect C's data changes into X.</p>
+<p>An example where A, B, and C transition to Ready in close succession. X has 2 Syncs and 2 evaluations (re-evaluate after Sync only). B's propagation arrives while X is mid-Sync, so the running Sync subsumes B's propagation. C's propagation is accepted after X's Sync completes, and a second Sync is executed. This execution is necessary to reflect C's data changes into X.</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant A
     participant B
@@ -1978,7 +2008,7 @@
 
     Note over B: Transition to Ready
     B-&gt;&gt;X: upstream Ready
-    Note over X: (ignored, mid-sync)
+    Note over X: (mid-sync → running sync subsumes)
 
     Note over X: sync complete
     Note over X: re-evaluate → Ready
@@ -2059,7 +2089,7 @@
 <pre class="mermaid"><code>graph LR
     A["A (has interval)"] --&gt; B["B (no interval)"] --&gt; X["X (no interval)"]
     A --&gt; C["C (no interval)"] --&gt; X</code></pre>
-<p>A combination of fan-out and fan-in. When A transitions to Ready, Sync for B and C is directly triggered. When B and C transition to Ready, they each directly trigger X's Sync. X has 1 Sync and 1 evaluation (re-evaluate only). Even if C becomes Ready while X is mid-Sync, Sync is not re-requested.</p>
+<p>A combination of fan-out and fan-in. When A transitions to Ready, Sync for B and C is directly triggered. When B and C transition to Ready, they each directly trigger X's Sync. X has 1 Sync and 1 evaluation (re-evaluate only). If C becomes Ready while X is mid-Sync, the running Sync subsumes C's propagation.</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant A
     participant B
@@ -2087,12 +2117,12 @@
     Note over C: re-evaluate → Ready
     deactivate C
     C-&gt;&gt;X: upstream Ready
-    Note over X: (ignored, mid-sync)
+    Note over X: (mid-sync → running sync subsumes)
 
     Note over X: sync complete
     Note over X: re-evaluate → Ready
     deactivate X</code></pre>
-<p>Even if Syncs for B and C complete at nearly the same time, duplicate execution does not occur as long as X's Sync is already running.</p>
+<p>Even if Syncs for B and C complete at nearly the same time, the running Sync subsumes subsequent propagations, so duplicate execution does not occur.</p>
 <h2 id="scenario-6-interval-with-upstream-propagation">Scenario 6: Interval with Upstream Propagation</h2>
 <pre class="mermaid"><code>graph LR
     A["A (has interval)"] --&gt; B["B (has interval)"]</code></pre>

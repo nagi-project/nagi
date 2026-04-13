@@ -8,13 +8,13 @@
       
       
       
-        <link rel="canonical" href="https://nagi-project.dev/0.0/architecture/notifications/">
+        <link rel="canonical" href="https://nagi-project.dev/0.0/reference/resources/identity/">
       
       
-        <link rel="prev" href="../export/">
+        <link rel="prev" href="../origin/">
       
       
-        <link rel="next" href="../mcp/">
+        <link rel="next" href="../../environment-variables/">
       
       
         
@@ -24,19 +24,19 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Notifications - Nagi Documentation</title>
+        <title>kind: Identity - Nagi Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -55,9 +55,9 @@
       
     
     
-      <link rel="stylesheet" href="../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -82,7 +82,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#notifications" class="md-skip">
+        <a href="#kind-identity" class="md-skip">
           Skip to content
         </a>
       
@@ -102,7 +102,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="Nagi Documentation" class="md-header__button md-logo" aria-label="Nagi Documentation" data-md-component="logo">
+    <a href="../../.." title="Nagi Documentation" class="md-header__button md-logo" aria-label="Nagi Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Notifications
+              kind: Identity
             
           </span>
         </div>
@@ -264,7 +264,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="Nagi Documentation" class="md-nav__button md-logo" aria-label="Nagi Documentation" data-md-component="logo">
+    <a href="../../.." title="Nagi Documentation" class="md-nav__button md-logo" aria-label="Nagi Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -294,7 +294,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -383,7 +383,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../overview/concepts/" class="md-nav__link">
+      <a href="../../../overview/concepts/" class="md-nav__link">
         
   
   
@@ -411,7 +411,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../overview/quickstart/" class="md-nav__link">
+      <a href="../../../overview/quickstart/" class="md-nav__link">
         
   
   
@@ -439,7 +439,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../overview/get-started/" class="md-nav__link">
+      <a href="../../../overview/get-started/" class="md-nav__link">
         
   
   
@@ -471,8 +471,6 @@
       
   
   
-    
-  
   
   
     
@@ -501,15 +499,17 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../" class="md-nav__link ">
+            <a href="../../../architecture/" class="md-nav__link ">
               
   
   
@@ -533,7 +533,7 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -612,7 +612,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../serve/internals/" class="md-nav__link">
+      <a href="../../../architecture/serve/internals/" class="md-nav__link">
         
   
   
@@ -640,7 +640,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../serve/scenarios/" class="md-nav__link">
+      <a href="../../../architecture/serve/scenarios/" class="md-nav__link">
         
   
   
@@ -668,7 +668,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../serve/restart/" class="md-nav__link">
+      <a href="../../../architecture/serve/restart/" class="md-nav__link">
         
   
   
@@ -704,7 +704,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../storage/" class="md-nav__link">
+      <a href="../../../architecture/storage/" class="md-nav__link">
         
   
   
@@ -732,7 +732,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../export/" class="md-nav__link">
+      <a href="../../../architecture/export/" class="md-nav__link">
         
   
   
@@ -757,37 +757,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Notifications
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../../architecture/notifications/" class="md-nav__link">
         
   
   
@@ -803,48 +776,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#events" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Events
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#slack" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Slack
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -857,7 +788,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mcp/" class="md-nav__link">
+      <a href="../../../architecture/mcp/" class="md-nav__link">
         
   
   
@@ -978,7 +909,7 @@
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../operations/deployment/" class="md-nav__link ">
+            <a href="../../../operations/deployment/" class="md-nav__link ">
               
   
   
@@ -1022,7 +953,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operations/deployment/local/" class="md-nav__link">
+      <a href="../../../operations/deployment/local/" class="md-nav__link">
         
   
   
@@ -1050,7 +981,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operations/deployment/vm/" class="md-nav__link">
+      <a href="../../../operations/deployment/vm/" class="md-nav__link">
         
   
   
@@ -1078,7 +1009,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operations/deployment/container/" class="md-nav__link">
+      <a href="../../../operations/deployment/container/" class="md-nav__link">
         
   
   
@@ -1118,8 +1049,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -1142,13 +1075,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -1169,7 +1100,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1187,7 +1118,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/project/" class="md-nav__link">
+      <a href="../../project/" class="md-nav__link">
         
   
   
@@ -1212,6 +1143,8 @@
                 
   
   
+    
+  
   
   
     
@@ -1239,17 +1172,15 @@
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../reference/resources/" class="md-nav__link ">
+            <a href="../" class="md-nav__link ">
               
   
   
@@ -1273,7 +1204,7 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1293,7 +1224,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/resources/asset/" class="md-nav__link">
+      <a href="../asset/" class="md-nav__link">
         
   
   
@@ -1321,7 +1252,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/resources/connection/" class="md-nav__link">
+      <a href="../connection/" class="md-nav__link">
         
   
   
@@ -1349,7 +1280,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/resources/sync/" class="md-nav__link">
+      <a href="../sync/" class="md-nav__link">
         
   
   
@@ -1377,7 +1308,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/resources/conditions/" class="md-nav__link">
+      <a href="../conditions/" class="md-nav__link">
         
   
   
@@ -1405,7 +1336,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/resources/origin/" class="md-nav__link">
+      <a href="../origin/" class="md-nav__link">
         
   
   
@@ -1430,10 +1361,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../reference/resources/identity/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kind: Identity
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1449,6 +1407,120 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#referencing-an-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Referencing an Identity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Referencing an Identity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Sync
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-a-sync-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From a Sync Stage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-command-condition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Command Condition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-resolution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity Resolution Order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        type: env
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1469,7 +1541,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/environment-variables/" class="md-nav__link">
+      <a href="../../environment-variables/" class="md-nav__link">
         
   
   
@@ -1497,7 +1569,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cli/" class="md-nav__link">
+      <a href="../../cli/" class="md-nav__link">
         
   
   
@@ -1525,7 +1597,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/glossary/" class="md-nav__link">
+      <a href="../../glossary/" class="md-nav__link">
         
   
   
@@ -1587,7 +1659,7 @@
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../integrations/" class="md-nav__link ">
+            <a href="../../../integrations/" class="md-nav__link ">
               
   
   
@@ -1690,7 +1762,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../integrations/dbt/resource-generation/" class="md-nav__link">
+      <a href="../../../integrations/dbt/resource-generation/" class="md-nav__link">
         
   
   
@@ -1718,7 +1790,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../integrations/dbt/core/" class="md-nav__link">
+      <a href="../../../integrations/dbt/core/" class="md-nav__link">
         
   
   
@@ -1746,7 +1818,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../integrations/dbt/cloud/" class="md-nav__link">
+      <a href="../../../integrations/dbt/cloud/" class="md-nav__link">
         
   
   
@@ -1809,10 +1881,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#events" class="md-nav__link">
+  <a href="#how-it-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Events
+        How It Works
       
     </span>
   </a>
@@ -1820,10 +1892,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#slack" class="md-nav__link">
+  <a href="#referencing-an-identity" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Slack
+        Referencing an Identity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Referencing an Identity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Sync
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-a-sync-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From a Sync Stage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-command-condition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Command Condition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-resolution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity Resolution Order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        type: env
       
     </span>
   </a>
@@ -1850,48 +1994,97 @@
   
 
 
-<h1 id="notifications">Notifications</h1>
-<p>Sends notifications for events that occur during <a href="../../reference/cli/#serve"><code>nagi serve</code></a> execution.</p>
-<h2 id="events">Events</h2>
+<h1 id="kind-identity">kind: Identity</h1>
+<p>Declares an authentication scope that can be referenced from Connection, Sync, and Command conditions. Binds a set of environment variables to a named identity so that each operation runs with specific credentials.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Identity</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-evaluator</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env</span>
+<span class="w">  </span><span class="nt">env</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${NAGI_EVAL_KEYFILE}</span>
+</code></pre></div>
+<h2 id="how-it-works">How It Works</h2>
+<p>When a Connection, Sync stage, or Command condition references an Identity by name, the environment variables defined in the Identity's <code>spec.env</code> are injected into the target scope.</p>
+<p>For Connections, the env map is used to resolve authentication credentials at query time. For subprocesses (Sync stages and Command conditions), the env map is injected into the subprocess environment between the OS essentials and the step-level <code>env</code> declarations. See <a href="../../environment-variables/">Environment Variables</a> for the full layering.</p>
+<p>Values can use <code>${VAR}</code> syntax to reference the Nagi process's own environment. The reference is resolved at the point of use, not at parse time. This means the expanded credential value is never stored in a struct field.</p>
+<h2 id="referencing-an-identity">Referencing an Identity</h2>
+<h3 id="from-connection">From Connection</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bigquery</span>
+<span class="w">  </span><span class="nt">project</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project</span>
+<span class="w">  </span><span class="nt">dataset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">analytics</span>
+<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-evaluator</span>
+</code></pre></div>
+<p>When a BigQuery Connection has an <code>identity</code> field, the Identity's env is used for authentication. If <code>GOOGLE_APPLICATION_CREDENTIALS</code> is present in the Identity's env, its value is used as the ADC file path.</p>
+<p>DuckDB and Snowflake connections do not yet support Identity. If <code>identity</code> is specified, a warning is emitted at compile time.</p>
+<h3 id="from-sync">From Sync</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-syncer</span>
+<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
+<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><code>identity</code> on the Sync applies to all stages (pre, run, post) unless overridden at the stage level.</p>
+<h3 id="from-a-sync-stage">From a Sync Stage</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default-id</span>
+<span class="w">  </span><span class="nt">pre</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
+<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;prepare.py&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pre-id</span>
+<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
+<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><code>pre</code> uses <code>pre-id</code>. <code>run</code> and <code>post</code> inherit <code>default-id</code> from the Sync level.</p>
+<h3 id="from-command-condition">From Command Condition</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">check-data</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">validate</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
+<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;validate.py&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">validator-id</span>
+</code></pre></div>
+<h2 id="identity-resolution-order">Identity Resolution Order</h2>
+<p>For each Sync stage, the Identity is determined as follows:</p>
+<ol>
+<li>If the stage (pre, run, or post) specifies <code>identity</code>, that Identity is used</li>
+<li>Otherwise, the Sync-level <code>identity</code> is inherited</li>
+<li>If neither is specified, no Identity is applied</li>
+</ol>
+<h2 id="type-env">type: env</h2>
+<p>Declares environment variable key-value pairs.</p>
 <table>
 <thead>
 <tr>
-<th>Event</th>
-<th>Trigger condition</th>
+<th>Attribute</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>EvalFailed</td>
-<td>When Evaluate fails with an error</td>
-</tr>
-<tr>
-<td>Suspended</td>
-<td>When Guardrails stops a Sync</td>
-</tr>
-<tr>
-<td>SyncLockSkipped</td>
-<td>When Sync lock acquisition reaches the retry limit and the Sync is skipped</td>
-</tr>
-<tr>
-<td>Halted</td>
-<td>When all Assets are stopped at once via <a href="../../reference/cli/#serve-halt"><code>nagi serve halt</code></a></td>
+<td><code>env</code></td>
+<td>map[string, string]</td>
+<td>Yes</td>
+<td>Environment variable names and values. Values may contain <code>${VAR}</code> references expanded from the Nagi process environment</td>
 </tr>
 </tbody>
 </table>
-<div class="admonition tip">
-<p class="admonition-title">Tip</p>
-<p>Even if notifications are not configured or notification delivery fails, the serve loop is not affected. If delivery fails, a warning-level log is emitted.</p>
-</div>
-<h2 id="slack">Slack</h2>
-<p>Notifications for the same Asset are grouped into a Slack thread. The first notification becomes the parent message, and subsequent notifications are posted to the same thread.</p>
-<p>To send notifications to Slack, complete the following setup:</p>
-<ol>
-<li>Create a Slack App and grant the <code>chat:write</code> scope</li>
-<li>Invite the App to the target channel</li>
-<li>Set the target channel in <code>notify.slack.channel</code> in <a href="../../reference/project/">nagi.yaml</a></li>
-<li>Set the Bot Token in the environment variable <code>SLACK_BOT_TOKEN</code></li>
-</ol>
 
 
 
@@ -1941,10 +2134,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.indexes", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "navigation.expand", "navigation.indexes", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

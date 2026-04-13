@@ -1286,6 +1286,8 @@
       
         
       
+        
+      
     
     
     
@@ -1466,6 +1468,34 @@
     
   
     kind: Origin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/resources/identity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kind: Identity
   
 
     
@@ -1964,7 +1994,7 @@
     A["A (interval あり)"] --&gt; X["X (interval なし)"]
     B["B (interval あり)"] --&gt; X
     C["C (interval あり)"] --&gt; X</code></pre>
-<p>A, B, C が近いタイミングで Ready に遷移した例です。<strong>X の sync は2回、evaluate は2回（sync 後の re-evaluate のみ）</strong>です。B の伝播は X が sync 中のため無視されます。C の伝播は X の sync 完了後に受理され、2回目の sync が実行されます。これは C のデータ変更を X に反映するために必要な実行です。</p>
+<p>A, B, C が近いタイミングで Ready に遷移した例です。<strong>X の sync は2回、evaluate は2回（sync 後の re-evaluate のみ）</strong>です。B の伝播は X が sync 中のため、実行中の sync が B の分も兼ねます。C の伝播は X の sync 完了後に受理され、2回目の sync が実行されます。これは C のデータ変更を X に反映するために必要な実行です。</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant A
     participant B
@@ -1978,7 +2008,7 @@
 
     Note over B: Ready に遷移
     B-&gt;&gt;X: upstream Ready
-    Note over X: (sync 中のため無視)
+    Note over X: (sync 中 → 実行中の sync が代替)
 
     Note over X: sync 完了
     Note over X: re-evaluate → Ready
@@ -2059,7 +2089,7 @@
 <pre class="mermaid"><code>graph LR
     A["A (interval あり)"] --&gt; B["B (interval なし)"] --&gt; X["X (interval なし)"]
     A --&gt; C["C (interval なし)"] --&gt; X</code></pre>
-<p>Fan-out と Fan-in の組み合わせです。A が Ready に遷移すると B と C の sync が直接起動されます。B と C が Ready に遷移すると、それぞれ X の sync を直接起動します。<strong>X の sync は1回、evaluate は1回（re-evaluate のみ）</strong>です。X の sync 中に C が Ready になっても、sync は再要求されません。</p>
+<p>Fan-out と Fan-in の組み合わせです。A が Ready に遷移すると B と C の sync が直接起動されます。B と C が Ready に遷移すると、それぞれ X の sync を直接起動します。<strong>X の sync は1回、evaluate は1回（re-evaluate のみ）</strong>です。X の sync 中に C が Ready になった場合、実行中の sync が C の分も兼ねます。</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant A
     participant B
@@ -2087,12 +2117,12 @@
     Note over C: re-evaluate → Ready
     deactivate C
     C-&gt;&gt;X: upstream Ready
-    Note over X: (sync 中のため無視)
+    Note over X: (sync 中 → 実行中の sync が代替)
 
     Note over X: sync 完了
     Note over X: re-evaluate → Ready
     deactivate X</code></pre>
-<p>B と C の sync 完了が近いタイミングであっても、X の sync が実行中であれば重複実行は発生しません。</p>
+<p>B と C の sync 完了が近いタイミングであっても、X の sync が実行中であれば実行中の sync が後続の伝播も兼ねるため、重複実行は発生しません。</p>
 <h2 id="scenario-6-interval-with-upstream-propagation">Scenario 6: Interval with Upstream Propagation</h2>
 <pre class="mermaid"><code>graph LR
     A["A (interval あり)"] --&gt; B["B (interval あり)"]</code></pre>
