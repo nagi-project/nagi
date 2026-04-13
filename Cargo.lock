@@ -1213,6 +1213,7 @@ dependencies = [
  "base64",
  "chrono",
  "dirs",
+ "futures-util",
  "humantime",
  "jsonwebtoken",
  "object_store",
