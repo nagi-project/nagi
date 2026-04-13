@@ -1,6 +1,7 @@
 mod categorize;
 pub mod dbt;
 mod load;
+mod template;
 
 pub(crate) use load::load_compiled_assets;
 pub use load::load_resources;
@@ -15,7 +16,7 @@ use thiserror::Error;
 use crate::runtime::kind::asset::{
     self as asset, validate_no_duplicate_condition_names, AssetSpec, DesiredCondition,
 };
-use crate::runtime::kind::sync::{SyncSpec, SyncStep};
+use crate::runtime::kind::sync::SyncSpec;
 use crate::runtime::kind::{self, KindError, Metadata, NagiKind};
 
 #[derive(Debug, Error)]
@@ -166,167 +167,10 @@ use crate::runtime::kind::connection::{
 };
 
 use categorize::{categorize, CategorizedResources};
-
-fn require_sync_ref(syncs: &HashMap<String, SyncSpec>, name: &str) -> Result<(), CompileError> {
-    if !syncs.contains_key(name) {
-        return Err(CompileError::UnresolvedRef {
-            kind: "Sync".to_string(),
-            name: name.to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Expands template variables in a SyncSpec's args.
-///
-/// Supported variables:
-/// - `{{ asset.name }}` — the Asset's `metadata.name` (Origin-prefixed, e.g. `origin.model`).
-///   Use for Nagi-internal references.
-/// - `{{ asset.modelName }}` — the original model name without the Origin prefix
-///   (e.g. `model`). Falls back to `asset.name` when unset.
-///   Use for external tool arguments (e.g. `dbt run --select`).
-/// - `{{ sync.<key> }}` — value from the `onDrift[].with` map.
-fn expand_step(
-    step: &SyncStep,
-    asset_name: &str,
-    model_name: &str,
-    with: &HashMap<String, String>,
-) -> SyncStep {
-    SyncStep {
-        step_type: step.step_type.clone(),
-        args: step
-            .args
-            .iter()
-            .map(|arg| expand_template_string(arg, asset_name, model_name, with))
-            .collect(),
-        env: step.env.clone(),
-        identity: step.identity.clone(),
-    }
-}
-
-fn expand_sync_templates(
-    sync_spec: &SyncSpec,
-    asset_name: &str,
-    model_name: &str,
-    with: &HashMap<String, String>,
-) -> SyncSpec {
-    SyncSpec {
-        pre: sync_spec
-            .pre
-            .as_ref()
-            .map(|s| expand_step(s, asset_name, model_name, with)),
-        run: expand_step(&sync_spec.run, asset_name, model_name, with),
-        post: sync_spec
-            .post
-            .as_ref()
-            .map(|s| expand_step(s, asset_name, model_name, with)),
-        identity: sync_spec.identity.clone(),
-    }
-}
-
-/// Expands template variables in a DesiredCondition's args.
-fn expand_condition_templates(
-    condition: &DesiredCondition,
-    asset_name: &str,
-    model_name: &str,
-    with: &HashMap<String, String>,
-) -> DesiredCondition {
-    match condition {
-        DesiredCondition::Command {
-            name,
-            run,
-            interval,
-            env,
-            evaluate_cache_ttl,
-            identity,
-        } => DesiredCondition::Command {
-            name: name.clone(),
-            run: run
-                .iter()
-                .map(|arg| expand_template_string(arg, asset_name, model_name, with))
-                .collect(),
-            interval: interval.clone(),
-            env: env.clone(),
-            evaluate_cache_ttl: evaluate_cache_ttl.clone(),
-            identity: identity.clone(),
-        },
-        other => other.clone(),
-    }
-}
-
-fn expand_template_string(
-    s: &str,
-    asset_name: &str,
-    model_name: &str,
-    with: &HashMap<String, String>,
-) -> String {
-    let mut result = s.replace("{{ asset.name }}", asset_name);
-    result = result.replace("{{ asset.modelName }}", model_name);
-    for (key, value) in with {
-        result = result.replace(&format!("{{{{ sync.{key} }}}}"), value);
-    }
-    result
-}
-
-fn warn_multi_asset_sync(name: &str, spec: &SyncSpec) {
-    let steps = [Some(&spec.run), spec.pre.as_ref(), spec.post.as_ref()];
-    if let Some(reason) = steps
-        .into_iter()
-        .flatten()
-        .find_map(|step| dbt::detect_multi_asset_step(&step.args))
-    {
-        tracing::warn!(
-            sync = name,
-            "Sync '{}' {}: this conflicts with Nagi's per-Asset reconciliation loop",
-            name,
-            reason,
-        );
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ReadinessWarning {
-    NoOnDrift,
-    NoEvalTriggers,
-}
-
-fn check_readiness_warning(asset: &ResolvedAsset) -> Option<ReadinessWarning> {
-    if asset.spec.on_drift.is_empty() {
-        return Some(ReadinessWarning::NoOnDrift);
-    }
-    if asset.spec.upstreams.is_empty()
-        && !asset
-            .resolved_on_drift
-            .iter()
-            .flat_map(|e| &e.conditions)
-            .any(|c| c.interval().is_some())
-    {
-        return Some(ReadinessWarning::NoEvalTriggers);
-    }
-    None
-}
-
-fn warn_asset_readiness(assets: &[ResolvedAsset]) {
-    for a in assets {
-        match check_readiness_warning(a) {
-            Some(ReadinessWarning::NoOnDrift) => {
-                tracing::warn!(
-                    asset = %a.metadata.name,
-                    "Asset '{}' has no onDrift entries: it will always be considered Ready",
-                    a.metadata.name,
-                );
-            }
-            Some(ReadinessWarning::NoEvalTriggers) => {
-                tracing::warn!(
-                    asset = %a.metadata.name,
-                    "Asset '{}' has no evaluation triggers (no interval, no upstreams): after initial evaluation in serve, its state will not change",
-                    a.metadata.name,
-                );
-            }
-            None => {}
-        }
-    }
-}
+use template::{
+    expand_condition_templates, expand_sync_templates, require_sync_ref, warn_asset_readiness,
+    warn_multi_asset_sync,
+};
 
 /// Resolves all references and builds the dependency graph.
 pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
@@ -731,9 +575,11 @@ pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), Com
 
 #[cfg(test)]
 mod tests {
+    use super::template::{check_readiness_warning, ReadinessWarning};
     use super::*;
     use crate::runtime::kind::asset::OnDriftEntry;
     use crate::runtime::kind::parse_kinds;
+    use crate::runtime::kind::sync::SyncStep;
     use tempfile::TempDir;
 
     // ── YAML fragments ──────────────────────────────────────────────────
@@ -1756,39 +1602,6 @@ spec:
         assert!(target_dir.join("graph.json").exists());
         assert!(target_dir.join("assets/my-dbt.customers.yaml").exists());
         assert!(target_dir.join("assets/my-dbt.stg_customers.yaml").exists());
-    }
-
-    // ── expand_step ─────────────────────────────────────────────────────
-
-    #[test]
-    fn expand_step_replaces_templates_in_args() {
-        let step = SyncStep {
-            step_type: crate::runtime::kind::sync::StepType::Command,
-            args: vec![
-                "dbt".into(),
-                "run".into(),
-                "--select".into(),
-                "{{ asset.name }}".into(),
-            ],
-            env: HashMap::new(),
-            identity: None,
-        };
-        let result = expand_step(&step, "origin.model", "model", &HashMap::new());
-        assert_eq!(result.args, vec!["dbt", "run", "--select", "origin.model"]);
-    }
-
-    #[test]
-    fn expand_step_replaces_with_variables() {
-        let step = SyncStep {
-            step_type: crate::runtime::kind::sync::StepType::Command,
-            args: vec!["{{ sync.target }}".into()],
-            env: HashMap::new(),
-            identity: None,
-        };
-        let mut with = HashMap::new();
-        with.insert("target".into(), "prod".into());
-        let result = expand_step(&step, "a", "b", &with);
-        assert_eq!(result.args, vec!["prod"]);
     }
 
     // ── into_result ────────────────────────────────────────────────────
