@@ -198,6 +198,13 @@ impl ServeState {
             return;
         };
         let name = name.to_string();
+        // Advance the timer unconditionally. Without this, an early return
+        // below (in-flight / upstream not ready) leaves next_eval_at in the
+        // past, causing the select! timer to resolve immediately every
+        // iteration and spinning the loop until the condition clears.
+        // handle_evaluate_result will reschedule again on completion, so
+        // the final next_eval_at is unaffected in the normal path.
+        self.scheduler.reschedule(&name);
         if self.in_flight.contains(&name) {
             return;
         }
@@ -1387,5 +1394,28 @@ mod tests {
         state.request_sync("b");
         state.request_sync("c");
         assert_eq!(state.next_syncable(Some(1)), Some("b".to_string()));
+    }
+
+    // ── enqueue_due busy-wait prevention ────────────────────────────────
+
+    #[test]
+    fn enqueue_due_reschedules_when_in_flight() {
+        let mut state = ServeState::new(&[], susp_store());
+        state.register_assets(&[asset_entry("a", Some(StdDuration::from_secs(60)))]);
+        while state.evaluate_queue.dequeue().is_some() {}
+
+        // Set timer to the past so the asset is due.
+        let past = tokio::time::Instant::now();
+        state.scheduler.next_eval_at.insert("a".to_string(), past);
+        state.in_flight.insert("a".to_string());
+
+        state.enqueue_due();
+
+        // Timer must have been advanced to the future, preventing busy-wait.
+        let (name, next) = state.scheduler.next_due().unwrap();
+        assert_eq!(name, "a");
+        assert!(next > past);
+        // Asset was not enqueued (already in-flight).
+        assert_eq!(state.evaluate_queue.dequeue(), None);
     }
 }
