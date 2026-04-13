@@ -19,6 +19,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      PUBLISH_DIR: docs-deploy  # worktree directory for the docs-site branch
     steps:
       # Main branch: scripts, pyproject.toml, setup-uv action
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -61,31 +63,35 @@ jobs:
         run: |
           git fetch origin docs-site || true
           if git rev-parse --verify origin/docs-site >/dev/null 2>&1; then
-            git worktree add docs-deploy origin/docs-site
+            git worktree add "$PUBLISH_DIR" origin/docs-site
           else
-            git worktree add --orphan -b docs-site docs-deploy
+            git worktree add --orphan -b docs-site "$PUBLISH_DIR"
           fi
 
       - name: Copy build output
         run: |
           MINOR="${{ steps.version.outputs.minor }}"
-          rm -rf "docs-deploy/${MINOR}"
-          rm -rf "docs-deploy/ja/${MINOR}"
-          mkdir -p "docs-deploy/ja"
-          cp -r docs-build-en/. "docs-deploy/${MINOR}/"
-          cp -r docs-build-ja/. "docs-deploy/ja/${MINOR}/"
-          # Remove legacy nested layout (docs-deploy/${MINOR}/ja) from prior deploys
-          rm -rf "docs-deploy/${MINOR}/ja"
+          rm -rf "${PUBLISH_DIR}/${MINOR}"
+          rm -rf "${PUBLISH_DIR}/ja/${MINOR}"
+          mkdir -p "${PUBLISH_DIR}/ja"
+          cp -r docs-build-en/. "${PUBLISH_DIR}/${MINOR}/"
+          cp -r docs-build-ja/. "${PUBLISH_DIR}/ja/${MINOR}/"
+          # Remove legacy nested layout (${PUBLISH_DIR}/${MINOR}/ja) from prior deploys
+          rm -rf "${PUBLISH_DIR}/${MINOR}/ja"
 
       - name: Update versions.json
         run: |
           MINOR="${{ steps.version.outputs.minor }}"
-          uv run --no-project scripts/update_versions.py docs-deploy "$MINOR"
-          uv run --no-project scripts/update_versions.py docs-deploy/ja "$MINOR"
+          uv run --no-project scripts/update_versions.py "$PUBLISH_DIR" "$MINOR"
+          uv run --no-project scripts/update_versions.py "$PUBLISH_DIR/ja" "$MINOR"
+
+      - name: Generate sitemap index
+        run: |
+          uv run --no-project scripts/generate_sitemap_index.py "$PUBLISH_DIR"
 
       - name: Push to docs-site branch
         run: |
-          cd docs-deploy
+          cd "$PUBLISH_DIR"
           git add -A
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
