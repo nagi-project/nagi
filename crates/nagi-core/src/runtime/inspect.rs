@@ -1,6 +1,9 @@
 // TODO: remove once inspect module is integrated into sync flow and CLI
 #![allow(dead_code)]
 
+#[cfg(feature = "bigquery")]
+pub mod bigquery;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +20,9 @@ pub enum InspectError {
 
     #[error("invalid asset name for path: {0}")]
     InvalidAssetName(String),
+
+    #[error("connection error: {0}")]
+    Connection(String),
 }
 
 /// A single condition's evaluation result snapshot.

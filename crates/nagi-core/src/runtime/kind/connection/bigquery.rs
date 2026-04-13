@@ -11,6 +11,16 @@ use crate::runtime::kind::connection::dbt::AdapterConfig;
 
 use super::{require_str, Connection, ConnectionError};
 
+/// Escapes backticks for BigQuery backtick-quoted identifiers.
+pub(crate) fn escape_backtick(s: &str) -> String {
+    s.replace('`', "``")
+}
+
+/// Escapes single quotes for BigQuery string literals.
+pub(crate) fn escape_single_quote(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
 /// Expands `${VAR}` references in a single value using process env.
 fn expand_env_value(template: &str) -> Result<String, ConnectionError> {
     let mut out = String::with_capacity(template.len());
@@ -592,15 +602,6 @@ impl Connection for BigQueryConnection {
         asset_name: &str,
         column: Option<&str>,
     ) -> Result<String, ConnectionError> {
-        /// Escapes backticks for BigQuery backtick-quoted identifiers.
-        fn escape_backtick(s: &str) -> String {
-            s.replace('`', "``")
-        }
-        /// Escapes single quotes for BigQuery string literals.
-        fn escape_single_quote(s: &str) -> String {
-            s.replace('\'', "''")
-        }
-
         Ok(match column {
             Some(col) => {
                 let col = escape_backtick(col);
