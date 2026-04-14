@@ -160,6 +160,80 @@ pub fn ls_to_text(json_str: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// Formats inspection JSON (array of SyncInspection) as human-readable text.
+pub fn inspect_to_text(json_str: &str) -> Result<String, String> {
+    let inspections: Vec<serde_json::Value> =
+        serde_json::from_str(json_str).map_err(|e| e.to_string())?;
+
+    if inspections.is_empty() {
+        return Ok("No inspections found.".to_string());
+    }
+
+    let mut out = String::new();
+    for insp in &inspections {
+        let asset = insp["asset_name"].as_str().unwrap_or("");
+        let exec_id = insp["execution_id"].as_str().unwrap_or("");
+        writeln!(out, "=== {asset}  execution_id: {exec_id} ===").unwrap();
+        writeln!(out).unwrap();
+
+        for (key, label) in [("before_sync", "Before sync"), ("after_sync", "After sync")] {
+            let snapshot = &insp[key];
+            writeln!(out, "  {label}:").unwrap();
+
+            if let Some(evals) = snapshot["evaluations"].as_array() {
+                for ev in evals {
+                    let name = ev["name"].as_str().unwrap_or("");
+                    let status = &ev["status"];
+                    let status_str = if let Some(state) = status["state"].as_str() {
+                        match status["reason"].as_str() {
+                            Some(reason) if !reason.is_empty() => {
+                                format!("{state}: {reason}")
+                            }
+                            _ => state.to_string(),
+                        }
+                    } else {
+                        status.to_string()
+                    };
+                    writeln!(out, "    {name:30} {status_str}").unwrap();
+                }
+            }
+
+            if let Some(phys) = snapshot["physical_object"].as_object() {
+                let obj_type = phys
+                    .get("object_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let metrics = phys
+                    .get("metrics")
+                    .and_then(|v| v.as_object())
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| format!("{k}={v}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                writeln!(out, "    [{obj_type}] {metrics}").unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+
+        if let Some(jobs) = insp["destination_jobs"].as_array() {
+            if !jobs.is_empty() {
+                writeln!(out, "  Destination jobs:").unwrap();
+                for job in jobs {
+                    let job_id = job["job_id"].as_str().unwrap_or("");
+                    let stmt = job["statement_type"].as_str().unwrap_or("");
+                    writeln!(out, "    {job_id:30} {stmt}").unwrap();
+                }
+                writeln!(out).unwrap();
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -361,5 +435,53 @@ mod tests {
         assert!(text.contains("raw-sales"));
         assert!(text.contains("true"));
         assert!(text.contains("my-bq"));
+    }
+
+    // ── inspect_to_text ─────────────────────────────────────────────
+
+    #[test]
+    fn inspect_to_text_empty() {
+        let text = inspect_to_text("[]").unwrap();
+        assert_eq!(text, "No inspections found.");
+    }
+
+    #[test]
+    fn inspect_to_text_with_data() {
+        let json = serde_json::json!([{
+            "schema_version": 1,
+            "execution_id": "exec-001",
+            "asset_name": "daily-sales",
+            "before_sync": {
+                "evaluations": [{
+                    "name": "freshness-24h",
+                    "status": {"state": "drifted", "reason": "age 30h"},
+                    "detail": {}
+                }],
+                "physical_object": {
+                    "object_type": "BASE TABLE",
+                    "metrics": {"row_count": 1000}
+                }
+            },
+            "after_sync": {
+                "evaluations": [{
+                    "name": "freshness-24h",
+                    "status": {"state": "ready"},
+                    "detail": {}
+                }],
+                "physical_object": {
+                    "object_type": "BASE TABLE",
+                    "metrics": {"row_count": 1500}
+                }
+            },
+            "destination_jobs": []
+        }]);
+        let text = inspect_to_text(&json.to_string()).unwrap();
+        assert!(text.contains("daily-sales"));
+        assert!(text.contains("exec-001"));
+        assert!(text.contains("drifted: age 30h"));
+        assert!(text.contains("ready"));
+        assert!(text.contains("BASE TABLE"));
+        assert!(text.contains("row_count=1000"));
+        assert!(text.contains("row_count=1500"));
     }
 }

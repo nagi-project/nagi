@@ -10,7 +10,7 @@ use std::collections::HashMap;
 /// dataset, looking up `model_name` as `table_name`. Returns the `table_type`
 /// string (e.g. "BASE TABLE", "VIEW", "MATERIALIZED VIEW") or `None` if no
 /// matching object exists.
-pub async fn resolve_object_type(
+async fn resolve_object_type(
     conn: &dyn Connection,
     project: &str,
     dataset: &str,
@@ -35,7 +35,7 @@ pub async fn resolve_object_type(
 }
 
 /// Fetches the row count of a BigQuery object via `SELECT COUNT(*)`.
-pub async fn fetch_row_count(
+async fn fetch_row_count(
     conn: &dyn Connection,
     project: &str,
     dataset: &str,

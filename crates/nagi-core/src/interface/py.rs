@@ -409,6 +409,22 @@ fn format_ls_text(json_str: &str) -> PyResult<String> {
     crate::interface::format::ls_to_text(json_str).map_err(to_py_err)
 }
 
+/// Formats inspection JSON as human-readable text.
+#[pyfunction]
+fn format_inspect_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::inspect_to_text(json_str).map_err(to_py_err)
+}
+
+/// Lists recent inspections for an asset as JSON.
+#[pyfunction]
+#[pyo3(signature = (asset_name, last=5))]
+fn list_inspections(asset_name: &str, last: usize) -> PyResult<String> {
+    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
+    let store = crate::runtime::inspect::InspectionStore::new(nagi_dir.root());
+    let inspections = store.list(asset_name, last).map_err(to_py_err)?;
+    serde_json::to_string(&inspections).map_err(to_py_err)
+}
+
 /// Registers all PyO3 functions into the module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
@@ -433,5 +449,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_evaluate_text, m)?)?;
     m.add_function(wrap_pyfunction!(format_status_text, m)?)?;
     m.add_function(wrap_pyfunction!(format_ls_text, m)?)?;
+    m.add_function(wrap_pyfunction!(format_inspect_text, m)?)?;
+    m.add_function(wrap_pyfunction!(list_inspections, m)?)?;
     Ok(())
 }
