@@ -419,6 +419,7 @@ pub(crate) struct SyncWorkflowParams<'a> {
     pub evaluation_id: Option<&'a str>,
     pub log_store: Option<&'a LogStore>,
     pub cache_dir: Option<&'a Path>,
+    pub nagi_dir: Option<&'a Path>,
     pub default_timeout: std::time::Duration,
 }
 
@@ -469,13 +470,37 @@ async fn re_evaluate_and_link(
 }
 
 /// Runs the full sync workflow: preflight check, execute, link evaluations,
-/// and post-sync re-evaluation.
+/// post-sync re-evaluation, and observation file creation.
 pub(crate) async fn run_sync_workflow(
     params: SyncWorkflowParams<'_>,
 ) -> Result<SyncExecutionResult, SyncError> {
     let sync_spec = resolve_sync_spec(params.compiled)?;
 
     preflight_check_dbt_cloud(params.compiled, params.force).await?;
+
+    // --- Observation: connect once, capture pre and post ---
+    let inspect_conn = connect_for_inspection(params.compiled, params.default_timeout);
+    let inspect_ctx = inspect_conn.as_ref().map(|(conn, project, dataset)| {
+        let model_name = params
+            .compiled
+            .spec
+            .model_name
+            .as_deref()
+            .unwrap_or(&params.compiled.metadata.name);
+        (
+            conn.as_ref(),
+            project.as_str(),
+            dataset.as_str(),
+            model_name,
+        )
+    });
+
+    let pre_physical = match inspect_ctx {
+        Some((conn, project, dataset, model_name)) => {
+            fetch_physical_state(conn, project, dataset, model_name).await
+        }
+        None => None,
+    };
 
     let result = execute_sync(
         &params.compiled.metadata.name,
@@ -500,7 +525,97 @@ pub(crate) async fn run_sync_workflow(
         .await;
     }
 
+    let post_physical = match inspect_ctx {
+        Some((conn, project, dataset, model_name)) => {
+            fetch_physical_state(conn, project, dataset, model_name).await
+        }
+        None => None,
+    };
+
+    write_inspection(
+        params.nagi_dir,
+        &params.compiled.metadata.name,
+        &result.execution_id,
+        pre_physical,
+        post_physical,
+    );
+
     Ok(result)
+}
+
+/// Creates a connection and extracts BigQuery project/dataset for inspection.
+/// Returns `None` for non-BigQuery connections or on connection failure.
+fn connect_for_inspection(
+    compiled: &CompiledAsset,
+    default_timeout: std::time::Duration,
+) -> Option<(
+    Box<dyn crate::runtime::kind::connection::Connection>,
+    String,
+    String,
+)> {
+    use crate::runtime::kind::connection::ResolvedConnection;
+    let resolved = compiled.connection.as_ref()?;
+    let (project, dataset) = match resolved {
+        #[cfg(feature = "bigquery")]
+        ResolvedConnection::BigQuery {
+            project, dataset, ..
+        } => (project.clone(), dataset.clone()),
+        _ => return None,
+    };
+    let conn = match resolved.connect(default_timeout) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "inspection: failed to connect");
+            return None;
+        }
+    };
+    Some((conn, project, dataset))
+}
+
+/// Fetches the physical object state. Failures are logged as warnings.
+async fn fetch_physical_state(
+    conn: &dyn crate::runtime::kind::connection::Connection,
+    project: &str,
+    dataset: &str,
+    model_name: &str,
+) -> Option<crate::runtime::inspect::PhysicalObjectState> {
+    match crate::runtime::inspect::bigquery::fetch_physical_object_state(
+        conn, project, dataset, model_name,
+    )
+    .await
+    {
+        Ok(state) => state,
+        Err(e) => {
+            tracing::warn!(error = %e, "inspection: failed to capture physical object state");
+            None
+        }
+    }
+}
+
+/// Writes an inspection file. Failures are logged as warnings
+/// and do not block the sync workflow.
+fn write_inspection(
+    nagi_dir: Option<&Path>,
+    asset_name: &str,
+    execution_id: &str,
+    pre_physical: Option<crate::runtime::inspect::PhysicalObjectState>,
+    post_physical: Option<crate::runtime::inspect::PhysicalObjectState>,
+) {
+    let Some(nagi_dir) = nagi_dir else {
+        return;
+    };
+
+    let mut inspection = crate::runtime::inspect::SyncInspection::new(
+        execution_id.to_string(),
+        asset_name.to_string(),
+    );
+    inspection.before_sync.physical_object = pre_physical;
+    inspection.after_sync.physical_object = post_physical;
+
+    let store = crate::runtime::inspect::InspectionStore::new(nagi_dir);
+    if let Err(e) = store.write(&inspection) {
+        tracing::warn!(error = %e, "inspection: failed to write inspection file");
+    }
 }
 
 #[cfg(test)]
@@ -962,5 +1077,59 @@ mod tests {
         .await;
 
         assert!(cache_dir.join("test-asset.json").exists());
+    }
+
+    #[tokio::test]
+    async fn re_evaluate_and_link_without_cache_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        let compiled = test_compiled_asset();
+
+        re_evaluate_and_link(&compiled, Some(&store), None, "exec-1", test_timeout()).await;
+    }
+
+    // ── connect_for_inspection ──────────────────────────────────────
+
+    #[test]
+    fn connect_for_inspection_returns_none_without_connection() {
+        let compiled = test_compiled_asset();
+        assert!(connect_for_inspection(&compiled, test_timeout()).is_none());
+    }
+
+    // ── write_inspection ────────────────────────────────────────────
+
+    #[test]
+    fn write_inspection_skips_when_nagi_dir_is_none() {
+        write_inspection(None, "test-asset", "exec-001", None, None);
+    }
+
+    #[test]
+    fn write_inspection_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let pre = Some(crate::runtime::inspect::PhysicalObjectState {
+            object_type: "BASE TABLE".to_string(),
+            metrics: HashMap::from([("row_count".to_string(), serde_json::json!(100))]),
+        });
+        let post = Some(crate::runtime::inspect::PhysicalObjectState {
+            object_type: "BASE TABLE".to_string(),
+            metrics: HashMap::from([("row_count".to_string(), serde_json::json!(200))]),
+        });
+        write_inspection(Some(dir.path()), "my-asset", "exec-001", pre, post);
+
+        let path = dir.path().join("inspections/my-asset/exec-001.json");
+        assert!(path.exists(), "inspection file should be created");
+
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(content["asset_name"], "my-asset");
+        assert_eq!(content["execution_id"], "exec-001");
+        assert_eq!(
+            content["before_sync"]["physical_object"]["object_type"],
+            "BASE TABLE"
+        );
+        assert_eq!(
+            content["after_sync"]["physical_object"]["metrics"]["row_count"],
+            200
+        );
     }
 }

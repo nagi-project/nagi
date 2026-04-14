@@ -1,6 +1,3 @@
-// TODO: remove once inspect module is integrated into sync flow and CLI
-#![allow(dead_code)]
-
 #[cfg(feature = "bigquery")]
 pub mod bigquery;
 
@@ -114,6 +111,7 @@ impl InspectionStore {
     }
 
     /// Reads an inspection by asset name and execution_id.
+    #[allow(dead_code)] // used by `nagi inspect` CLI (not yet implemented)
     pub fn read(
         &self,
         asset_name: &str,
@@ -132,6 +130,7 @@ impl InspectionStore {
     /// (`<execution_id>.json`). This works because `generate_uuid()` produces
     /// IDs with a timestamp prefix, so lexicographic order matches chronological
     /// order.
+    #[allow(dead_code)] // used by `nagi inspect` CLI (not yet implemented)
     pub fn list(
         &self,
         asset_name: &str,

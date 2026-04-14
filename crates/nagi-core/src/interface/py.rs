@@ -185,6 +185,7 @@ fn execute_sync_proposal(
                 db_path: None,
                 logs_dir: None,
                 cache_dir: cache_dir.map(std::path::Path::new),
+                nagi_dir: None,
                 dry_run: false,
                 force,
                 evaluation_id,
