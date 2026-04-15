@@ -36,7 +36,6 @@ jobs:
         run: |
           command -v cargo-audit >/dev/null || cargo install cargo-audit
           IGNORE_ADVISORIES=(
-            RUSTSEC-2023-0071  # rsa: no fix available, used transitively via jsonwebtoken
           )
           IGNORE_FLAGS=()
           for id in "${IGNORE_ADVISORIES[@]}"; do
