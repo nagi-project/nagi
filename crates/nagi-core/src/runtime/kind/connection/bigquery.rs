@@ -399,6 +399,24 @@ impl BigQueryConnection {
         extract_scalar_from_query_response(json)
     }
 
+    #[allow(dead_code)] // used by query_rows trait impl, integrated with lazy fetch
+    fn query_rows_sync(&self, sql: &str) -> Result<Vec<Value>, ConnectionError> {
+        let token = self.access_token()?;
+        let url = self.queries_url();
+        let body = self.build_query_request(sql.to_string());
+        let mut resp = self
+            .agent
+            .post(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .send_json(&body)
+            .map_err(|e| ConnectionError::Http(e.to_string()))?;
+        let json: Value = resp
+            .body_mut()
+            .read_json()
+            .map_err(|e| ConnectionError::Http(e.to_string()))?;
+        extract_rows_from_query_response(json)
+    }
+
     fn execute_sql_sync(&self, sql: &str) -> Result<(), ConnectionError> {
         let token = self.access_token()?;
         let url = self.queries_url();
@@ -557,6 +575,51 @@ fn extract_scalar_from_query_response(json: Value) -> Result<Value, ConnectionEr
         .ok_or_else(|| ConnectionError::QueryFailed("query returned no rows".to_string()))
 }
 
+#[allow(dead_code)] // used by query_rows_sync, integrated with lazy fetch
+fn extract_rows_from_query_response(
+    json: Value,
+) -> Result<Vec<serde_json::Value>, ConnectionError> {
+    #[derive(Deserialize)]
+    struct QueryResponse {
+        schema: Option<Schema>,
+        rows: Option<Vec<Row>>,
+    }
+    #[derive(Deserialize)]
+    struct Schema {
+        fields: Vec<Field>,
+    }
+    #[derive(Deserialize)]
+    struct Field {
+        name: String,
+    }
+    #[derive(Deserialize)]
+    struct Row {
+        f: Vec<Cell>,
+    }
+    #[derive(Deserialize)]
+    struct Cell {
+        v: Value,
+    }
+
+    let resp: QueryResponse =
+        serde_json::from_value(json).map_err(|e| ConnectionError::Http(e.to_string()))?;
+    let fields = resp.schema.map(|s| s.fields).unwrap_or_default();
+    let rows = resp.rows.unwrap_or_default();
+
+    let result = rows
+        .into_iter()
+        .map(|row| {
+            let mut obj = serde_json::Map::new();
+            for (field, cell) in fields.iter().zip(row.f.into_iter()) {
+                obj.insert(field.name.clone(), cell.v);
+            }
+            Value::Object(obj)
+        })
+        .collect();
+
+    Ok(result)
+}
+
 fn check_dml_response(json: Value) -> Result<(), ConnectionError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -639,6 +702,21 @@ impl Connection for BigQueryConnection {
                 identity_env: None,
             }
             .execute_sql_sync(&sql)
+        })
+        .await
+    }
+
+    async fn query_rows(&self, sql: &str) -> Result<Vec<Value>, ConnectionError> {
+        let config = self.config.clone();
+        let agent = self.agent.clone();
+        let sql = sql.to_string();
+        super::run_blocking(move || {
+            BigQueryConnection {
+                config,
+                agent,
+                identity_env: None,
+            }
+            .query_rows_sync(&sql)
         })
         .await
     }

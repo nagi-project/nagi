@@ -1527,6 +1527,7 @@ spec:
                 method: None,
                 keyfile: None,
                 timeout: None,
+                location: None,
                 identity: Some("nonexistent".to_string()),
             },
         );

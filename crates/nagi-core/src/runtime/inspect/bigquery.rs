@@ -62,6 +62,62 @@ async fn fetch_row_count(
     }
 }
 
+/// Fetches destination jobs from BigQuery `INFORMATION_SCHEMA.JOBS_BY_PROJECT`
+/// by matching the `nagi_execution_id` job label.
+///
+/// `location` specifies the BigQuery region (e.g. "us", "asia-northeast1").
+/// If `None`, defaults to "us".
+#[allow(dead_code)] // integrated when nagi inspect performs lazy fetch
+pub async fn fetch_destination_jobs(
+    conn: &dyn Connection,
+    project: &str,
+    location: Option<&str>,
+    execution_id: &str,
+) -> Result<Vec<crate::runtime::inspect::DestinationJob>, InspectError> {
+    let project = escape_backtick(project);
+    let region = location.unwrap_or("us");
+    let region = escape_backtick(region);
+    let execution_id_lit = escape_single_quote(execution_id);
+    let sql = format!(
+        "SELECT job_id, statement_type \
+         FROM `{project}`.`region-{region}`.INFORMATION_SCHEMA.JOBS_BY_PROJECT, \
+              UNNEST(labels) AS l \
+         WHERE l.key = 'nagi_execution_id' \
+           AND l.value = '{execution_id_lit}'"
+    );
+    let rows = conn
+        .query_rows(&sql)
+        .await
+        .map_err(|e| InspectError::Connection(e.to_string()))?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(row_to_destination_job)
+        .collect())
+}
+
+fn row_to_destination_job(
+    row: serde_json::Value,
+) -> Option<crate::runtime::inspect::DestinationJob> {
+    let mut obj = match row {
+        serde_json::Value::Object(m) => m,
+        _ => return None,
+    };
+    let job_id = obj
+        .remove("job_id")
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let statement_type = obj
+        .remove("statement_type")
+        .and_then(|v| v.as_str().map(String::from));
+    let details = obj.into_iter().collect();
+    Some(crate::runtime::inspect::DestinationJob {
+        job_id,
+        statement_type,
+        details,
+    })
+}
+
 /// Builds a `PhysicalObjectState` for a BigQuery object by querying its type
 /// and row count.
 pub async fn fetch_physical_object_state(
@@ -93,6 +149,9 @@ mod tests {
 
     /// Mock Connection that returns preconfigured responses for specific SQL patterns
     /// and records all SQL statements for assertion.
+    ///
+    /// For `query_scalar`: matches pattern → returns scalar value.
+    /// For `query_rows`: matches pattern → returns value as array (if Array) or wraps in vec.
     struct MockConnection {
         responses: Vec<(String, serde_json::Value)>,
         captured_sql: std::sync::Mutex<Vec<String>>,
@@ -151,6 +210,22 @@ mod tests {
             _jsonl_path: &std::path::Path,
         ) -> Result<(), ConnectionError> {
             unimplemented!()
+        }
+
+        async fn query_rows(&self, sql: &str) -> Result<Vec<serde_json::Value>, ConnectionError> {
+            self.captured_sql.lock().unwrap().push(sql.to_string());
+            for (pattern, value) in &self.responses {
+                if sql.contains(pattern) {
+                    return match value {
+                        serde_json::Value::Array(arr) => Ok(arr.clone()),
+                        serde_json::Value::Null => Ok(Vec::new()),
+                        other => Ok(vec![other.clone()]),
+                    };
+                }
+            }
+            Err(ConnectionError::QueryFailed(format!(
+                "no mock response for: {sql}"
+            )))
         }
     }
 
@@ -281,5 +356,103 @@ mod tests {
             sql.contains("`tbl``name`"),
             "backtick in model_name should be escaped: {sql}"
         );
+    }
+
+    // ── fetch_destination_jobs ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_destination_jobs_returns_matching_jobs() {
+        let conn = MockConnection::new(vec![(
+            "INFORMATION_SCHEMA.JOBS",
+            serde_json::json!([
+                {"job_id": "bqjob_001", "statement_type": "MERGE"},
+                {"job_id": "bqjob_002", "statement_type": "INSERT"}
+            ]),
+        )]);
+        let jobs = fetch_destination_jobs(&conn, "my-project", Some("us"), "exec-001")
+            .await
+            .unwrap();
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].job_id, "bqjob_001");
+        assert_eq!(jobs[0].statement_type.as_deref(), Some("MERGE"));
+        assert_eq!(jobs[1].job_id, "bqjob_002");
+        assert_eq!(jobs[1].statement_type.as_deref(), Some("INSERT"));
+    }
+
+    #[tokio::test]
+    async fn fetch_destination_jobs_returns_empty_for_no_matches() {
+        let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
+        let jobs = fetch_destination_jobs(&conn, "my-project", Some("us"), "exec-999")
+            .await
+            .unwrap();
+        assert!(jobs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_destination_jobs_uses_location() {
+        let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
+        fetch_destination_jobs(&conn, "my-project", Some("asia-northeast1"), "exec-001")
+            .await
+            .unwrap();
+        let sql = conn.last_sql();
+        assert!(
+            sql.contains("region-asia-northeast1"),
+            "should use specified location: {sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_destination_jobs_defaults_to_us() {
+        let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
+        fetch_destination_jobs(&conn, "my-project", None, "exec-001")
+            .await
+            .unwrap();
+        let sql = conn.last_sql();
+        assert!(sql.contains("region-us"), "should default to us: {sql}");
+    }
+
+    #[tokio::test]
+    async fn fetch_destination_jobs_escapes_execution_id() {
+        let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
+        fetch_destination_jobs(&conn, "proj", Some("us"), "exec'; DROP TABLE t--")
+            .await
+            .unwrap();
+        let sql = conn.last_sql();
+        assert!(
+            sql.contains("exec''; DROP TABLE t--"),
+            "single quote in execution_id should be escaped: {sql}"
+        );
+    }
+
+    // ── row_to_destination_job ───────────────────────────────────────
+
+    #[test]
+    fn row_to_destination_job_extracts_fields() {
+        let row = serde_json::json!({
+            "job_id": "bqjob_001",
+            "statement_type": "MERGE",
+            "extra_field": 42
+        });
+        let job = row_to_destination_job(row).unwrap();
+        assert_eq!(job.job_id, "bqjob_001");
+        assert_eq!(job.statement_type.as_deref(), Some("MERGE"));
+        assert_eq!(job.details["extra_field"], 42);
+        assert!(!job.details.contains_key("job_id"));
+        assert!(!job.details.contains_key("statement_type"));
+    }
+
+    #[test]
+    fn row_to_destination_job_handles_missing_statement_type() {
+        let row = serde_json::json!({"job_id": "bqjob_002"});
+        let job = row_to_destination_job(row).unwrap();
+        assert_eq!(job.job_id, "bqjob_002");
+        assert!(job.statement_type.is_none());
+    }
+
+    #[test]
+    fn row_to_destination_job_returns_none_for_non_object() {
+        assert!(row_to_destination_job(serde_json::json!("not an object")).is_none());
+        assert!(row_to_destination_job(serde_json::json!(42)).is_none());
+        assert!(row_to_destination_job(serde_json::Value::Null).is_none());
     }
 }

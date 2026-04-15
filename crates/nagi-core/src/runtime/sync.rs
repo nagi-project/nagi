@@ -480,24 +480,22 @@ pub(crate) async fn run_sync_workflow(
 
     // --- Observation: connect once, capture pre and post ---
     let inspect_conn = connect_for_inspection(params.compiled, params.default_timeout);
-    let inspect_ctx = inspect_conn.as_ref().map(|(conn, project, dataset)| {
-        let model_name = params
-            .compiled
-            .spec
-            .model_name
-            .as_deref()
-            .unwrap_or(&params.compiled.metadata.name);
-        (
-            conn.as_ref(),
-            project.as_str(),
-            dataset.as_str(),
-            model_name,
-        )
-    });
+    let model_name_for_inspect = params
+        .compiled
+        .spec
+        .model_name
+        .as_deref()
+        .unwrap_or(&params.compiled.metadata.name);
 
-    let pre_physical = match inspect_ctx {
-        Some((conn, project, dataset, model_name)) => {
-            fetch_physical_state(conn, project, dataset, model_name).await
+    let pre_physical = match &inspect_conn {
+        Some(ic) => {
+            fetch_physical_state(
+                ic.conn.as_ref(),
+                &ic.project,
+                &ic.dataset,
+                model_name_for_inspect,
+            )
+            .await
         }
         None => None,
     };
@@ -525,9 +523,15 @@ pub(crate) async fn run_sync_workflow(
         .await;
     }
 
-    let post_physical = match inspect_ctx {
-        Some((conn, project, dataset, model_name)) => {
-            fetch_physical_state(conn, project, dataset, model_name).await
+    let post_physical = match &inspect_conn {
+        Some(ic) => {
+            fetch_physical_state(
+                ic.conn.as_ref(),
+                &ic.project,
+                &ic.dataset,
+                model_name_for_inspect,
+            )
+            .await
         }
         None => None,
     };
@@ -543,23 +547,31 @@ pub(crate) async fn run_sync_workflow(
     Ok(result)
 }
 
-/// Creates a connection and extracts BigQuery project/dataset for inspection.
+/// Resolved BigQuery connection info for inspection.
+struct BqInspectConn {
+    conn: Box<dyn crate::runtime::kind::connection::Connection>,
+    project: String,
+    dataset: String,
+    #[allow(dead_code)] // used by destination jobs lazy fetch (not yet integrated)
+    location: Option<String>,
+}
+
+/// Creates a connection and extracts BigQuery project/dataset/location for inspection.
 /// Returns `None` for non-BigQuery connections or on connection failure.
 fn connect_for_inspection(
     compiled: &CompiledAsset,
     default_timeout: std::time::Duration,
-) -> Option<(
-    Box<dyn crate::runtime::kind::connection::Connection>,
-    String,
-    String,
-)> {
+) -> Option<BqInspectConn> {
     use crate::runtime::kind::connection::ResolvedConnection;
     let resolved = compiled.connection.as_ref()?;
-    let (project, dataset) = match resolved {
+    let (project, dataset, location) = match resolved {
         #[cfg(feature = "bigquery")]
         ResolvedConnection::BigQuery {
-            project, dataset, ..
-        } => (project.clone(), dataset.clone()),
+            project,
+            dataset,
+            location,
+            ..
+        } => (project.clone(), dataset.clone(), location.clone()),
         _ => return None,
     };
     let conn = match resolved.connect(default_timeout) {
@@ -569,7 +581,12 @@ fn connect_for_inspection(
             return None;
         }
     };
-    Some((conn, project, dataset))
+    Some(BqInspectConn {
+        conn,
+        project,
+        dataset,
+        location,
+    })
 }
 
 /// Fetches the physical object state. Failures are logged as warnings.
