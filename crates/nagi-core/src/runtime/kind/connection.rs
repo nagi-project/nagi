@@ -4,6 +4,7 @@ pub mod dbt;
 pub mod duckdb;
 #[cfg(feature = "snowflake")]
 pub mod snowflake;
+mod sql;
 
 use async_trait::async_trait;
 use schemars::JsonSchema;

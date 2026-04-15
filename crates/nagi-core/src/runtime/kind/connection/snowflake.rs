@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::sql::{escape_identifier, escape_literal};
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
@@ -218,16 +219,6 @@ fn check_statement_success(resp: &StatementResponse) -> Result<(), ConnectionErr
                 "Snowflake error {code}: {msg}"
             )))
         })
-}
-
-/// Escapes double quotes for Snowflake double-quoted identifiers.
-fn escape_identifier(s: &str) -> String {
-    s.replace('"', "\"\"")
-}
-
-/// Escapes single quotes for Snowflake string literals.
-fn escape_literal(s: &str) -> String {
-    s.replace('\'', "''")
 }
 
 #[async_trait]

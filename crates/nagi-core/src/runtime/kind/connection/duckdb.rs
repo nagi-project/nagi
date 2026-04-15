@@ -1,17 +1,8 @@
 use async_trait::async_trait;
 use tokio::process::Command;
 
+use super::sql::{escape_identifier, escape_literal};
 use super::{Connection, ConnectionError};
-
-/// Escapes double quotes for DuckDB double-quoted identifiers.
-fn escape_identifier(s: &str) -> String {
-    s.replace('"', "\"\"")
-}
-
-/// Escapes single quotes for DuckDB string literals.
-fn escape_literal(s: &str) -> String {
-    s.replace('\'', "''")
-}
 
 /// DuckDB connection via the `duckdb` CLI subprocess.
 pub struct DuckDbConnection {
