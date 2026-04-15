@@ -1,6 +1,28 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
-use super::{CompileError, DependencyGraph, GraphEdge, GraphNode, ResolvedAsset};
+use serde::{Deserialize, Serialize};
+
+use super::{CompileError, ResolvedAsset};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DependencyGraph {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GraphNode {
+    pub name: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GraphEdge {
+    pub from: String,
+    pub to: String,
+}
 
 pub(super) fn build_graph(assets: &[ResolvedAsset]) -> Result<DependencyGraph, CompileError> {
     let mut nodes = Vec::new();

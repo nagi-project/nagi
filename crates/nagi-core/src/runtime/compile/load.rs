@@ -5,7 +5,7 @@ use crate::runtime::kind::{self, NagiKind};
 
 use super::{into_result, CompileError, DependencyGraph};
 
-pub fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
+pub(crate) fn load_resources(dir: &Path) -> Result<Vec<NagiKind>, CompileError> {
     if !dir.exists() {
         return Err(CompileError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,

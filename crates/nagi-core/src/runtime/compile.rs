@@ -1,30 +1,45 @@
 mod categorize;
-pub mod dbt;
+mod dbt;
 mod graph;
 mod load;
 mod output;
 mod template;
 
-pub(crate) use load::load_compiled_assets;
-pub use load::load_resources;
-pub(crate) use load::{load_graph, resolve_compiled_asset_names};
-#[allow(unused_imports)] // re-exported for external use
-pub use output::{write_output, CompiledAsset, CompiledAssetSpec};
+// Re-exports for use by other modules in the crate.
+#[allow(unused_imports)]
+pub(crate) use graph::{DependencyGraph, GraphEdge, GraphNode};
+pub(crate) use load::{
+    load_compiled_assets, load_graph, load_resources, resolve_compiled_asset_names,
+};
+pub(crate) use output::write_output;
+pub use output::CompiledAsset;
+#[allow(unused_imports)]
+pub(crate) use output::CompiledAssetSpec;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::runtime::kind::asset::{
-    self as asset, validate_no_duplicate_condition_names, AssetSpec, DesiredCondition,
+    validate_no_duplicate_condition_names, AssetSpec, DesiredCondition, OnDriftEntry,
+};
+use crate::runtime::kind::connection::{
+    connection_identity_ref, resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
 };
 use crate::runtime::kind::sync::SyncSpec;
 use crate::runtime::kind::{KindError, Metadata, NagiKind};
 
+use categorize::{categorize, CategorizedResources};
+use graph::{build_graph, collect_cycle_errors, collect_unresolved_upstream_errors};
+use template::{
+    expand_condition_templates, expand_sync_templates, require_sync_ref, warn_asset_readiness,
+    warn_multi_asset_sync,
+};
+
 #[derive(Debug, Error)]
-pub enum CompileError {
+pub(crate) enum CompileError {
     #[error("failed to read assets directory: {0}")]
     Io(#[from] std::io::Error),
 
@@ -77,34 +92,14 @@ fn into_result(errors: Vec<CompileError>) -> Result<(), CompileError> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DependencyGraph {
-    pub nodes: Vec<GraphNode>,
-    pub edges: Vec<GraphEdge>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GraphNode {
-    pub name: String,
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub labels: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GraphEdge {
-    pub from: String,
-    pub to: String,
-}
-
 #[derive(Debug)]
-pub struct CompileOutput {
+pub(crate) struct CompileOutput {
     pub assets: Vec<ResolvedAsset>,
     pub graph: DependencyGraph,
 }
 
 #[derive(Debug, Clone)]
-pub struct ResolvedAsset {
+pub(crate) struct ResolvedAsset {
     pub metadata: Metadata,
     /// Original model name without the Origin prefix.
     /// For Origin-generated Assets this is the dbt model name (e.g. "orders").
@@ -121,7 +116,7 @@ pub struct ResolvedAsset {
 /// A compiled on_drift entry with resolved conditions and sync spec.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolvedOnDriftEntry {
+pub(crate) struct ResolvedOnDriftEntry {
     /// Resolved conditions from the referenced Conditions.
     pub conditions: Vec<DesiredCondition>,
     /// Name of the conditions group (for display/logging).
@@ -134,7 +129,7 @@ pub struct ResolvedOnDriftEntry {
 
 /// Compiles all YAML resources from `resources_dir` and writes resolved output to `target_dir`.
 /// When `export_config` is provided, auto-generates export Assets for log tables.
-pub fn compile(
+pub(crate) fn compile(
     resources_dir: &Path,
     target_dir: &Path,
     export_config: Option<&crate::runtime::config::ExportConfig>,
@@ -166,18 +161,8 @@ pub fn compile(
     Ok(output)
 }
 
-use crate::runtime::kind::connection::{
-    connection_identity_ref, resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
-};
-
-use categorize::{categorize, CategorizedResources};
-use template::{
-    expand_condition_templates, expand_sync_templates, require_sync_ref, warn_asset_readiness,
-    warn_multi_asset_sync,
-};
-
 /// Resolves all references and builds the dependency graph.
-pub fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
+pub(crate) fn resolve(resources: Vec<NagiKind>) -> Result<CompileOutput, CompileError> {
     let mut categorized = categorize(resources)?;
 
     categorized
@@ -347,7 +332,7 @@ fn warn_unsupported_identity_connections(resources: &CategorizedResources) {
 fn resolve_on_drift(
     asset_name: &str,
     model_name: &str,
-    on_drift: &[asset::OnDriftEntry],
+    on_drift: &[OnDriftEntry],
     conditions_groups: &HashMap<String, Vec<DesiredCondition>>,
     syncs: &HashMap<String, SyncSpec>,
 ) -> Result<Vec<ResolvedOnDriftEntry>, CompileError> {
@@ -395,14 +380,12 @@ fn resolve_on_drift(
     Ok(resolved)
 }
 
-use graph::{build_graph, collect_cycle_errors, collect_unresolved_upstream_errors};
-
 #[cfg(test)]
 mod tests {
     use super::template::{check_readiness_warning, ReadinessWarning};
     use super::*;
     use crate::runtime::kind;
-    use crate::runtime::kind::asset::OnDriftEntry;
+    use crate::runtime::kind::asset::{MergePosition, OnDriftEntry};
     use crate::runtime::kind::parse_kinds;
     use crate::runtime::kind::sync::SyncStep;
     use tempfile::TempDir;
@@ -629,11 +612,11 @@ spec:
 
     #[test]
     fn resolve_on_drift_expands_conditions_and_templates() {
-        let entry = asset::OnDriftEntry {
+        let entry = OnDriftEntry {
             conditions: "daily-sla".to_string(),
             sync: "dbt-run".to_string(),
             with: HashMap::new(),
-            merge_position: asset::MergePosition::BeforeOrigin,
+            merge_position: MergePosition::BeforeOrigin,
         };
         let result = resolve_on_drift(
             "daily-sales",
@@ -654,11 +637,11 @@ spec:
 
     #[test]
     fn resolve_on_drift_rejects_missing_conditions_ref() {
-        let entry = asset::OnDriftEntry {
+        let entry = OnDriftEntry {
             conditions: "nonexistent".to_string(),
             sync: "dbt-run".to_string(),
             with: HashMap::new(),
-            merge_position: asset::MergePosition::BeforeOrigin,
+            merge_position: MergePosition::BeforeOrigin,
         };
         let err =
             resolve_on_drift("a", "a", &[entry], &HashMap::new(), &sample_syncs()).unwrap_err();
@@ -667,11 +650,11 @@ spec:
 
     #[test]
     fn resolve_on_drift_rejects_missing_sync_ref() {
-        let entry = asset::OnDriftEntry {
+        let entry = OnDriftEntry {
             conditions: "daily-sla".to_string(),
             sync: "nonexistent".to_string(),
             with: HashMap::new(),
-            merge_position: asset::MergePosition::BeforeOrigin,
+            merge_position: MergePosition::BeforeOrigin,
         };
         let err = resolve_on_drift("a", "a", &[entry], &sample_conditions(), &HashMap::new())
             .unwrap_err();
@@ -705,17 +688,17 @@ spec:
             ),
         ]);
         let entries = vec![
-            asset::OnDriftEntry {
+            OnDriftEntry {
                 conditions: "group-a".to_string(),
                 sync: "dbt-run".to_string(),
                 with: HashMap::new(),
-                merge_position: asset::MergePosition::BeforeOrigin,
+                merge_position: MergePosition::BeforeOrigin,
             },
-            asset::OnDriftEntry {
+            OnDriftEntry {
                 conditions: "group-b".to_string(),
                 sync: "dbt-run".to_string(),
                 with: HashMap::new(),
-                merge_position: asset::MergePosition::BeforeOrigin,
+                merge_position: MergePosition::BeforeOrigin,
             },
         ];
         let err = resolve_on_drift("a", "a", &entries, &conditions, &sample_syncs()).unwrap_err();
@@ -743,11 +726,11 @@ spec:
                 identity: None,
             },
         )]);
-        let entry = asset::OnDriftEntry {
+        let entry = OnDriftEntry {
             conditions: "daily-sla".to_string(),
             sync: "dbt-run".to_string(),
             with: HashMap::from([("selector".to_string(), "+daily_sales".to_string())]),
-            merge_position: asset::MergePosition::BeforeOrigin,
+            merge_position: MergePosition::BeforeOrigin,
         };
         let result = resolve_on_drift(
             "daily-sales",
@@ -777,11 +760,11 @@ spec:
                 identity: None,
             }],
         )]);
-        let entry = asset::OnDriftEntry {
+        let entry = OnDriftEntry {
             conditions: "export-drift".to_string(),
             sync: "dbt-run".to_string(),
             with: HashMap::from([("table".to_string(), "evaluate_logs".to_string())]),
-            merge_position: asset::MergePosition::BeforeOrigin,
+            merge_position: MergePosition::BeforeOrigin,
         };
         let result = resolve_on_drift(
             "nagi-export-evaluate_logs",
@@ -820,11 +803,11 @@ spec:
             },
         )]);
         // Origin-generated Asset: model_name differs from asset name
-        let entry = asset::OnDriftEntry {
+        let entry = OnDriftEntry {
             conditions: "daily-sla".to_string(),
             sync: "dbt-run".to_string(),
             with: HashMap::new(),
-            merge_position: asset::MergePosition::BeforeOrigin,
+            merge_position: MergePosition::BeforeOrigin,
         };
         let result = resolve_on_drift(
             "my-dbt.orders",
@@ -1510,17 +1493,17 @@ spec:
     #[test]
     fn resolve_on_drift_accumulates_missing_conditions_and_sync() {
         let entries = vec![
-            asset::OnDriftEntry {
+            OnDriftEntry {
                 conditions: "missing-cond".to_string(),
                 sync: "dbt-run".to_string(),
                 with: HashMap::new(),
-                merge_position: asset::MergePosition::BeforeOrigin,
+                merge_position: MergePosition::BeforeOrigin,
             },
-            asset::OnDriftEntry {
+            OnDriftEntry {
                 conditions: "daily-sla".to_string(),
                 sync: "missing-sync".to_string(),
                 with: HashMap::new(),
-                merge_position: asset::MergePosition::BeforeOrigin,
+                merge_position: MergePosition::BeforeOrigin,
             },
         ];
         let err = resolve_on_drift("a", "a", &entries, &sample_conditions(), &sample_syncs())

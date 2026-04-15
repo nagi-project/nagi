@@ -7,7 +7,7 @@ use crate::runtime::compile::load_compiled_assets;
 use crate::runtime::compile::CompiledAsset;
 
 #[derive(Debug, Error)]
-pub enum LsError {
+pub(crate) enum LsError {
     #[error(transparent)]
     Compile(#[from] crate::runtime::compile::CompileError),
 

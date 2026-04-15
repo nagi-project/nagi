@@ -50,7 +50,7 @@ pub struct CompiledAsset {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CompiledAssetSpec {
+pub(crate) struct CompiledAssetSpec {
     #[serde(default)]
     pub upstreams: Vec<String>,
     #[serde(default)]
@@ -74,7 +74,7 @@ fn default_true() -> bool {
     true
 }
 
-pub fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), CompileError> {
+pub(crate) fn write_output(output: &CompileOutput, target_dir: &Path) -> Result<(), CompileError> {
     let assets_dir = target_dir.join("assets");
     std::fs::create_dir_all(&assets_dir)?;
 

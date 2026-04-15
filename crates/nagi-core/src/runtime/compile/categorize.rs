@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::runtime::kind::asset::{self as asset, AssetSpec, DesiredCondition};
+use crate::runtime::kind::asset::{merge_on_drift_entries, AssetSpec, DesiredCondition};
 use crate::runtime::kind::connection::ConnectionSpec;
 use crate::runtime::kind::sync::SyncSpec;
 use crate::runtime::kind::{self, Metadata, NagiKind};
@@ -65,7 +65,7 @@ pub(super) fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResource
                     if check_dup_collect(&mut seen, &mut errors, kind, name) {
                         let overlay = std::mem::take(&mut result.assets[idx].1.on_drift);
                         result.assets[idx].1.on_drift =
-                            asset::merge_on_drift_entries(overlay, spec.on_drift);
+                            merge_on_drift_entries(overlay, spec.on_drift);
                     }
                 } else {
                     asset_indices.insert(name, result.assets.len());
