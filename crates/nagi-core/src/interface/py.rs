@@ -416,12 +416,24 @@ fn format_inspect_text(json_str: &str) -> PyResult<String> {
 }
 
 /// Lists recent inspections for an asset as JSON.
+/// If `target_dir` is provided, attempts to backfill empty destination_jobs
+/// from BigQuery INFORMATION_SCHEMA.JOBS.
 #[pyfunction]
-#[pyo3(signature = (asset_name, last=5))]
-fn list_inspections(asset_name: &str, last: usize) -> PyResult<String> {
+#[pyo3(signature = (asset_name, last=5, target_dir=None))]
+fn list_inspections(asset_name: &str, last: usize, target_dir: Option<&str>) -> PyResult<String> {
     let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
     let store = crate::runtime::inspect::InspectionStore::new(nagi_dir.root());
-    let inspections = store.list(asset_name, last).map_err(to_py_err)?;
+    let mut inspections = store.list(asset_name, last).map_err(to_py_err)?;
+
+    if let Some(td) = target_dir {
+        TOKIO_RT.block_on(crate::interface::inspect::backfill_destination_jobs(
+            &store,
+            &mut inspections,
+            std::path::Path::new(td),
+            asset_name,
+        ));
+    }
+
     serde_json::to_string(&inspections).map_err(to_py_err)
 }
 
