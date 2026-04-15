@@ -18,12 +18,12 @@
 
 mod controller;
 mod graph;
-pub mod guardrail;
-pub mod queue;
+mod guardrail;
+mod queue;
 mod reconciler;
-pub mod scheduler;
-pub mod state;
-pub mod suspended;
+mod scheduler;
+mod state;
+mod suspended;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
