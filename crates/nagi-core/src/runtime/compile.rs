@@ -387,7 +387,7 @@ mod tests {
     use crate::runtime::kind;
     use crate::runtime::kind::asset::{MergePosition, OnDriftEntry};
     use crate::runtime::kind::parse_kinds;
-    use crate::runtime::kind::sync::SyncStep;
+    use crate::runtime::kind::sync::{StepType, SyncStep};
     use tempfile::TempDir;
 
     // ── YAML fragments ──────────────────────────────────────────────────
@@ -488,17 +488,7 @@ spec:
     }
 
     fn sample_sync_spec() -> SyncSpec {
-        SyncSpec {
-            pre: None,
-            run: crate::runtime::kind::sync::SyncStep {
-                step_type: crate::runtime::kind::sync::StepType::Command,
-                args: vec!["true".to_string()],
-                env: HashMap::new(),
-                identity: None,
-            },
-            post: None,
-            identity: None,
-        }
+        sync_spec_with_args(&["true"])
     }
 
     fn resolved_entry_with_conditions(conditions: Vec<DesiredCondition>) -> ResolvedOnDriftEntry {
@@ -508,6 +498,42 @@ spec:
             sync: sample_sync_spec(),
             sync_ref_name: "sync".to_string(),
         }
+    }
+
+    fn drift(conditions: &str, sync: &str) -> OnDriftEntry {
+        OnDriftEntry {
+            conditions: conditions.to_string(),
+            sync: sync.to_string(),
+            with: HashMap::new(),
+            merge_position: MergePosition::BeforeOrigin,
+        }
+    }
+
+    fn drift_with(conditions: &str, sync: &str, with: HashMap<String, String>) -> OnDriftEntry {
+        OnDriftEntry {
+            conditions: conditions.to_string(),
+            sync: sync.to_string(),
+            with,
+            merge_position: MergePosition::BeforeOrigin,
+        }
+    }
+
+    fn sync_spec_with_args(args: &[&str]) -> SyncSpec {
+        SyncSpec {
+            pre: None,
+            run: SyncStep {
+                step_type: StepType::Command,
+                args: args.iter().map(|s| s.to_string()).collect(),
+                env: HashMap::new(),
+                identity: None,
+            },
+            post: None,
+            identity: None,
+        }
+    }
+
+    fn syncs_map(name: &str, args: &[&str]) -> HashMap<String, SyncSpec> {
+        HashMap::from([(name.to_string(), sync_spec_with_args(args))])
     }
 
     macro_rules! check_readiness_warning_test {
@@ -583,25 +609,7 @@ spec:
     }
 
     fn sample_syncs() -> HashMap<String, SyncSpec> {
-        HashMap::from([(
-            "dbt-run".to_string(),
-            SyncSpec {
-                pre: None,
-                run: crate::runtime::kind::sync::SyncStep {
-                    step_type: crate::runtime::kind::sync::StepType::Command,
-                    args: vec![
-                        "dbt".to_string(),
-                        "run".to_string(),
-                        "--select".to_string(),
-                        "{{ asset.name }}".to_string(),
-                    ],
-                    env: HashMap::new(),
-                    identity: None,
-                },
-                post: None,
-                identity: None,
-            },
-        )])
+        syncs_map("dbt-run", &["dbt", "run", "--select", "{{ asset.name }}"])
     }
 
     #[test]
@@ -612,16 +620,10 @@ spec:
 
     #[test]
     fn resolve_on_drift_expands_conditions_and_templates() {
-        let entry = OnDriftEntry {
-            conditions: "daily-sla".to_string(),
-            sync: "dbt-run".to_string(),
-            with: HashMap::new(),
-            merge_position: MergePosition::BeforeOrigin,
-        };
         let result = resolve_on_drift(
             "daily-sales",
             "daily-sales",
-            &[entry],
+            &[drift("daily-sla", "dbt-run")],
             &sample_conditions(),
             &sample_syncs(),
         )
@@ -637,27 +639,27 @@ spec:
 
     #[test]
     fn resolve_on_drift_rejects_missing_conditions_ref() {
-        let entry = OnDriftEntry {
-            conditions: "nonexistent".to_string(),
-            sync: "dbt-run".to_string(),
-            with: HashMap::new(),
-            merge_position: MergePosition::BeforeOrigin,
-        };
-        let err =
-            resolve_on_drift("a", "a", &[entry], &HashMap::new(), &sample_syncs()).unwrap_err();
+        let err = resolve_on_drift(
+            "a",
+            "a",
+            &[drift("nonexistent", "dbt-run")],
+            &HashMap::new(),
+            &sample_syncs(),
+        )
+        .unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, .. } if kind == "Conditions"));
     }
 
     #[test]
     fn resolve_on_drift_rejects_missing_sync_ref() {
-        let entry = OnDriftEntry {
-            conditions: "daily-sla".to_string(),
-            sync: "nonexistent".to_string(),
-            with: HashMap::new(),
-            merge_position: MergePosition::BeforeOrigin,
-        };
-        let err = resolve_on_drift("a", "a", &[entry], &sample_conditions(), &HashMap::new())
-            .unwrap_err();
+        let err = resolve_on_drift(
+            "a",
+            "a",
+            &[drift("daily-sla", "nonexistent")],
+            &sample_conditions(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
         assert!(matches!(err, CompileError::UnresolvedRef { kind, .. } if kind == "Sync"));
     }
 
@@ -687,51 +689,22 @@ spec:
                 }],
             ),
         ]);
-        let entries = vec![
-            OnDriftEntry {
-                conditions: "group-a".to_string(),
-                sync: "dbt-run".to_string(),
-                with: HashMap::new(),
-                merge_position: MergePosition::BeforeOrigin,
-            },
-            OnDriftEntry {
-                conditions: "group-b".to_string(),
-                sync: "dbt-run".to_string(),
-                with: HashMap::new(),
-                merge_position: MergePosition::BeforeOrigin,
-            },
-        ];
+        let entries = vec![drift("group-a", "dbt-run"), drift("group-b", "dbt-run")];
         let err = resolve_on_drift("a", "a", &entries, &conditions, &sample_syncs()).unwrap_err();
         assert!(matches!(err, CompileError::Kind(_)));
     }
 
     #[test]
     fn resolve_on_drift_with_variables() {
-        let syncs = HashMap::from([(
-            "dbt-run".to_string(),
-            SyncSpec {
-                pre: None,
-                run: crate::runtime::kind::sync::SyncStep {
-                    step_type: crate::runtime::kind::sync::StepType::Command,
-                    args: vec![
-                        "dbt".to_string(),
-                        "run".to_string(),
-                        "--select".to_string(),
-                        "{{ sync.selector }}".to_string(),
-                    ],
-                    env: HashMap::new(),
-                    identity: None,
-                },
-                post: None,
-                identity: None,
-            },
-        )]);
-        let entry = OnDriftEntry {
-            conditions: "daily-sla".to_string(),
-            sync: "dbt-run".to_string(),
-            with: HashMap::from([("selector".to_string(), "+daily_sales".to_string())]),
-            merge_position: MergePosition::BeforeOrigin,
-        };
+        let syncs = syncs_map(
+            "dbt-run",
+            &["dbt", "run", "--select", "{{ sync.selector }}"],
+        );
+        let entry = drift_with(
+            "daily-sla",
+            "dbt-run",
+            HashMap::from([("selector".to_string(), "+daily_sales".to_string())]),
+        );
         let result = resolve_on_drift(
             "daily-sales",
             "daily-sales",
@@ -760,12 +733,11 @@ spec:
                 identity: None,
             }],
         )]);
-        let entry = OnDriftEntry {
-            conditions: "export-drift".to_string(),
-            sync: "dbt-run".to_string(),
-            with: HashMap::from([("table".to_string(), "evaluate_logs".to_string())]),
-            merge_position: MergePosition::BeforeOrigin,
-        };
+        let entry = drift_with(
+            "export-drift",
+            "dbt-run",
+            HashMap::from([("table".to_string(), "evaluate_logs".to_string())]),
+        );
         let result = resolve_on_drift(
             "nagi-export-evaluate_logs",
             "nagi-export-evaluate_logs",
@@ -783,36 +755,15 @@ spec:
 
     #[test]
     fn resolve_on_drift_expands_model_name_template() {
-        let syncs = HashMap::from([(
-            "dbt-run".to_string(),
-            SyncSpec {
-                pre: None,
-                run: crate::runtime::kind::sync::SyncStep {
-                    step_type: crate::runtime::kind::sync::StepType::Command,
-                    args: vec![
-                        "dbt".to_string(),
-                        "run".to_string(),
-                        "--select".to_string(),
-                        "{{ asset.modelName }}".to_string(),
-                    ],
-                    env: HashMap::new(),
-                    identity: None,
-                },
-                post: None,
-                identity: None,
-            },
-        )]);
+        let syncs = syncs_map(
+            "dbt-run",
+            &["dbt", "run", "--select", "{{ asset.modelName }}"],
+        );
         // Origin-generated Asset: model_name differs from asset name
-        let entry = OnDriftEntry {
-            conditions: "daily-sla".to_string(),
-            sync: "dbt-run".to_string(),
-            with: HashMap::new(),
-            merge_position: MergePosition::BeforeOrigin,
-        };
         let result = resolve_on_drift(
             "my-dbt.orders",
             "orders",
-            &[entry],
+            &[drift("daily-sla", "dbt-run")],
             &sample_conditions(),
             &syncs,
         )
@@ -1493,18 +1444,8 @@ spec:
     #[test]
     fn resolve_on_drift_accumulates_missing_conditions_and_sync() {
         let entries = vec![
-            OnDriftEntry {
-                conditions: "missing-cond".to_string(),
-                sync: "dbt-run".to_string(),
-                with: HashMap::new(),
-                merge_position: MergePosition::BeforeOrigin,
-            },
-            OnDriftEntry {
-                conditions: "daily-sla".to_string(),
-                sync: "missing-sync".to_string(),
-                with: HashMap::new(),
-                merge_position: MergePosition::BeforeOrigin,
-            },
+            drift("missing-cond", "dbt-run"),
+            drift("daily-sla", "missing-sync"),
         ];
         let err = resolve_on_drift("a", "a", &entries, &sample_conditions(), &sample_syncs())
             .unwrap_err();
