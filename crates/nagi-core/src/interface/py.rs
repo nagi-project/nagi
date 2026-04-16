@@ -418,12 +418,23 @@ fn format_inspect_text(json_str: &str) -> PyResult<String> {
 /// Lists recent inspections for an asset as JSON.
 /// If `target_dir` is provided, attempts to backfill empty destination_jobs
 /// from BigQuery INFORMATION_SCHEMA.JOBS.
+/// If `changed_only` is true, returns only inspections where before_sync
+/// differs from after_sync.
 #[pyfunction]
-#[pyo3(signature = (asset_name, last=5, target_dir=None))]
-fn list_inspections(asset_name: &str, last: usize, target_dir: Option<&str>) -> PyResult<String> {
+#[pyo3(signature = (asset_name, limit=5, target_dir=None, changed_only=false))]
+fn list_inspections(
+    asset_name: &str,
+    limit: usize,
+    target_dir: Option<&str>,
+    changed_only: bool,
+) -> PyResult<String> {
     let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
     let store = crate::runtime::inspect::InspectionStore::new(nagi_dir.root());
-    let mut inspections = store.list(asset_name, last).map_err(to_py_err)?;
+    let mut inspections = if changed_only {
+        store.list_changed(asset_name, limit).map_err(to_py_err)?
+    } else {
+        store.list(asset_name, limit).map_err(to_py_err)?
+    };
 
     if let Some(td) = target_dir {
         TOKIO_RT.block_on(crate::interface::inspect::backfill_destination_jobs(

@@ -157,6 +157,16 @@ mod tests {
         }
     }
 
+    const TEST_FINISHED_AT: &str = "2026-04-16T09:30:00.000Z";
+
+    fn new_inspection(execution_id: &str, asset_name: &str) -> SyncInspection {
+        SyncInspection::new(
+            execution_id.to_string(),
+            asset_name.to_string(),
+            TEST_FINISHED_AT.to_string(),
+        )
+    }
+
     fn conn_info_with(conn: MockConn) -> BqConnInfo {
         BqConnInfo {
             conn: Box::new(conn),
@@ -172,7 +182,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
         let mut inspections = vec![{
-            let mut i = SyncInspection::new("exec-001".to_string(), "a".to_string());
+            let mut i = new_inspection("exec-001", "a");
             i.destination_jobs = vec![DestinationJob {
                 job_id: "existing".to_string(),
                 statement_type: None,
@@ -189,7 +199,7 @@ mod tests {
     async fn backfill_skips_when_connection_not_resolved() {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
-        let mut inspections = vec![SyncInspection::new("exec-001".to_string(), "a".to_string())];
+        let mut inspections = vec![new_inspection("exec-001", "a")];
         backfill_destination_jobs(&store, &mut inspections, dir.path(), "a").await;
         assert!(inspections[0].destination_jobs.is_empty());
     }
@@ -201,8 +211,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
         let mut inspections = vec![
-            SyncInspection::new("exec-001".to_string(), "my-asset".to_string()),
-            SyncInspection::new("exec-002".to_string(), "my-asset".to_string()),
+            new_inspection("exec-001", "my-asset"),
+            new_inspection("exec-002", "my-asset"),
         ];
         for i in &inspections {
             store.write(i).unwrap();
@@ -229,13 +239,13 @@ mod tests {
     async fn backfill_with_connection_skips_already_filled() {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
-        let mut filled = SyncInspection::new("exec-001".to_string(), "my-asset".to_string());
+        let mut filled = new_inspection("exec-001", "my-asset");
         filled.destination_jobs = vec![DestinationJob {
             job_id: "original".to_string(),
             statement_type: None,
             details: HashMap::new(),
         }];
-        let empty = SyncInspection::new("exec-002".to_string(), "my-asset".to_string());
+        let empty = new_inspection("exec-002", "my-asset");
         store.write(&empty).unwrap();
         let mut inspections = vec![filled, empty];
 
@@ -255,7 +265,7 @@ mod tests {
     async fn fetch_and_save_jobs_writes_to_store() {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
-        let mut inspection = SyncInspection::new("exec-001".to_string(), "my-asset".to_string());
+        let mut inspection = new_inspection("exec-001", "my-asset");
         store.write(&inspection).unwrap();
 
         let conn_info = conn_info_with(MockConn::with_jobs(vec![serde_json::json!({
@@ -276,7 +286,7 @@ mod tests {
     async fn fetch_and_save_jobs_does_not_write_when_empty() {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
-        let mut inspection = SyncInspection::new("exec-001".to_string(), "my-asset".to_string());
+        let mut inspection = new_inspection("exec-001", "my-asset");
 
         let conn_info = conn_info_with(MockConn::empty());
         fetch_and_save_jobs(&store, &mut inspection, &conn_info).await;

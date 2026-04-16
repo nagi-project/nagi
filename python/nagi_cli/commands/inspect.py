@@ -7,16 +7,22 @@ from nagi_cli.output import OUTPUT_FORMATS, echo_output
 @click.command()
 @click.argument("asset_name")
 @click.option(
-    "--last",
+    "--limit",
     default=5,
     show_default=True,
-    help="Number of most recent sync executions to show.",
+    help="Maximum number of recent sync executions to show.",
 )
 @click.option(
     "--target-dir",
     default="target",
     show_default=True,
     help="Directory containing compiled output.",
+)
+@click.option(
+    "--changed-only",
+    is_flag=True,
+    default=False,
+    help="Show only executions where state changed between before and after Sync.",
 )
 @click.option(
     "--output",
@@ -34,12 +40,13 @@ from nagi_cli.output import OUTPUT_FORMATS, echo_output
 )
 def inspect(
     asset_name: str,
-    last: int,
+    limit: int,
     target_dir: str,
+    changed_only: bool,
     output_format: str,
     no_pager: bool,
 ) -> None:
     """Show sync execution inspection records for an asset."""
-    json_str = list_inspections(asset_name, last, target_dir)
+    json_str = list_inspections(asset_name, limit, target_dir, changed_only)
     output = format_inspect_text(json_str) if output_format == "text" else json_str
     echo_output(output, no_pager=no_pager)

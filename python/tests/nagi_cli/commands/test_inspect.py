@@ -22,28 +22,24 @@ def inspection_dir(nagi_dir: Path) -> Path:
 def _write_inspection(
     inspection_dir: Path,
     execution_id: str,
+    finished_at: str = "20260416T093000.000Z",
+    changed: bool = True,
 ) -> Path:
-    data = {
-        "schema_version": 1,
-        "execution_id": execution_id,
-        "asset_name": "daily-sales",
-        "before_sync": {
-            "evaluations": [
-                {
-                    "name": "freshness-24h",
-                    "status": {
-                        "state": "drifted",
-                        "reason": "age 30h",
-                    },
-                    "detail": {"age_hours": 30},
-                }
-            ],
-            "physical_object": {
-                "object_type": "BASE TABLE",
-                "metrics": {"row_count": 1000},
-            },
+    before = {
+        "evaluations": [
+            {
+                "name": "freshness-24h",
+                "status": {"state": "drifted", "reason": "age 30h"},
+                "detail": {"age_hours": 30},
+            }
+        ],
+        "physical_object": {
+            "object_type": "BASE TABLE",
+            "metrics": {"row_count": 1000},
         },
-        "after_sync": {
+    }
+    after = (
+        {
             "evaluations": [
                 {
                     "name": "freshness-24h",
@@ -55,10 +51,21 @@ def _write_inspection(
                 "object_type": "BASE TABLE",
                 "metrics": {"row_count": 1500},
             },
-        },
+        }
+        if changed
+        else before
+    )
+    data = {
+        "schema_version": 1,
+        "execution_id": execution_id,
+        "asset_name": "daily-sales",
+        "finished_at": "2026-04-16T09:30:00.000Z",
+        "before_sync": before,
+        "after_sync": after,
         "destination_jobs": [],
     }
-    path = inspection_dir / f"{execution_id}.json"
+    flag = "changed" if changed else "nochange"
+    path = inspection_dir / f"{finished_at}_{flag}.{execution_id}.json"
     path.write_text(json.dumps(data))
     return path
 
@@ -99,6 +106,66 @@ class TestInspectCommand:
         assert "daily-sales" in result.output
         assert "exec-001" in result.output
         assert "BASE TABLE" in result.output
+
+    def test_limit_restricts_output(
+        self,
+        nagi_dir: Path,
+        inspection_dir: Path,
+    ) -> None:
+        for i in range(1, 6):
+            _write_inspection(
+                inspection_dir,
+                f"exec-{i:03d}",
+                finished_at=f"20260416T09300{i}.000Z",
+            )
+        runner = CliRunner()
+        result = runner.invoke(
+            inspect,
+            ["daily-sales", "--limit", "2", "--output", "json", "--no-pager"],
+            catch_exceptions=False,
+            env={"HOME": str(nagi_dir.parent)},
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert len(data) == 2
+        assert data[0]["execution_id"] == "exec-004"
+        assert data[1]["execution_id"] == "exec-005"
+
+    def test_changed_only(
+        self,
+        nagi_dir: Path,
+        inspection_dir: Path,
+    ) -> None:
+        _write_inspection(
+            inspection_dir,
+            "exec-001",
+            finished_at="20260416T093001.000Z",
+            changed=True,
+        )
+        _write_inspection(
+            inspection_dir,
+            "exec-002",
+            finished_at="20260416T093002.000Z",
+            changed=False,
+        )
+        _write_inspection(
+            inspection_dir,
+            "exec-003",
+            finished_at="20260416T093003.000Z",
+            changed=True,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            inspect,
+            ["daily-sales", "--changed-only", "--output", "json", "--no-pager"],
+            catch_exceptions=False,
+            env={"HOME": str(nagi_dir.parent)},
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert len(data) == 2
+        assert data[0]["execution_id"] == "exec-001"
+        assert data[1]["execution_id"] == "exec-003"
 
     def test_empty_asset(self, nagi_dir: Path) -> None:
         runner = CliRunner()
