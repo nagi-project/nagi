@@ -437,11 +437,13 @@ fn list_inspections(
     };
 
     if let Some(td) = target_dir {
+        let default_timeout = crate::runtime::config::resolve_default_timeout();
         TOKIO_RT.block_on(crate::interface::inspect::backfill_destination_jobs(
             &store,
             &mut inspections,
             std::path::Path::new(td),
             asset_name,
+            default_timeout,
         ));
     }
 

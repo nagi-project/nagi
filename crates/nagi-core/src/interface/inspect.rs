@@ -17,13 +17,14 @@ pub async fn backfill_destination_jobs(
     inspections: &mut [SyncInspection],
     target_dir: &Path,
     asset_name: &str,
+    default_timeout: std::time::Duration,
 ) {
     let needs_backfill = inspections.iter().any(|i| i.destination_jobs.is_empty());
     if !needs_backfill {
         return;
     }
 
-    let conn_info = match resolve_bq_connection(target_dir, asset_name) {
+    let conn_info = match resolve_bq_connection(target_dir, asset_name, default_timeout) {
         Some(info) => info,
         None => return,
     };
@@ -84,7 +85,11 @@ struct BqConnInfo {
     location: Option<String>,
 }
 
-fn resolve_bq_connection(target_dir: &Path, asset_name: &str) -> Option<BqConnInfo> {
+fn resolve_bq_connection(
+    target_dir: &Path,
+    asset_name: &str,
+    default_timeout: std::time::Duration,
+) -> Option<BqConnInfo> {
     let assets = load_compiled_assets(target_dir, &[asset_name], &[]).ok()?;
     let (_, yaml) = assets.into_iter().next()?;
     let compiled: CompiledAsset = serde_yaml::from_str(&yaml).ok()?;
@@ -95,7 +100,7 @@ fn resolve_bq_connection(target_dir: &Path, asset_name: &str) -> Option<BqConnIn
         project, location, ..
     } = resolved
     {
-        let conn = resolved.connect().ok()?;
+        let conn = resolved.connect(default_timeout).ok()?;
         return Some(BqConnInfo {
             conn,
             project: project.clone(),
@@ -190,7 +195,14 @@ mod tests {
             }];
             i
         }];
-        backfill_destination_jobs(&store, &mut inspections, Path::new("/nonexistent"), "a").await;
+        backfill_destination_jobs(
+            &store,
+            &mut inspections,
+            Path::new("/nonexistent"),
+            "a",
+            std::time::Duration::from_secs(30),
+        )
+        .await;
         assert_eq!(inspections[0].destination_jobs.len(), 1);
         assert_eq!(inspections[0].destination_jobs[0].job_id, "existing");
     }
@@ -200,7 +212,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
         let mut inspections = vec![new_inspection("exec-001", "a")];
-        backfill_destination_jobs(&store, &mut inspections, dir.path(), "a").await;
+        backfill_destination_jobs(
+            &store,
+            &mut inspections,
+            dir.path(),
+            "a",
+            std::time::Duration::from_secs(30),
+        )
+        .await;
         assert!(inspections[0].destination_jobs.is_empty());
     }
 

@@ -22,6 +22,7 @@
 | `serve resume` | 停止した Asset を再開する |
 | `serve halt` | 全 Asset を一括停止する |
 | `export` | 実行ログをデータウェアハウス にエクスポートする |
+| `inspect` | Sync 実行の前後の状態変化を表示する |
 | `mcp` | MCP サーバーを stdio で起動する |
 
 ## Global options
@@ -175,6 +176,27 @@ nagi export [OPTIONS]
 | --- | --- | --- |
 | `--select` | — | エクスポート対象のテーブル名を指定（`evaluate_logs`, `sync_logs`, `sync_evaluations`） |
 | `--dry-run` | — | 未エクスポートの行数を表示（転送は行わない） |
+
+## inspect
+
+Sync 実行の前後の状態変化を表示します。
+
+- 条件評価結果（Ready / Drifted）
+- 行数とオブジェクト種別（テーブル、ビューなど）
+
+```bash
+nagi inspect <ASSET_NAME> [OPTIONS]
+```
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--limit` | `5` | 表示する最大件数 |
+| `--changed-only` | — | 状態が変化した実行のみ表示 |
+| `--target-dir` | `target` | コンパイル済みディレクトリ |
+| `--output` | `text` | 出力形式（`json`, `text`） |
+| `--no-pager` | — | ページャーを無効にする |
+
+観測データは `<nagiDir>/inspections/<asset-name>/` にキャッシュされます。
 
 ## mcp
 

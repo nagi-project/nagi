@@ -40,6 +40,7 @@ BigQuery REST API connection.
 | `keyfile` | string | — | - | Path to the service account JSON key file. Required when `method` is `service-account`. |
 | `method` | string | — | - | Authentication method. `oauth` (Application Default Credentials) or `service-account`. Defaults to `oauth`. |
 | `timeout` | Duration | — | - | Query timeout (e.g. "30s", "1h"). Falls back to `NagiConfig::default_timeout` when omitted. |
+| `location` | string | — | - | BigQuery region (e.g. `us`, `asia-northeast1`). Used for `INFORMATION_SCHEMA` queries by `nagi inspect`. |
 
 ### type: DuckDB
 
