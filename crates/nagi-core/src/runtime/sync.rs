@@ -536,10 +536,12 @@ pub(crate) async fn run_sync_workflow(
         None => None,
     };
 
+    let finished_at = chrono::Utc::now().to_rfc3339();
     write_inspection(
         params.nagi_dir,
         &params.compiled.metadata.name,
         &result.execution_id,
+        &finished_at,
         pre_physical,
         post_physical,
     );
@@ -615,6 +617,7 @@ fn write_inspection(
     nagi_dir: Option<&Path>,
     asset_name: &str,
     execution_id: &str,
+    finished_at: &str,
     pre_physical: Option<crate::runtime::inspect::PhysicalObjectState>,
     post_physical: Option<crate::runtime::inspect::PhysicalObjectState>,
 ) {
@@ -625,6 +628,7 @@ fn write_inspection(
     let mut inspection = crate::runtime::inspect::SyncInspection::new(
         execution_id.to_string(),
         asset_name.to_string(),
+        finished_at.to_string(),
     );
     inspection.before_sync.physical_object = pre_physical;
     inspection.after_sync.physical_object = post_physical;
@@ -1115,9 +1119,11 @@ mod tests {
 
     // ── write_inspection ────────────────────────────────────────────
 
+    const TEST_FINISHED_AT: &str = "2026-04-16T09:30:00.000Z";
+
     #[test]
     fn write_inspection_skips_when_nagi_dir_is_none() {
-        write_inspection(None, "test-asset", "exec-001", None, None);
+        write_inspection(None, "test-asset", "exec-001", TEST_FINISHED_AT, None, None);
     }
 
     #[test]
@@ -1131,13 +1137,24 @@ mod tests {
             object_type: "BASE TABLE".to_string(),
             metrics: HashMap::from([("row_count".to_string(), serde_json::json!(200))]),
         });
-        write_inspection(Some(dir.path()), "my-asset", "exec-001", pre, post);
+        write_inspection(
+            Some(dir.path()),
+            "my-asset",
+            "exec-001",
+            TEST_FINISHED_AT,
+            pre,
+            post,
+        );
 
-        let path = dir.path().join("inspections/my-asset/exec-001.json");
-        assert!(path.exists(), "inspection file should be created");
+        let asset_dir = dir.path().join("inspections/my-asset");
+        let files: Vec<_> = std::fs::read_dir(&asset_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(files.len(), 1);
 
         let content: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(files[0].path()).unwrap()).unwrap();
         assert_eq!(content["asset_name"], "my-asset");
         assert_eq!(content["execution_id"], "exec-001");
         assert_eq!(
