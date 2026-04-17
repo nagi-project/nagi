@@ -470,7 +470,7 @@ async fn re_evaluate_and_link(
 }
 
 /// Runs the full sync workflow: preflight check, execute, link evaluations,
-/// post-sync re-evaluation, and observation file creation.
+/// post-sync re-evaluation, and inspection file creation.
 pub(crate) async fn run_sync_workflow(
     params: SyncWorkflowParams<'_>,
 ) -> Result<SyncExecutionResult, SyncError> {
@@ -487,9 +487,9 @@ pub(crate) async fn run_sync_workflow(
         .as_deref()
         .unwrap_or(&params.compiled.metadata.name);
 
-    let pre_physical = match &inspect_conn {
+    let (row_count_before, object_type) = match &inspect_conn {
         Some(ic) => {
-            fetch_physical_state(
+            fetch_row_count_before(
                 ic.conn.as_ref(),
                 &ic.project,
                 &ic.dataset,
@@ -497,7 +497,7 @@ pub(crate) async fn run_sync_workflow(
             )
             .await
         }
-        None => None,
+        None => (None, None),
     };
 
     let result = execute_sync(
@@ -523,9 +523,9 @@ pub(crate) async fn run_sync_workflow(
         .await;
     }
 
-    let post_physical = match &inspect_conn {
+    let row_count_after = match &inspect_conn {
         Some(ic) => {
-            fetch_physical_state(
+            fetch_row_count_after(
                 ic.conn.as_ref(),
                 &ic.project,
                 &ic.dataset,
@@ -542,8 +542,10 @@ pub(crate) async fn run_sync_workflow(
         &params.compiled.metadata.name,
         &result.execution_id,
         &finished_at,
-        pre_physical,
-        post_physical,
+        object_type.as_deref(),
+        model_name_for_inspect,
+        row_count_before,
+        row_count_after,
     );
 
     Ok(result)
@@ -591,21 +593,50 @@ fn connect_for_inspection(
     })
 }
 
-/// Fetches the physical object state. Failures are logged as warnings.
-async fn fetch_physical_state(
+/// Fetches row count before sync. Returns (row_count, normalized_object_type).
+async fn fetch_row_count_before(
     conn: &dyn crate::runtime::kind::connection::Connection,
     project: &str,
     dataset: &str,
     model_name: &str,
-) -> Option<crate::runtime::inspect::PhysicalObjectState> {
-    match crate::runtime::inspect::bigquery::fetch_physical_object_state(
+) -> (Option<serde_json::Value>, Option<String>) {
+    match crate::runtime::inspect::bigquery::fetch_row_count_value(
         conn, project, dataset, model_name,
     )
     .await
     {
-        Ok(state) => state,
+        Ok(Some(count)) => {
+            let obj_type = crate::runtime::inspect::bigquery::resolve_normalized_type(
+                conn, project, dataset, model_name,
+            )
+            .await
+            .ok()
+            .flatten();
+            (Some(count), obj_type)
+        }
+        Ok(None) => (None, None),
         Err(e) => {
-            tracing::warn!(error = %e, "inspection: failed to capture physical object state");
+            tracing::warn!(error = %e, "inspection: failed to fetch row count");
+            (None, None)
+        }
+    }
+}
+
+/// Fetches row count after sync.
+async fn fetch_row_count_after(
+    conn: &dyn crate::runtime::kind::connection::Connection,
+    project: &str,
+    dataset: &str,
+    model_name: &str,
+) -> Option<serde_json::Value> {
+    match crate::runtime::inspect::bigquery::fetch_row_count_value(
+        conn, project, dataset, model_name,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "inspection: failed to fetch row count");
             None
         }
     }
@@ -613,13 +644,16 @@ async fn fetch_physical_state(
 
 /// Writes an inspection file. Failures are logged as warnings
 /// and do not block the sync workflow.
+#[allow(clippy::too_many_arguments)]
 fn write_inspection(
     nagi_dir: Option<&Path>,
     asset_name: &str,
     execution_id: &str,
     finished_at: &str,
-    pre_physical: Option<crate::runtime::inspect::PhysicalObjectState>,
-    post_physical: Option<crate::runtime::inspect::PhysicalObjectState>,
+    object_type: Option<&str>,
+    model_name: &str,
+    row_count_before: Option<serde_json::Value>,
+    row_count_after: Option<serde_json::Value>,
 ) {
     let Some(nagi_dir) = nagi_dir else {
         return;
@@ -630,8 +664,21 @@ fn write_inspection(
         asset_name.to_string(),
         finished_at.to_string(),
     );
-    inspection.before_sync.physical_object = pre_physical;
-    inspection.after_sync.physical_object = post_physical;
+
+    if let (Some(before), Some(after)) = (row_count_before, row_count_after) {
+        let item_type = match object_type {
+            Some(t) => format!("{t} row count"),
+            None => "row count".to_string(),
+        };
+        inspection
+            .comparisons
+            .push(crate::runtime::inspect::ComparisonItem {
+                item_type,
+                name: model_name.to_string(),
+                before,
+                after,
+            });
+    }
 
     let store = crate::runtime::inspect::InspectionStore::new(nagi_dir);
     if let Err(e) = store.write(&inspection) {
@@ -1123,27 +1170,30 @@ mod tests {
 
     #[test]
     fn write_inspection_skips_when_nagi_dir_is_none() {
-        write_inspection(None, "test-asset", "exec-001", TEST_FINISHED_AT, None, None);
+        write_inspection(
+            None,
+            "test-asset",
+            "exec-001",
+            TEST_FINISHED_AT,
+            None,
+            "test-asset",
+            None,
+            None,
+        );
     }
 
     #[test]
-    fn write_inspection_creates_file() {
+    fn write_inspection_creates_file_with_row_count() {
         let dir = tempfile::tempdir().unwrap();
-        let pre = Some(crate::runtime::inspect::PhysicalObjectState {
-            object_type: "BASE TABLE".to_string(),
-            metrics: HashMap::from([("row_count".to_string(), serde_json::json!(100))]),
-        });
-        let post = Some(crate::runtime::inspect::PhysicalObjectState {
-            object_type: "BASE TABLE".to_string(),
-            metrics: HashMap::from([("row_count".to_string(), serde_json::json!(200))]),
-        });
         write_inspection(
             Some(dir.path()),
             "my-asset",
             "exec-001",
             TEST_FINISHED_AT,
-            pre,
-            post,
+            Some("table"),
+            "daily_sales",
+            Some(serde_json::json!(100)),
+            Some(serde_json::json!(200)),
         );
 
         let asset_dir = dir.path().join("inspections/my-asset");
@@ -1157,13 +1207,10 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(files[0].path()).unwrap()).unwrap();
         assert_eq!(content["asset_name"], "my-asset");
         assert_eq!(content["execution_id"], "exec-001");
-        assert_eq!(
-            content["before_sync"]["physical_object"]["object_type"],
-            "BASE TABLE"
-        );
-        assert_eq!(
-            content["after_sync"]["physical_object"]["metrics"]["row_count"],
-            200
-        );
+        assert_eq!(content["comparisons"].as_array().unwrap().len(), 1);
+        assert_eq!(content["comparisons"][0]["type"], "table row count");
+        assert_eq!(content["comparisons"][0]["name"], "daily_sales");
+        assert_eq!(content["comparisons"][0]["before"], 100);
+        assert_eq!(content["comparisons"][0]["after"], 200);
     }
 }

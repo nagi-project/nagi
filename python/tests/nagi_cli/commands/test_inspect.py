@@ -25,44 +25,38 @@ def _write_inspection(
     finished_at: str = "20260416T093000.000Z",
     changed: bool = True,
 ) -> Path:
-    before = {
-        "evaluations": [
+    comparisons = (
+        [
             {
+                "type": "condition",
                 "name": "freshness-24h",
-                "status": {"state": "drifted", "reason": "age 30h"},
-                "detail": {"age_hours": 30},
-            }
-        ],
-        "physical_object": {
-            "object_type": "BASE TABLE",
-            "metrics": {"row_count": 1000},
-        },
-    }
-    after = (
-        {
-            "evaluations": [
-                {
-                    "name": "freshness-24h",
-                    "status": {"state": "ready"},
-                    "detail": {"age_hours": 0},
-                }
-            ],
-            "physical_object": {
-                "object_type": "BASE TABLE",
-                "metrics": {"row_count": 1500},
+                "before": {"state": "drifted", "reason": "age 30h > max 24h"},
+                "after": {"state": "ready"},
             },
-        }
+            {
+                "type": "table row count",
+                "name": "daily_sales",
+                "before": 1000,
+                "after": 1500,
+            },
+        ]
         if changed
-        else before
+        else [
+            {
+                "type": "condition",
+                "name": "freshness-24h",
+                "before": {"state": "ready"},
+                "after": {"state": "ready"},
+            },
+        ]
     )
     data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "execution_id": execution_id,
         "asset_name": "daily-sales",
         "finished_at": "2026-04-16T09:30:00.000Z",
-        "before_sync": before,
-        "after_sync": after,
-        "destination_jobs": [],
+        "comparisons": comparisons,
+        "jobs": [],
     }
     flag = "changed" if changed else "nochange"
     path = inspection_dir / f"{finished_at}_{flag}.{execution_id}.json"
@@ -105,7 +99,8 @@ class TestInspectCommand:
         assert result.exit_code == 0, result.output
         assert "daily-sales" in result.output
         assert "exec-001" in result.output
-        assert "BASE TABLE" in result.output
+        assert "condition" in result.output
+        assert "freshness-24h" in result.output
 
     def test_limit_restricts_output(
         self,

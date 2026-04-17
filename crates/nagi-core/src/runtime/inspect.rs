@@ -25,34 +25,27 @@ pub enum InspectError {
     InvalidTimestamp(String),
 }
 
-/// A single condition's evaluation result snapshot.
+/// A single comparison item in an inspection. Each row in the text output
+/// corresponds to one `ComparisonItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConditionSnapshot {
+pub struct ComparisonItem {
+    /// Category of the item (e.g. "condition", "table_row_count").
+    #[serde(rename = "type")]
+    pub item_type: String,
+    /// Identifier (condition name, table name, etc.).
     pub name: String,
-    pub status: crate::runtime::evaluate::ConditionStatus,
-    pub detail: Option<serde_json::Value>,
+    /// State before sync.
+    pub before: serde_json::Value,
+    /// State after sync.
+    pub after: serde_json::Value,
 }
 
-/// Physical object state snapshot at a point in time.
+/// A job executed on the data warehouse during sync.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PhysicalObjectState {
-    pub object_type: String,
-    pub metrics: HashMap<String, serde_json::Value>,
-}
-
-/// A job executed on the destination during a sync.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DestinationJob {
+pub struct SyncJob {
     pub job_id: String,
     pub statement_type: Option<String>,
     pub details: HashMap<String, serde_json::Value>,
-}
-
-/// Snapshot of an Asset's state at a point in time (before or after sync).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SyncSnapshot {
-    pub evaluations: Vec<ConditionSnapshot>,
-    pub physical_object: Option<PhysicalObjectState>,
 }
 
 /// Cached inspection record for a single sync execution.
@@ -64,13 +57,14 @@ pub struct SyncInspection {
     pub asset_name: String,
     /// Sync completion timestamp in RFC3339 format.
     pub finished_at: String,
-    pub before_sync: SyncSnapshot,
-    pub after_sync: SyncSnapshot,
-    pub destination_jobs: Vec<DestinationJob>,
+    /// Comparison items grouped by what is being compared.
+    pub comparisons: Vec<ComparisonItem>,
+    /// Jobs executed on the data warehouse during this sync.
+    pub jobs: Vec<SyncJob>,
 }
 
 impl SyncInspection {
-    pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+    pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
     pub fn new(execution_id: String, asset_name: String, finished_at: String) -> Self {
         Self {
@@ -78,22 +72,15 @@ impl SyncInspection {
             execution_id,
             asset_name,
             finished_at,
-            before_sync: SyncSnapshot {
-                evaluations: Vec::new(),
-                physical_object: None,
-            },
-            after_sync: SyncSnapshot {
-                evaluations: Vec::new(),
-                physical_object: None,
-            },
-            destination_jobs: Vec::new(),
+            comparisons: Vec::new(),
+            jobs: Vec::new(),
         }
     }
 
-    /// Returns true if `before_sync` differs from `after_sync`.
+    /// Returns true if any comparison item has different before and after values.
     /// Used to determine the `changed` / `nochange` flag in the filename.
     pub fn has_changes(&self) -> bool {
-        self.before_sync != self.after_sync
+        self.comparisons.iter().any(|c| c.before != c.after)
     }
 }
 
@@ -228,7 +215,7 @@ impl InspectionStore {
         self.list_filtered(asset_name, limit, |_| true)
     }
 
-    /// Lists inspections where `before_sync` differs from `after_sync`.
+    /// Lists inspections where any comparison item has different before and after values.
     /// Filtering uses filename alone (no file read required); only matching
     /// files are opened.
     pub fn list_changed(
@@ -288,7 +275,6 @@ impl InspectionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::evaluate::ConditionStatus;
 
     const SAMPLE_FINISHED_AT: &str = "2026-04-16T09:30:00.123Z";
 
@@ -298,30 +284,26 @@ mod tests {
             "daily-sales".to_string(),
             SAMPLE_FINISHED_AT.to_string(),
         );
-        inspection.before_sync = SyncSnapshot {
-            evaluations: vec![ConditionSnapshot {
+        inspection.comparisons = vec![
+            ComparisonItem {
+                item_type: "condition".to_string(),
                 name: "freshness-24h".to_string(),
-                status: ConditionStatus::Drifted {
-                    reason: "age 30h exceeds max 24h".to_string(),
-                },
-                detail: Some(serde_json::json!({"age_hours": 30})),
-            }],
-            physical_object: Some(PhysicalObjectState {
-                object_type: "BASE TABLE".to_string(),
-                metrics: HashMap::from([("row_count".to_string(), serde_json::json!(1000))]),
-            }),
-        };
-        inspection.after_sync = SyncSnapshot {
-            evaluations: vec![ConditionSnapshot {
-                name: "freshness-24h".to_string(),
-                status: ConditionStatus::Ready,
-                detail: Some(serde_json::json!({"age_hours": 0})),
-            }],
-            physical_object: Some(PhysicalObjectState {
-                object_type: "BASE TABLE".to_string(),
-                metrics: HashMap::from([("row_count".to_string(), serde_json::json!(1500))]),
-            }),
-        };
+                before: serde_json::json!({"state": "drifted", "reason": "age 30h > max 24h"}),
+                after: serde_json::json!({"state": "ready"}),
+            },
+            ComparisonItem {
+                item_type: "condition".to_string(),
+                name: "no-negative-amount".to_string(),
+                before: serde_json::json!({"state": "ready"}),
+                after: serde_json::json!({"state": "ready"}),
+            },
+            ComparisonItem {
+                item_type: "table_row_count".to_string(),
+                name: "daily_sales".to_string(),
+                before: serde_json::json!(1000),
+                after: serde_json::json!(1500),
+            },
+        ];
         inspection
     }
 
@@ -383,7 +365,7 @@ mod tests {
         let mut inspection = sample_inspection();
         store.write(&inspection).unwrap();
 
-        inspection.destination_jobs = vec![DestinationJob {
+        inspection.jobs = vec![SyncJob {
             job_id: "bqjob_123".to_string(),
             statement_type: Some("MERGE".to_string()),
             details: HashMap::new(),
@@ -391,8 +373,8 @@ mod tests {
         store.write(&inspection).unwrap();
 
         let loaded = store.read("daily-sales", "exec-001").unwrap();
-        assert_eq!(loaded.destination_jobs.len(), 1);
-        assert_eq!(loaded.destination_jobs[0].job_id, "bqjob_123");
+        assert_eq!(loaded.jobs.len(), 1);
+        assert_eq!(loaded.jobs[0].job_id, "bqjob_123");
     }
 
     #[test]
@@ -427,13 +409,18 @@ mod tests {
     }
 
     #[test]
-    fn has_changes_returns_false_when_before_equals_after() {
+    fn has_changes_returns_false_when_all_before_equals_after() {
         let mut inspection = SyncInspection::new(
             "exec-001".to_string(),
             "a".to_string(),
             SAMPLE_FINISHED_AT.to_string(),
         );
-        inspection.after_sync = inspection.before_sync.clone();
+        inspection.comparisons = vec![ComparisonItem {
+            item_type: "condition".to_string(),
+            name: "c".to_string(),
+            before: serde_json::json!({"state": "ready"}),
+            after: serde_json::json!({"state": "ready"}),
+        }];
         assert!(!inspection.has_changes());
     }
 
@@ -446,13 +433,12 @@ mod tests {
     }
 
     #[test]
-    fn filename_uses_nochange_when_before_equals_after() {
-        let mut inspection = SyncInspection::new(
+    fn filename_uses_nochange_when_no_changes() {
+        let inspection = SyncInspection::new(
             "exec-001".to_string(),
             "a".to_string(),
             SAMPLE_FINISHED_AT.to_string(),
         );
-        inspection.after_sync = inspection.before_sync.clone();
         let name = build_filename(&inspection).unwrap();
         assert!(name.contains("_nochange."));
     }
@@ -482,14 +468,13 @@ mod tests {
                 "my-asset".to_string(),
                 format!("2026-04-16T09:30:0{i}.000Z"),
             );
-            // Odd: changed (from sample), Even: nochange
-            if i % 2 == 0 {
-                // leave before_sync == after_sync (both empty)
-            } else {
-                inspection.after_sync.evaluations = vec![ConditionSnapshot {
+            // Odd: changed, Even: nochange (empty comparisons)
+            if i % 2 != 0 {
+                inspection.comparisons = vec![ComparisonItem {
+                    item_type: "condition".to_string(),
                     name: "c".to_string(),
-                    status: ConditionStatus::Ready,
-                    detail: None,
+                    before: serde_json::json!({"state": "drifted"}),
+                    after: serde_json::json!({"state": "ready"}),
                 }];
             }
             store.write(&inspection).unwrap();
@@ -512,10 +497,11 @@ mod tests {
                 "my-asset".to_string(),
                 format!("2026-04-16T09:30:0{i}.000Z"),
             );
-            inspection.after_sync.evaluations = vec![ConditionSnapshot {
+            inspection.comparisons = vec![ComparisonItem {
+                item_type: "condition".to_string(),
                 name: "c".to_string(),
-                status: ConditionStatus::Ready,
-                detail: None,
+                before: serde_json::json!({"state": "drifted"}),
+                after: serde_json::json!({"state": "ready"}),
             }];
             store.write(&inspection).unwrap();
         }
@@ -543,17 +529,19 @@ mod tests {
     }
 
     #[test]
-    fn physical_object_state_with_custom_metrics() {
-        let state = PhysicalObjectState {
-            object_type: "VECTOR INDEX".to_string(),
-            metrics: HashMap::from([
-                ("indexed_row_count".to_string(), serde_json::json!(50000)),
-                ("coverage".to_string(), serde_json::json!(0.95)),
-                ("status".to_string(), serde_json::json!("ACTIVE")),
-            ]),
+    fn comparison_item_roundtrip() {
+        let item = ComparisonItem {
+            item_type: "table_row_count".to_string(),
+            name: "daily_sales".to_string(),
+            before: serde_json::json!(1000),
+            after: serde_json::json!(1500),
         };
-        let json = serde_json::to_string(&state).unwrap();
-        let deserialized: PhysicalObjectState = serde_json::from_str(&json).unwrap();
-        assert_eq!(state, deserialized);
+        let json = serde_json::to_string(&item).unwrap();
+        let deserialized: ComparisonItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(item, deserialized);
+        // Verify "type" is the JSON key (not "item_type")
+        let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(raw.get("type").is_some());
+        assert!(raw.get("item_type").is_none());
     }
 }

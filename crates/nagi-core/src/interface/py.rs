@@ -416,7 +416,7 @@ fn format_inspect_text(json_str: &str) -> PyResult<String> {
 }
 
 /// Lists recent inspections for an asset as JSON.
-/// If `target_dir` is provided, attempts to backfill empty destination_jobs
+/// If `target_dir` is provided, attempts to backfill empty jobs
 /// from BigQuery INFORMATION_SCHEMA.JOBS.
 /// If `changed_only` is true, returns only inspections where before_sync
 /// differs from after_sync.
@@ -438,7 +438,7 @@ fn list_inspections(
 
     if let Some(td) = target_dir {
         let default_timeout = crate::runtime::config::resolve_default_timeout();
-        TOKIO_RT.block_on(crate::interface::inspect::backfill_destination_jobs(
+        TOKIO_RT.block_on(crate::interface::inspect::backfill_jobs(
             &store,
             &mut inspections,
             std::path::Path::new(td),

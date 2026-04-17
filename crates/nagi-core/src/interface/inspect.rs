@@ -4,22 +4,22 @@ use crate::runtime::compile::{load_compiled_assets, CompiledAsset};
 use crate::runtime::inspect::{InspectionStore, SyncInspection};
 use crate::runtime::kind::connection::ResolvedConnection;
 
-/// Backfills empty `destination_jobs` in inspections by querying
+/// Backfills empty `jobs` in inspections by querying
 /// BigQuery `INFORMATION_SCHEMA.JOBS_BY_PROJECT`.
 ///
-/// For each inspection with empty destination_jobs, resolves the asset's
+/// For each inspection with empty jobs, resolves the asset's
 /// Connection from compiled YAML, fetches jobs, updates the inspection,
 /// and writes it back to the store.
 ///
 /// Failures are logged as warnings and do not propagate.
-pub async fn backfill_destination_jobs(
+pub async fn backfill_jobs(
     store: &InspectionStore,
     inspections: &mut [SyncInspection],
     target_dir: &Path,
     asset_name: &str,
     default_timeout: std::time::Duration,
 ) {
-    let needs_backfill = inspections.iter().any(|i| i.destination_jobs.is_empty());
+    let needs_backfill = inspections.iter().any(|i| i.jobs.is_empty());
     if !needs_backfill {
         return;
     }
@@ -38,7 +38,7 @@ async fn backfill_with_connection(
     conn_info: &BqConnInfo,
 ) {
     for inspection in inspections.iter_mut() {
-        if !inspection.destination_jobs.is_empty() {
+        if !inspection.jobs.is_empty() {
             continue;
         }
         fetch_and_save_jobs(store, inspection, conn_info).await;
@@ -50,7 +50,7 @@ async fn fetch_and_save_jobs(
     inspection: &mut SyncInspection,
     conn_info: &BqConnInfo,
 ) {
-    let jobs = match crate::runtime::inspect::bigquery::fetch_destination_jobs(
+    let jobs = match crate::runtime::inspect::bigquery::fetch_jobs(
         conn_info.conn.as_ref(),
         &conn_info.project,
         conn_info.location.as_deref(),
@@ -73,7 +73,7 @@ async fn fetch_and_save_jobs(
         return;
     }
 
-    inspection.destination_jobs = jobs;
+    inspection.jobs = jobs;
     if let Err(e) = store.write(inspection) {
         tracing::warn!(error = %e, "backfill: failed to write inspection");
     }
@@ -115,7 +115,7 @@ fn resolve_bq_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::inspect::{DestinationJob, InspectionStore, SyncInspection};
+    use crate::runtime::inspect::{InspectionStore, SyncInspection, SyncJob};
     use crate::runtime::kind::connection::{Connection, ConnectionError};
     use async_trait::async_trait;
     use std::collections::HashMap;
@@ -180,7 +180,7 @@ mod tests {
         }
     }
 
-    // ── backfill_destination_jobs ────────────────────────────────────
+    // ── backfill_jobs ────────────────────────────────────
 
     #[tokio::test]
     async fn backfill_skips_when_all_have_jobs() {
@@ -188,14 +188,14 @@ mod tests {
         let store = InspectionStore::new(dir.path());
         let mut inspections = vec![{
             let mut i = new_inspection("exec-001", "a");
-            i.destination_jobs = vec![DestinationJob {
+            i.jobs = vec![SyncJob {
                 job_id: "existing".to_string(),
                 statement_type: None,
                 details: HashMap::new(),
             }];
             i
         }];
-        backfill_destination_jobs(
+        backfill_jobs(
             &store,
             &mut inspections,
             Path::new("/nonexistent"),
@@ -203,8 +203,8 @@ mod tests {
             std::time::Duration::from_secs(30),
         )
         .await;
-        assert_eq!(inspections[0].destination_jobs.len(), 1);
-        assert_eq!(inspections[0].destination_jobs[0].job_id, "existing");
+        assert_eq!(inspections[0].jobs.len(), 1);
+        assert_eq!(inspections[0].jobs[0].job_id, "existing");
     }
 
     #[tokio::test]
@@ -212,7 +212,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
         let mut inspections = vec![new_inspection("exec-001", "a")];
-        backfill_destination_jobs(
+        backfill_jobs(
             &store,
             &mut inspections,
             dir.path(),
@@ -220,7 +220,7 @@ mod tests {
             std::time::Duration::from_secs(30),
         )
         .await;
-        assert!(inspections[0].destination_jobs.is_empty());
+        assert!(inspections[0].jobs.is_empty());
     }
 
     // ── backfill_with_connection ─────────────────────────────────────
@@ -244,13 +244,13 @@ mod tests {
         backfill_with_connection(&store, &mut inspections, &conn_info).await;
 
         for i in &inspections {
-            assert_eq!(i.destination_jobs.len(), 1);
-            assert_eq!(i.destination_jobs[0].job_id, "bqjob_filled");
+            assert_eq!(i.jobs.len(), 1);
+            assert_eq!(i.jobs[0].job_id, "bqjob_filled");
         }
         // Verify files were updated
         for id in ["exec-001", "exec-002"] {
             let loaded = store.read("my-asset", id).unwrap();
-            assert_eq!(loaded.destination_jobs.len(), 1);
+            assert_eq!(loaded.jobs.len(), 1);
         }
     }
 
@@ -259,7 +259,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = InspectionStore::new(dir.path());
         let mut filled = new_inspection("exec-001", "my-asset");
-        filled.destination_jobs = vec![DestinationJob {
+        filled.jobs = vec![SyncJob {
             job_id: "original".to_string(),
             statement_type: None,
             details: HashMap::new(),
@@ -274,8 +274,8 @@ mod tests {
         })]));
         backfill_with_connection(&store, &mut inspections, &conn_info).await;
 
-        assert_eq!(inspections[0].destination_jobs[0].job_id, "original");
-        assert_eq!(inspections[1].destination_jobs[0].job_id, "bqjob_new");
+        assert_eq!(inspections[0].jobs[0].job_id, "original");
+        assert_eq!(inspections[1].jobs[0].job_id, "bqjob_new");
     }
 
     // ── fetch_and_save_jobs ─────────────────────────────────────────
@@ -293,12 +293,12 @@ mod tests {
         })]));
         fetch_and_save_jobs(&store, &mut inspection, &conn_info).await;
 
-        assert_eq!(inspection.destination_jobs.len(), 1);
-        assert_eq!(inspection.destination_jobs[0].job_id, "bqjob_fetched");
+        assert_eq!(inspection.jobs.len(), 1);
+        assert_eq!(inspection.jobs[0].job_id, "bqjob_fetched");
 
         let loaded = store.read("my-asset", "exec-001").unwrap();
-        assert_eq!(loaded.destination_jobs.len(), 1);
-        assert_eq!(loaded.destination_jobs[0].job_id, "bqjob_fetched");
+        assert_eq!(loaded.jobs.len(), 1);
+        assert_eq!(loaded.jobs[0].job_id, "bqjob_fetched");
     }
 
     #[tokio::test]
@@ -310,7 +310,7 @@ mod tests {
         let conn_info = conn_info_with(MockConn::empty());
         fetch_and_save_jobs(&store, &mut inspection, &conn_info).await;
 
-        assert!(inspection.destination_jobs.is_empty());
+        assert!(inspection.jobs.is_empty());
         assert!(store.read("my-asset", "exec-001").is_err());
     }
 }

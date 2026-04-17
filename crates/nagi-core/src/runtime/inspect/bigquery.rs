@@ -1,8 +1,6 @@
-use crate::runtime::inspect::{InspectError, PhysicalObjectState};
+use crate::runtime::inspect::{InspectError, SyncJob};
 use crate::runtime::kind::connection::bigquery::{escape_backtick, escape_single_quote};
 use crate::runtime::kind::connection::Connection;
-
-use std::collections::HashMap;
 
 /// Resolves the physical object type for a BigQuery table/view.
 ///
@@ -68,12 +66,12 @@ async fn fetch_row_count(
 /// `location` specifies the BigQuery region (e.g. "us", "asia-northeast1").
 /// If `None`, defaults to "us".
 #[allow(dead_code)] // integrated when nagi inspect performs lazy fetch
-pub async fn fetch_destination_jobs(
+pub async fn fetch_jobs(
     conn: &dyn Connection,
     project: &str,
     location: Option<&str>,
     execution_id: &str,
-) -> Result<Vec<crate::runtime::inspect::DestinationJob>, InspectError> {
+) -> Result<Vec<SyncJob>, InspectError> {
     let project = escape_backtick(project);
     let region = location.unwrap_or("us");
     let region = escape_backtick(region);
@@ -96,9 +94,7 @@ pub async fn fetch_destination_jobs(
         .collect())
 }
 
-fn row_to_destination_job(
-    row: serde_json::Value,
-) -> Option<crate::runtime::inspect::DestinationJob> {
+fn row_to_destination_job(row: serde_json::Value) -> Option<SyncJob> {
     let mut obj = match row {
         serde_json::Value::Object(m) => m,
         _ => return None,
@@ -111,34 +107,50 @@ fn row_to_destination_job(
         .remove("statement_type")
         .and_then(|v| v.as_str().map(String::from));
     let details = obj.into_iter().collect();
-    Some(crate::runtime::inspect::DestinationJob {
+    Some(SyncJob {
         job_id,
         statement_type,
         details,
     })
 }
 
-/// Builds a `PhysicalObjectState` for a BigQuery object by querying its type
-/// and row count.
-pub async fn fetch_physical_object_state(
+/// Queries the object type and row count for a BigQuery object.
+/// Fetches just the row count as a JSON value, for use as before/after.
+pub async fn fetch_row_count_value(
     conn: &dyn Connection,
     project: &str,
     dataset: &str,
     model_name: &str,
-) -> Result<Option<PhysicalObjectState>, InspectError> {
+) -> Result<Option<serde_json::Value>, InspectError> {
     let object_type = resolve_object_type(conn, project, dataset, model_name).await?;
-    let Some(object_type) = object_type else {
+    if object_type.is_none() {
         return Ok(None);
-    };
+    }
+    let count = fetch_row_count(conn, project, dataset, model_name).await?;
+    Ok(Some(serde_json::json!(count)))
+}
 
-    let row_count = fetch_row_count(conn, project, dataset, model_name).await?;
-    let mut metrics = HashMap::new();
-    metrics.insert("row_count".to_string(), serde_json::json!(row_count));
+/// Normalizes BigQuery table_type to a user-facing string.
+fn normalize_object_type(bq_type: &str) -> &str {
+    match bq_type {
+        "BASE TABLE" => "table",
+        "VIEW" => "view",
+        "MATERIALIZED VIEW" => "materialized view",
+        "EXTERNAL" => "external table",
+        "SNAPSHOT" => "snapshot",
+        other => other,
+    }
+}
 
-    Ok(Some(PhysicalObjectState {
-        object_type,
-        metrics,
-    }))
+/// Resolves the normalized object type for a BigQuery object.
+pub async fn resolve_normalized_type(
+    conn: &dyn Connection,
+    project: &str,
+    dataset: &str,
+    model_name: &str,
+) -> Result<Option<String>, InspectError> {
+    let raw = resolve_object_type(conn, project, dataset, model_name).await?;
+    Ok(raw.map(|t| normalize_object_type(&t).to_string()))
 }
 
 #[cfg(test)]
@@ -283,28 +295,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_physical_object_state_for_table() {
+    async fn fetch_row_count_value_for_table() {
         let conn = MockConnection::new(vec![
             ("INFORMATION_SCHEMA.TABLES", serde_json::json!("BASE TABLE")),
             ("COUNT(*)", serde_json::json!(1500)),
         ]);
-        let state = fetch_physical_object_state(&conn, "my-project", "my_dataset", "daily_sales")
+        let value = fetch_row_count_value(&conn, "my-project", "my_dataset", "daily_sales")
             .await
             .unwrap();
-        let state = state.unwrap();
-        assert_eq!(state.object_type, "BASE TABLE");
-        assert_eq!(state.metrics["row_count"], serde_json::json!(1500));
+        assert_eq!(value, Some(serde_json::json!(1500)));
     }
 
     #[tokio::test]
-    async fn fetch_physical_object_state_for_nonexistent() {
+    async fn fetch_row_count_value_for_nonexistent() {
         let conn =
             MockConnection::new(vec![("INFORMATION_SCHEMA.TABLES", serde_json::Value::Null)]);
-        let state =
-            fetch_physical_object_state(&conn, "my-project", "my_dataset", "does_not_exist")
-                .await
-                .unwrap();
-        assert!(state.is_none());
+        let value = fetch_row_count_value(&conn, "my-project", "my_dataset", "does_not_exist")
+            .await
+            .unwrap();
+        assert!(value.is_none());
+    }
+
+    #[tokio::test]
+    async fn normalize_object_type_values() {
+        assert_eq!(normalize_object_type("BASE TABLE"), "table");
+        assert_eq!(normalize_object_type("VIEW"), "view");
+        assert_eq!(
+            normalize_object_type("MATERIALIZED VIEW"),
+            "materialized view"
+        );
+        assert_eq!(normalize_object_type("EXTERNAL"), "external table");
+        assert_eq!(normalize_object_type("SNAPSHOT"), "snapshot");
+        assert_eq!(normalize_object_type("UNKNOWN"), "UNKNOWN");
     }
 
     // ── SQL injection prevention ────────────────────────────────────
@@ -358,10 +380,10 @@ mod tests {
         );
     }
 
-    // ── fetch_destination_jobs ───────────────────────────────────────
+    // ── fetch_jobs ───────────────────────────────────────
 
     #[tokio::test]
-    async fn fetch_destination_jobs_returns_matching_jobs() {
+    async fn fetch_jobs_returns_matching_jobs() {
         let conn = MockConnection::new(vec![(
             "INFORMATION_SCHEMA.JOBS",
             serde_json::json!([
@@ -369,7 +391,7 @@ mod tests {
                 {"job_id": "bqjob_002", "statement_type": "INSERT"}
             ]),
         )]);
-        let jobs = fetch_destination_jobs(&conn, "my-project", Some("us"), "exec-001")
+        let jobs = fetch_jobs(&conn, "my-project", Some("us"), "exec-001")
             .await
             .unwrap();
         assert_eq!(jobs.len(), 2);
@@ -380,18 +402,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_destination_jobs_returns_empty_for_no_matches() {
+    async fn fetch_jobs_returns_empty_for_no_matches() {
         let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
-        let jobs = fetch_destination_jobs(&conn, "my-project", Some("us"), "exec-999")
+        let jobs = fetch_jobs(&conn, "my-project", Some("us"), "exec-999")
             .await
             .unwrap();
         assert!(jobs.is_empty());
     }
 
     #[tokio::test]
-    async fn fetch_destination_jobs_uses_location() {
+    async fn fetch_jobs_uses_location() {
         let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
-        fetch_destination_jobs(&conn, "my-project", Some("asia-northeast1"), "exec-001")
+        fetch_jobs(&conn, "my-project", Some("asia-northeast1"), "exec-001")
             .await
             .unwrap();
         let sql = conn.last_sql();
@@ -402,9 +424,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_destination_jobs_defaults_to_us() {
+    async fn fetch_jobs_defaults_to_us() {
         let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
-        fetch_destination_jobs(&conn, "my-project", None, "exec-001")
+        fetch_jobs(&conn, "my-project", None, "exec-001")
             .await
             .unwrap();
         let sql = conn.last_sql();
@@ -412,9 +434,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_destination_jobs_escapes_execution_id() {
+    async fn fetch_jobs_escapes_execution_id() {
         let conn = MockConnection::new(vec![("INFORMATION_SCHEMA.JOBS", serde_json::Value::Null)]);
-        fetch_destination_jobs(&conn, "proj", Some("us"), "exec'; DROP TABLE t--")
+        fetch_jobs(&conn, "proj", Some("us"), "exec'; DROP TABLE t--")
             .await
             .unwrap();
         let sql = conn.last_sql();
