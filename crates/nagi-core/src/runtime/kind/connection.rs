@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use self::dbt::AdapterConfig;
 use super::KindError;
 use crate::runtime::compile::CompileError;
+use crate::runtime::duration::Duration;
 
 #[derive(Debug, Error)]
 pub enum ConnectionError {
@@ -23,8 +24,6 @@ pub enum ConnectionError {
     UnsupportedAdapter(String),
     #[error("missing required field '{field}' in profile output")]
     MissingField { field: String },
-    #[error("invalid value for field '{field}' in profile output")]
-    InvalidField { field: String },
     #[error("authentication failed: {0}")]
     AuthFailed(String),
     #[error("query failed: {0}")]
@@ -134,7 +133,7 @@ pub enum ResolvedConnection {
         execution_project: Option<String>,
         method: Option<String>,
         keyfile: Option<String>,
-        timeout_seconds: Option<u32>,
+        timeout: Option<Duration>,
         /// Unexpanded Identity env template. Excluded from serialization.
         #[serde(skip)]
         identity_env: Option<HashMap<String, String>>,
@@ -159,6 +158,8 @@ pub enum ResolvedConnection {
         warehouse: String,
         role: Option<String>,
         private_key_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<Duration>,
         /// Unexpanded Identity env template. Excluded from serialization.
         #[serde(skip)]
         identity_env: Option<HashMap<String, String>>,
@@ -176,7 +177,12 @@ impl ResolvedConnection {
     }
 
     /// Creates a `Box<dyn Connection>` from the resolved connection info.
-    pub fn connect(&self) -> Result<Box<dyn Connection>, ConnectionError> {
+    /// When a connection's `timeout` is `None`, `default_timeout` is applied.
+    pub fn connect(
+        &self,
+        default_timeout: std::time::Duration,
+    ) -> Result<Box<dyn Connection>, ConnectionError> {
+        let default = Duration::from_std(default_timeout);
         match self {
             ResolvedConnection::Dbt {
                 profile,
@@ -191,17 +197,18 @@ impl ResolvedConnection {
                 execution_project,
                 method,
                 keyfile,
-                timeout_seconds,
+                timeout,
                 identity_env,
                 ..
             } => {
+                let effective = Some(timeout.clone().unwrap_or_else(|| default.clone()));
                 let conn = bigquery::BigQueryConnection::from_resolved(
                     project,
                     dataset,
                     execution_project,
                     method.as_deref(),
                     keyfile,
-                    *timeout_seconds,
+                    effective,
                     identity_env.as_ref(),
                 )?;
                 Ok(Box::new(conn))
@@ -222,16 +229,22 @@ impl ResolvedConnection {
                 warehouse,
                 role,
                 private_key_path,
+                timeout,
                 ..
-            } => connect_snowflake(
-                account,
-                user,
-                database,
-                schema,
-                warehouse,
-                role,
-                private_key_path,
-            ),
+            } => {
+                let effective = Some(timeout.clone().unwrap_or(default));
+                let config = snowflake::SnowflakeConfig {
+                    account: account.clone(),
+                    user: user.clone(),
+                    database: database.clone(),
+                    schema: schema.clone(),
+                    warehouse: warehouse.clone(),
+                    role: role.clone(),
+                    private_key_path: private_key_path.clone(),
+                    timeout: effective,
+                };
+                Ok(Box::new(snowflake::SnowflakeConnection::new(config)))
+            }
             #[cfg(not(feature = "snowflake"))]
             ResolvedConnection::Snowflake { .. } => Err(ConnectionError::UnsupportedAdapter(
                 "snowflake (feature disabled)".to_string(),
@@ -257,28 +270,6 @@ fn connect_dbt(
         .resolve(profile, target)
         .map_err(|e| ConnectionError::AuthFailed(e.to_string()))?;
     create_connection(output)
-}
-
-#[cfg(feature = "snowflake")]
-fn connect_snowflake(
-    account: &str,
-    user: &str,
-    database: &str,
-    schema: &str,
-    warehouse: &str,
-    role: &Option<String>,
-    private_key_path: &str,
-) -> Result<Box<dyn Connection>, ConnectionError> {
-    let config = snowflake::SnowflakeConfig {
-        account: account.to_string(),
-        user: user.to_string(),
-        database: database.to_string(),
-        schema: schema.to_string(),
-        warehouse: warehouse.to_string(),
-        role: role.clone(),
-        private_key_path: private_key_path.to_string(),
-    };
-    Ok(Box::new(snowflake::SnowflakeConnection::new(config)))
 }
 
 /// Resolves a named `ConnectionSpec` into a `ResolvedConnection`.
@@ -320,7 +311,7 @@ pub fn resolve_connection_by_name(
             ref execution_project,
             ref method,
             ref keyfile,
-            ref timeout_seconds,
+            ref timeout,
             ..
         } => Ok(ResolvedConnection::BigQuery {
             name: conn_name.to_string(),
@@ -329,7 +320,7 @@ pub fn resolve_connection_by_name(
             execution_project: execution_project.clone(),
             method: method.clone(),
             keyfile: keyfile.clone(),
-            timeout_seconds: *timeout_seconds,
+            timeout: timeout.clone(),
             identity_env: identity_env.clone(),
         }),
         ConnectionSpec::DuckDb { ref path, .. } => Ok(ResolvedConnection::DuckDb {
@@ -345,6 +336,7 @@ pub fn resolve_connection_by_name(
             ref warehouse,
             ref role,
             ref private_key_path,
+            ref timeout,
             ..
         } => Ok(ResolvedConnection::Snowflake {
             name: conn_name.to_string(),
@@ -355,6 +347,7 @@ pub fn resolve_connection_by_name(
             warehouse: warehouse.clone(),
             role: role.clone(),
             private_key_path: private_key_path.clone(),
+            timeout: timeout.clone(),
             identity_env: identity_env.clone(),
         }),
     }
@@ -420,9 +413,9 @@ pub enum ConnectionSpec {
         /// Path to the service account JSON key file. Required when `method` is `service-account`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keyfile: Option<String>,
-        /// Query timeout in seconds.
+        /// Query timeout (e.g. "30s", "1h"). Falls back to `NagiConfig::default_timeout` when omitted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        timeout_seconds: Option<u32>,
+        timeout: Option<Duration>,
         /// Reference to a `kind: Identity` resource for authentication scope.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         identity: Option<String>,
@@ -454,6 +447,9 @@ pub enum ConnectionSpec {
         role: Option<String>,
         /// Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.
         private_key_path: String,
+        /// Query timeout (e.g. "30s", "1h"). Falls back to `NagiConfig::default_timeout` when omitted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<Duration>,
         /// Reference to a `kind: Identity` resource for authentication scope.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         identity: Option<String>,
@@ -626,7 +622,7 @@ dataset: raw
 executionProject: my-billing-proj
 method: service-account
 keyfile: /path/to/key.json
-timeoutSeconds: 30
+timeout: 30s
 "#;
         let spec: ConnectionSpec = serde_yaml::from_str(yaml).unwrap();
         match &spec {
@@ -636,7 +632,7 @@ timeoutSeconds: 30
                 execution_project,
                 method,
                 keyfile,
-                timeout_seconds,
+                timeout,
                 ..
             } => {
                 assert_eq!(project, "my-gcp-project");
@@ -644,7 +640,10 @@ timeoutSeconds: 30
                 assert_eq!(execution_project, &Some("my-billing-proj".to_string()));
                 assert_eq!(method, &Some("service-account".to_string()));
                 assert_eq!(keyfile, &Some("/path/to/key.json".to_string()));
-                assert_eq!(timeout_seconds, &Some(30));
+                assert_eq!(
+                    timeout.as_ref().map(Duration::as_std),
+                    Some(std::time::Duration::from_secs(30))
+                );
             }
             other => panic!("expected BigQuery, got {other:?}"),
         }
@@ -665,7 +664,7 @@ dataset: raw
                 execution_project,
                 method,
                 keyfile,
-                timeout_seconds,
+                timeout,
                 ..
             } => {
                 assert_eq!(project, "my-gcp-project");
@@ -673,7 +672,7 @@ dataset: raw
                 assert!(execution_project.is_none());
                 assert!(method.is_none());
                 assert!(keyfile.is_none());
-                assert!(timeout_seconds.is_none());
+                assert!(timeout.is_none());
             }
             other => panic!("expected BigQuery, got {other:?}"),
         }
@@ -708,7 +707,7 @@ dataset: raw
                 execution_project: None,
                 method: Some("oauth".to_string()),
                 keyfile: None,
-                timeout_seconds: None,
+                timeout: None,
                 identity: None,
             };
         validate_bigquery_service_account:
@@ -718,7 +717,7 @@ dataset: raw
                 execution_project: None,
                 method: Some("service-account".to_string()),
                 keyfile: Some("/path/to/key.json".to_string()),
-                timeout_seconds: None,
+                timeout: None,
                 identity: None,
             };
     }
@@ -756,7 +755,7 @@ dataset: raw
                 execution_project: None,
                 method: None,
                 keyfile: None,
-                timeout_seconds: None,
+                timeout: None,
                 identity: None,
             } => "project must not be empty";
         validate_bigquery_rejects_empty_dataset:
@@ -766,7 +765,7 @@ dataset: raw
                 execution_project: None,
                 method: None,
                 keyfile: None,
-                timeout_seconds: None,
+                timeout: None,
                 identity: None,
             } => "dataset must not be empty";
         validate_bigquery_rejects_empty_execution_project:
@@ -776,7 +775,7 @@ dataset: raw
                 execution_project: Some("".to_string()),
                 method: None,
                 keyfile: None,
-                timeout_seconds: None,
+                timeout: None,
                 identity: None,
             } => "executionProject must not be empty";
     }
@@ -844,7 +843,7 @@ dataset: raw
                 execution_project: Some("billing-proj".to_string()),
                 method: Some("oauth".to_string()),
                 keyfile: None,
-                timeout_seconds: Some(30),
+                timeout: Some(Duration::from_secs(30)),
                 identity: None,
             },
         );
@@ -858,7 +857,7 @@ dataset: raw
                 execution_project,
                 method,
                 keyfile,
-                timeout_seconds,
+                timeout,
                 ..
             } => {
                 assert_eq!(name, "my-bq-direct");
@@ -867,7 +866,10 @@ dataset: raw
                 assert_eq!(execution_project, Some("billing-proj".to_string()));
                 assert_eq!(method, Some("oauth".to_string()));
                 assert!(keyfile.is_none());
-                assert_eq!(timeout_seconds, Some(30));
+                assert_eq!(
+                    timeout.as_ref().map(Duration::as_std),
+                    Some(std::time::Duration::from_secs(30))
+                );
             }
             other => panic!("expected BigQuery, got {other:?}"),
         }
@@ -1002,6 +1004,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "MY_WH".to_string(),
                 role: None,
                 private_key_path: "/path/to/rsa_key.p8".to_string(),
+                timeout: None,
                 identity: None,
             };
     }
@@ -1016,6 +1019,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                timeout: None,
                 identity: None,
             } => "account must not be empty";
         validate_snowflake_rejects_empty_user:
@@ -1027,6 +1031,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                timeout: None,
                 identity: None,
             } => "user must not be empty";
         validate_snowflake_rejects_empty_database:
@@ -1038,6 +1043,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                timeout: None,
                 identity: None,
             } => "database must not be empty";
         validate_snowflake_rejects_empty_schema:
@@ -1049,6 +1055,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                timeout: None,
                 identity: None,
             } => "schema must not be empty";
         validate_snowflake_rejects_empty_warehouse:
@@ -1060,6 +1067,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "".to_string(),
                 role: None,
                 private_key_path: "p".to_string(),
+                timeout: None,
                 identity: None,
             } => "warehouse must not be empty";
         validate_snowflake_rejects_empty_private_key_path:
@@ -1071,6 +1079,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: None,
                 private_key_path: "".to_string(),
+                timeout: None,
                 identity: None,
             } => "privateKeyPath must not be empty";
         validate_snowflake_rejects_empty_role:
@@ -1082,6 +1091,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "w".to_string(),
                 role: Some("".to_string()),
                 private_key_path: "p".to_string(),
+                timeout: None,
                 identity: None,
             } => "role must not be empty";
     }
@@ -1099,6 +1109,7 @@ privateKeyPath: /path/to/rsa_key.p8
                 warehouse: "MY_WH".to_string(),
                 role: Some("MY_ROLE".to_string()),
                 private_key_path: "/path/to/key.p8".to_string(),
+                timeout: None,
                 identity: None,
             },
         );

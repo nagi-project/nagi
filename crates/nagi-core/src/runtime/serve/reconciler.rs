@@ -26,13 +26,17 @@ pub async fn evaluate_and_cache(
     yaml: &str,
     cache_dir: Option<&Path>,
     skip_cache: bool,
+    default_timeout: std::time::Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
     let conn = compiled
         .connection
         .as_ref()
-        .map(|c| c.connect().map_err(EvaluateError::Connection))
+        .map(|c| {
+            c.connect(default_timeout)
+                .map_err(EvaluateError::Connection)
+        })
         .transpose()?;
 
     let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
@@ -54,6 +58,7 @@ pub async fn evaluate_and_cache(
         &compiled.spec.on_drift,
         conn.as_deref(),
         &cached_conditions,
+        default_timeout,
     )
     .await?;
 
@@ -143,9 +148,10 @@ pub async fn spawn_evaluate(
     yaml: String,
     cache_dir: Option<PathBuf>,
     skip_cache: bool,
+    default_timeout: std::time::Duration,
 ) -> (String, EvaluateOutcome) {
     let started_at = chrono::Utc::now().to_rfc3339();
-    let result = evaluate_and_cache(&yaml, cache_dir.as_deref(), skip_cache).await;
+    let result = evaluate_and_cache(&yaml, cache_dir.as_deref(), skip_cache, default_timeout).await;
     let finished_at = chrono::Utc::now().to_rfc3339();
     (
         asset_name,
@@ -177,11 +183,20 @@ pub async fn spawn_sync(
     lock: Arc<dyn SyncLock>,
     lock_config: LockConfig,
     notifier: Option<Arc<dyn Notifier>>,
+    default_timeout: std::time::Duration,
 ) -> (
     String,
     Result<crate::runtime::sync::SyncExecutionResult, SyncError>,
 ) {
-    let result = resolve_and_sync(&asset_name, &yaml, lock, lock_config, notifier).await;
+    let result = resolve_and_sync(
+        &asset_name,
+        &yaml,
+        lock,
+        lock_config,
+        notifier,
+        default_timeout,
+    )
+    .await;
     (asset_name, result)
 }
 
@@ -227,6 +242,7 @@ async fn resolve_and_sync(
     lock: Arc<dyn SyncLock>,
     lock_config: LockConfig,
     notifier: Option<Arc<dyn Notifier>>,
+    default_timeout: std::time::Duration,
 ) -> Result<crate::runtime::sync::SyncExecutionResult, SyncError> {
     let (compiled, entry_idx) = resolve_sync_spec(yaml)?;
     let sync_spec = &compiled.spec.on_drift[entry_idx].sync;
@@ -253,6 +269,7 @@ async fn resolve_and_sync(
         sync_spec,
         crate::runtime::sync::SyncType::Sync,
         None,
+        default_timeout,
     )
     .await;
 
@@ -556,6 +573,7 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }],
         );
 
@@ -580,6 +598,7 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }],
         );
 
@@ -604,6 +623,7 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: Some(serde_yaml::from_str("2m").unwrap()),
+                timeout: None,
             }],
         );
 
@@ -627,6 +647,7 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }],
         );
 
@@ -644,6 +665,7 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }],
         );
 

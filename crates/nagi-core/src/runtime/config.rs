@@ -52,6 +52,10 @@ pub struct NagiConfig {
     /// Log export configuration. When set, compile generates export Assets
     /// and logs are transferred to the remote data warehouse.
     pub export: Option<ExportConfig>,
+    /// Default timeout applied to evaluate, sync, and query operations when
+    /// the individual resource does not specify its own `timeout`. Defaults to 1h.
+    #[serde(default = "default_timeout")]
+    pub default_timeout: Duration,
 }
 
 impl Default for NagiConfig {
@@ -68,8 +72,13 @@ impl Default for NagiConfig {
             max_sync_concurrency: None,
             nagi_dir: NagiDir::default(),
             export: None,
+            default_timeout: default_timeout(),
         }
     }
+}
+
+fn default_timeout() -> Duration {
+    Duration::from_secs(3600)
 }
 
 fn default_lock_ttl_seconds() -> u64 {
@@ -150,6 +159,15 @@ fn schema_default_nagi_dir() -> NagiDir {
     NagiDir::new(PathBuf::from("~/.nagi"))
 }
 
+/// Returns the default timeout from `nagi.yaml` in the current directory.
+/// Falls back to `NagiConfig::default()` if the config file is missing or unreadable.
+pub fn resolve_default_timeout() -> std::time::Duration {
+    load_config(Path::new("."))
+        .unwrap_or_default()
+        .default_timeout
+        .as_std()
+}
+
 /// Loads config from `project_dir` and returns the resolved `NagiDir`.
 /// Falls back to the default if the config file is missing or unreadable.
 pub fn resolve_nagi_dir(project_dir: &Path) -> NagiDir {
@@ -180,6 +198,9 @@ pub struct ExportConfig {
     /// Condition evaluation interval and export throttling threshold.
     #[serde(default = "default_export_interval")]
     pub interval: Duration,
+    /// Timeout for export operations. Falls back to `defaultTimeout` when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<Duration>,
 }
 
 fn default_export_format() -> ExportFormat {
@@ -268,6 +289,21 @@ mod tests {
         assert!(config.max_sync_concurrency.is_none());
         assert!(config.nagi_dir.root().ends_with(".nagi"));
         assert!(config.export.is_none());
+        assert_eq!(
+            config.default_timeout.as_std(),
+            std::time::Duration::from_secs(3600)
+        );
+    }
+
+    #[test]
+    fn load_custom_default_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("nagi.yaml"), "defaultTimeout: 30m").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(
+            config.default_timeout.as_std(),
+            std::time::Duration::from_secs(30 * 60)
+        );
     }
 
     #[test]
@@ -417,6 +453,23 @@ export:
     }
 
     #[test]
+    fn load_export_config_with_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "\
+export:
+  connection: my-bq
+  dataset: logs
+  timeout: 10m";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_config(dir.path()).unwrap();
+        let export = config.export.unwrap();
+        assert_eq!(
+            export.timeout.as_ref().map(Duration::as_std),
+            Some(std::time::Duration::from_secs(600))
+        );
+    }
+
+    #[test]
     fn load_export_config_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "\
@@ -431,6 +484,7 @@ export:
             export.interval.as_std(),
             std::time::Duration::from_secs(30 * 60)
         );
+        assert!(export.timeout.is_none());
     }
 
     #[test]

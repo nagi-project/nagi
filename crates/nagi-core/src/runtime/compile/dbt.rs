@@ -186,7 +186,7 @@ mod tests {
             execution_project: None,
             method: None,
             keyfile: None,
-            timeout_seconds: None,
+            timeout: None,
             identity_env: None,
         });
 
@@ -204,7 +204,7 @@ mod tests {
             execution_project: None,
             method: None,
             keyfile: None,
-            timeout_seconds: None,
+            timeout: None,
             identity_env: None,
         });
 

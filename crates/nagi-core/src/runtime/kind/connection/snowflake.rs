@@ -11,6 +11,7 @@ use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::runtime::duration::Duration;
 use crate::runtime::kind::connection::dbt::AdapterConfig;
 
 use super::{require_str, Connection, ConnectionError};
@@ -26,6 +27,7 @@ pub(super) struct SnowflakeConfig {
     pub(super) warehouse: String,
     pub(super) role: Option<String>,
     pub(super) private_key_path: String,
+    pub(super) timeout: Option<Duration>,
 }
 
 impl SnowflakeConfig {
@@ -46,6 +48,11 @@ impl SnowflakeConfig {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let private_key_path = require_str(&output.fields, "private_key_path")?;
+        let timeout = output
+            .fields
+            .get("query_timeout")
+            .and_then(|v| v.as_u64())
+            .map(Duration::from_secs);
         Ok(Self {
             account,
             user,
@@ -54,6 +61,7 @@ impl SnowflakeConfig {
             warehouse,
             role,
             private_key_path,
+            timeout,
         })
     }
 }
@@ -151,9 +159,14 @@ impl SnowflakeConnection {
         let token = self.jwt()?;
         let url = self.api_url();
 
+        let timeout = self
+            .config
+            .timeout
+            .as_ref()
+            .and_then(|d| u32::try_from(d.as_std().as_secs()).ok());
         let body = StatementRequest {
             statement: sql,
-            timeout: 60,
+            timeout,
             database: &self.config.database,
             schema: &self.config.schema,
             warehouse: &self.config.warehouse,
@@ -182,7 +195,8 @@ impl SnowflakeConnection {
 #[serde(rename_all = "camelCase")]
 struct StatementRequest<'a> {
     statement: &'a str,
-    timeout: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeout: Option<u32>,
     database: &'a str,
     schema: &'a str,
     warehouse: &'a str,
@@ -417,6 +431,50 @@ my_project:
     }
 
     #[test]
+    fn parses_query_timeout() {
+        let output = AdapterConfig {
+            adapter_type: "snowflake".to_string(),
+            fields: [
+                (
+                    "account".to_string(),
+                    serde_yaml::Value::String("a".to_string()),
+                ),
+                (
+                    "user".to_string(),
+                    serde_yaml::Value::String("u".to_string()),
+                ),
+                (
+                    "database".to_string(),
+                    serde_yaml::Value::String("d".to_string()),
+                ),
+                (
+                    "schema".to_string(),
+                    serde_yaml::Value::String("s".to_string()),
+                ),
+                (
+                    "warehouse".to_string(),
+                    serde_yaml::Value::String("w".to_string()),
+                ),
+                (
+                    "private_key_path".to_string(),
+                    serde_yaml::Value::String("/p".to_string()),
+                ),
+                (
+                    "query_timeout".to_string(),
+                    serde_yaml::Value::Number(120.into()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let cfg = SnowflakeConfig::from_output(&output).unwrap();
+        assert_eq!(
+            cfg.timeout.as_ref().map(Duration::as_std),
+            Some(std::time::Duration::from_secs(120))
+        );
+    }
+
+    #[test]
     fn rejects_unsupported_adapter() {
         let output = AdapterConfig {
             adapter_type: "bigquery".to_string(),
@@ -470,6 +528,7 @@ my_project:
             warehouse: "MY_WH".to_string(),
             role: None,
             private_key_path: "/dummy".to_string(),
+            timeout: None,
         })
     }
 

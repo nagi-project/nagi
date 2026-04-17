@@ -102,7 +102,7 @@ pub enum NagiKind {
         #[serde(rename = "apiVersion")]
         api_version: String,
         metadata: Metadata,
-        spec: SyncSpec,
+        spec: Box<SyncSpec>,
     },
     Origin {
         #[serde(rename = "apiVersion")]

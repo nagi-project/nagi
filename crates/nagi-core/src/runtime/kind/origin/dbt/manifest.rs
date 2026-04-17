@@ -195,7 +195,7 @@ fn make_dbt_run_sync(name: &str, dbt_extra_args: &[String]) -> NagiKind {
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
         metadata: Metadata::new(name),
-        spec: SyncSpec::new(SyncStep::command(args)),
+        spec: Box::new(SyncSpec::new(SyncStep::command(args))),
     }
 }
 
@@ -204,7 +204,7 @@ fn make_skip_sync() -> NagiKind {
     NagiKind::Sync {
         api_version: API_VERSION.to_string(),
         metadata: Metadata::new(SKIP_SYNC_NAME),
-        spec: SyncSpec::new(SyncStep::command(vec!["true".to_string()])),
+        spec: Box::new(SyncSpec::new(SyncStep::command(vec!["true".to_string()]))),
     }
 }
 
@@ -498,6 +498,7 @@ fn tests_to_conditions(tests: &[&DbtNode], dbt_extra_args: &[String]) -> Vec<Des
                 env: HashMap::new(),
                 evaluate_cache_ttl: None,
                 identity: None,
+                timeout: None,
             });
         }
     }

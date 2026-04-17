@@ -14,6 +14,7 @@ async fn evaluate_from_compiled(
     cache_dir: Option<&Path>,
     db_path: Option<&Path>,
     logs_dir: Option<&Path>,
+    default_timeout: std::time::Duration,
 ) -> Result<String, EvaluateError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
@@ -27,7 +28,10 @@ async fn evaluate_from_compiled(
     let conn = compiled
         .connection
         .as_ref()
-        .map(|c| c.connect().map_err(EvaluateError::Connection))
+        .map(|c| {
+            c.connect(default_timeout)
+                .map_err(EvaluateError::Connection)
+        })
         .transpose()?;
 
     let conn_ref = conn.as_deref();
@@ -36,6 +40,7 @@ async fn evaluate_from_compiled(
         &compiled.spec.on_drift,
         conn_ref,
         log_store.as_ref(),
+        default_timeout,
     )
     .await?;
 
@@ -84,6 +89,7 @@ async fn evaluate_assets(
     assets: &[(String, String)],
     cache_dir: Option<&Path>,
 ) -> Result<Vec<serde_json::Value>, EvaluateError> {
+    let default_timeout = crate::runtime::config::resolve_default_timeout();
     let handles: Vec<_> = assets
         .iter()
         .map(|(name, yaml)| {
@@ -92,8 +98,13 @@ async fn evaluate_assets(
             let cache = cache_dir.map(PathBuf::from);
             tokio::task::spawn_blocking(move || {
                 let rt = tokio::runtime::Handle::current();
-                let json =
-                    rt.block_on(evaluate_from_compiled(&yaml, cache.as_deref(), None, None))?;
+                let json = rt.block_on(evaluate_from_compiled(
+                    &yaml,
+                    cache.as_deref(),
+                    None,
+                    None,
+                    default_timeout,
+                ))?;
                 let value: serde_json::Value = serde_json::from_str(&json)
                     .map_err(|e| EvaluateError::Serialize(e.to_string()))?;
                 Ok::<(String, serde_json::Value), EvaluateError>((name, value))

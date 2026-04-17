@@ -6,6 +6,7 @@ use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::runtime::duration::Duration;
 use crate::runtime::kind::connection::dbt::AdapterConfig;
 
 use super::{require_str, Connection, ConnectionError};
@@ -63,8 +64,9 @@ pub struct BigQueryConfig {
     /// API endpoint project for billing. Falls back to `project` when `None`.
     pub execution_project: Option<String>,
     pub dataset: String,
-    /// Query timeout in milliseconds. `None` defers to the BigQuery server default.
-    pub timeout_ms: Option<u32>,
+    /// Query timeout. `None` when not specified by the user; the global default
+    /// is injected by `ResolvedConnection::connect()`.
+    pub timeout: Option<Duration>,
 }
 
 impl BigQueryConfig {
@@ -93,18 +95,11 @@ impl BigQueryConfig {
                 )))
             }
         };
-        let timeout_ms = output
+        let timeout = output
             .fields
             .get("job_execution_timeout_seconds")
             .and_then(|v| v.as_u64())
-            .map(|secs| {
-                u32::try_from(secs.saturating_mul(1000)).map_err(|_| {
-                    ConnectionError::InvalidField {
-                        field: "job_execution_timeout_seconds".to_string(),
-                    }
-                })
-            })
-            .transpose()?;
+            .map(Duration::from_secs);
         let execution_project = output
             .fields
             .get("execution_project")
@@ -115,7 +110,7 @@ impl BigQueryConfig {
             project,
             execution_project,
             dataset,
-            timeout_ms,
+            timeout,
         })
     }
 }
@@ -297,7 +292,7 @@ impl BigQueryConnection {
         execution_project: &Option<String>,
         method: Option<&str>,
         keyfile: &Option<String>,
-        timeout_seconds: Option<u32>,
+        timeout: Option<Duration>,
         identity_env: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Self, super::ConnectionError> {
         let auth = match method.unwrap_or("oauth") {
@@ -320,7 +315,7 @@ impl BigQueryConnection {
             project: project.to_string(),
             execution_project: execution_project.clone(),
             dataset: dataset.to_string(),
-            timeout_ms: timeout_seconds.map(|s| s.saturating_mul(1000)),
+            timeout,
         };
         Ok(Self {
             config,
@@ -369,7 +364,11 @@ impl BigQueryConnection {
                 project_id: self.config.project.clone(),
                 dataset_id: self.config.dataset.clone(),
             },
-            timeout_ms: self.config.timeout_ms,
+            timeout_ms: self
+                .config
+                .timeout
+                .as_ref()
+                .and_then(|d| u32::try_from(d.as_std().as_millis()).ok()),
         }
     }
 
@@ -744,33 +743,9 @@ my_project:
         let f = profiles();
         let out = f.resolve("my_project", Some("with_timeout")).unwrap();
         let cfg = BigQueryConfig::from_output(out).unwrap();
-        assert_eq!(cfg.timeout_ms, Some(30_000));
-    }
-
-    #[test]
-    fn rejects_timeout_overflow() {
-        let output = AdapterConfig {
-            adapter_type: "bigquery".to_string(),
-            fields: [
-                (
-                    "project".to_string(),
-                    serde_yaml::Value::String("p".to_string()),
-                ),
-                (
-                    "dataset".to_string(),
-                    serde_yaml::Value::String("d".to_string()),
-                ),
-                (
-                    "job_execution_timeout_seconds".to_string(),
-                    serde_yaml::Value::Number(4_295_000.into()),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        };
-        let err = BigQueryConfig::from_output(&output).unwrap_err();
-        assert!(
-            matches!(err, ConnectionError::InvalidField { field } if field == "job_execution_timeout_seconds")
+        assert_eq!(
+            cfg.timeout.as_ref().map(Duration::as_std),
+            Some(std::time::Duration::from_secs(30))
         );
     }
 
@@ -813,7 +788,7 @@ my_project:
             project: "p".to_string(),
             execution_project: None,
             dataset: "d".to_string(),
-            timeout_ms: None,
+            timeout: None,
         })
     }
 
@@ -874,9 +849,22 @@ my_project:
             project: "p".to_string(),
             execution_project: Some("billing".to_string()),
             dataset: "d".to_string(),
-            timeout_ms: None,
+            timeout: None,
         });
         assert!(conn.queries_url().contains("/billing/queries"));
+    }
+
+    #[test]
+    fn build_query_request_sends_timeout_ms_from_duration() {
+        let conn = BigQueryConnection::new(BigQueryConfig {
+            auth: AuthMethod::OAuth,
+            project: "p".to_string(),
+            execution_project: None,
+            dataset: "d".to_string(),
+            timeout: Some(Duration::from_secs(45)),
+        });
+        let req = conn.build_query_request("SELECT 1".to_string());
+        assert_eq!(req.timeout_ms, Some(45_000));
     }
 
     #[test]

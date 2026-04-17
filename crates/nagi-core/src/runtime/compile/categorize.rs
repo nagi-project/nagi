@@ -84,7 +84,7 @@ pub(super) fn categorize(resources: Vec<NagiKind>) -> Result<CategorizedResource
             }
             NagiKind::Sync { spec, .. } => {
                 if check_dup_collect(&mut seen, &mut errors, kind, name.clone()) {
-                    result.syncs.insert(name, spec);
+                    result.syncs.insert(name, *spec);
                 }
             }
             NagiKind::Origin { .. } => {}

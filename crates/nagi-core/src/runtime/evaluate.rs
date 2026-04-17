@@ -70,6 +70,11 @@ pub enum EvaluateError {
     Serialize(String),
     #[error("subprocess env resolution error: {0}")]
     EnvResolution(#[from] crate::runtime::subprocess::SubprocessEnvError),
+    #[error("condition '{condition_name}' timed out after {seconds}s")]
+    Timeout {
+        condition_name: String,
+        seconds: u64,
+    },
 }
 
 fn evaluate_boolean(value: serde_json::Value) -> Result<ConditionStatus, EvaluateError> {
@@ -107,6 +112,27 @@ fn require_select_only(query: &str, dialect: &dyn Dialect) -> Result<(), Evaluat
 }
 
 async fn evaluate_condition(
+    name: &str,
+    asset_name: &str,
+    condition: &DesiredCondition,
+    conn: Option<&dyn Connection>,
+    default_timeout: std::time::Duration,
+) -> Result<ConditionResult, EvaluateError> {
+    let timeout = condition
+        .timeout()
+        .map(|d| d.as_std())
+        .unwrap_or(default_timeout);
+    let fut = evaluate_condition_inner(name, asset_name, condition, conn);
+    match tokio::time::timeout(timeout, fut).await {
+        Ok(res) => res,
+        Err(_) => Err(EvaluateError::Timeout {
+            condition_name: name.to_string(),
+            seconds: timeout.as_secs(),
+        }),
+    }
+}
+
+async fn evaluate_condition_inner(
     name: &str,
     asset_name: &str,
     condition: &DesiredCondition,
@@ -155,6 +181,7 @@ async fn evaluate_conditions(
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
     cached_conditions: &std::collections::HashMap<String, ConditionResult>,
+    default_timeout: std::time::Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let conditions = on_drift.iter().flat_map(|e| &e.conditions);
     let mut results = Vec::new();
@@ -167,7 +194,8 @@ async fn evaluate_conditions(
             );
             results.push(cached.clone());
         } else {
-            let result = evaluate_condition(cond.name(), asset_name, cond, conn).await?;
+            let result =
+                evaluate_condition(cond.name(), asset_name, cond, conn, default_timeout).await?;
             results.push(result);
         }
     }
@@ -191,9 +219,17 @@ pub async fn evaluate_asset(
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
     log_store: Option<&LogStore>,
+    default_timeout: std::time::Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let started_at = Utc::now();
-    let mut result = evaluate_conditions(asset_name, on_drift, conn, &Default::default()).await?;
+    let mut result = evaluate_conditions(
+        asset_name,
+        on_drift,
+        conn,
+        &Default::default(),
+        default_timeout,
+    )
+    .await?;
 
     if let Some(store) = log_store {
         let id = crate::runtime::sync::generate_uuid();
@@ -214,8 +250,16 @@ pub(crate) async fn evaluate_asset_cached(
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
     cached_conditions: &std::collections::HashMap<String, ConditionResult>,
+    default_timeout: std::time::Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
-    evaluate_conditions(asset_name, on_drift, conn, cached_conditions).await
+    evaluate_conditions(
+        asset_name,
+        on_drift,
+        conn,
+        cached_conditions,
+        default_timeout,
+    )
+    .await
 }
 
 /// A single condition from an asset's on_drift entries, with its name.
@@ -328,18 +372,26 @@ mod tests {
     }
 
     fn duration(secs: u64) -> Duration {
-        serde_yaml::from_str(&format!("{}s", secs)).unwrap()
+        Duration::from_secs(secs)
     }
+
+    /// 1 hour — arbitrary interval for test freshness conditions.
+    const TEST_INTERVAL_SECS: u64 = 3600;
 
     fn freshness_condition(max_age_secs: u64, column: Option<&str>) -> DesiredCondition {
         DesiredCondition::Freshness {
             name: "freshness".to_string(),
             max_age: duration(max_age_secs),
-            interval: duration(3600),
+            interval: duration(TEST_INTERVAL_SECS),
             check_at: None,
             column: column.map(str::to_string),
             evaluate_cache_ttl: None,
+            timeout: None,
         }
+    }
+
+    fn test_timeout() -> std::time::Duration {
+        std::time::Duration::from_secs(30)
     }
 
     fn epoch_secs_ago(secs: f64) -> Value {
@@ -358,9 +410,15 @@ mod tests {
             response: epoch_secs_ago(3600.0),
         };
         let on_drift = on_drift_with(vec![freshness_condition(7200, None)]);
-        let result = evaluate_asset("my_dataset.my_table", &on_drift, Some(&conn), None)
-            .await
-            .unwrap();
+        let result = evaluate_asset(
+            "my_dataset.my_table",
+            &on_drift,
+            Some(&conn),
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert!(result.ready);
         assert_eq!(result.conditions[0].status, ConditionStatus::Ready);
     }
@@ -371,9 +429,15 @@ mod tests {
             response: epoch_secs_ago(25.0 * 3600.0),
         };
         let on_drift = on_drift_with(vec![freshness_condition(86400, None)]);
-        let result = evaluate_asset("my_dataset.my_table", &on_drift, Some(&conn), None)
-            .await
-            .unwrap();
+        let result = evaluate_asset(
+            "my_dataset.my_table",
+            &on_drift,
+            Some(&conn),
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert!(!result.ready);
         assert!(matches!(
             &result.conditions[0].status,
@@ -387,7 +451,7 @@ mod tests {
             response: Value::String("2099-01-01T00:00:00Z".to_string()),
         };
         let on_drift = on_drift_with(vec![freshness_condition(86400, Some("updated_at"))]);
-        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None, test_timeout())
             .await
             .unwrap();
         assert!(result.ready);
@@ -399,7 +463,7 @@ mod tests {
             response: Value::Null,
         };
         let on_drift = on_drift_with(vec![freshness_condition(86400, None)]);
-        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None, test_timeout()).await;
         assert!(matches!(result, Err(EvaluateError::UnexpectedResult(_))));
     }
 
@@ -415,8 +479,9 @@ mod tests {
             query: "SELECT true".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         }]);
-        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None, test_timeout())
             .await
             .unwrap();
         assert!(result.ready);
@@ -432,8 +497,9 @@ mod tests {
             query: "SELECT false".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         }]);
-        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None)
+        let result = evaluate_asset("my_table", &on_drift, Some(&conn), None, test_timeout())
             .await
             .unwrap();
         assert!(!result.ready);
@@ -487,12 +553,14 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
             DesiredCondition::Sql {
                 name: "check-b".to_string(),
                 query: "SELECT false".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
         ]);
         let result = evaluate_asset(
@@ -500,6 +568,7 @@ mod tests {
             &on_drift,
             Some(&CountingConnection(&call_count)),
             None,
+            test_timeout(),
         )
         .await
         .unwrap();
@@ -529,6 +598,7 @@ mod tests {
             query: "SELECT COUNT(*) > 0 FROM orders".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         };
         let on_drift = on_drift_with(vec![condition.clone()]);
         let result = dry_run_asset("my_table", &on_drift);
@@ -543,6 +613,7 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            timeout: None,
             identity: None,
         };
         let on_drift = on_drift_with(vec![condition.clone()]);
@@ -560,9 +631,10 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            timeout: None,
             identity: None,
         }]);
-        let result = evaluate_asset("my_table", &on_drift, None, None)
+        let result = evaluate_asset("my_table", &on_drift, None, None, test_timeout())
             .await
             .unwrap();
         assert!(result.ready);
@@ -575,8 +647,9 @@ mod tests {
             query: "SELECT 1".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         }]);
-        let result = evaluate_asset("my_table", &on_drift, None, None).await;
+        let result = evaluate_asset("my_table", &on_drift, None, None, test_timeout()).await;
         assert!(matches!(
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "check"
@@ -604,8 +677,10 @@ mod tests {
                 query: query.to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }]);
-            let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
+            let result =
+                evaluate_asset("my_table", &on_drift, Some(&conn), None, test_timeout()).await;
             assert!(
                 matches!(&result, Err(EvaluateError::ReadOnlyViolation(_))),
                 "expected ReadOnlyViolation for query: {query}, got: {result:?}"
@@ -630,8 +705,10 @@ mod tests {
                 query: query.to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }]);
-            let result = evaluate_asset("my_table", &on_drift, Some(&conn), None).await;
+            let result =
+                evaluate_asset("my_table", &on_drift, Some(&conn), None, test_timeout()).await;
             assert!(
                 result.is_ok(),
                 "expected success for query: {query}, got: {result:?}"
@@ -642,7 +719,7 @@ mod tests {
     #[tokio::test]
     async fn freshness_condition_without_connection_returns_error() {
         let on_drift = on_drift_with(vec![freshness_condition(86400, None)]);
-        let result = evaluate_asset("my_table", &on_drift, None, None).await;
+        let result = evaluate_asset("my_table", &on_drift, None, None, test_timeout()).await;
         assert!(matches!(
             result,
             Err(EvaluateError::NoConnection { condition_name }) if condition_name == "freshness"
@@ -659,6 +736,7 @@ mod tests {
             query: "SELECT true".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         }]);
         let cached: HashMap<String, ConditionResult> = [(
             "check".to_string(),
@@ -670,7 +748,7 @@ mod tests {
         )]
         .into();
         // No connection provided — would fail without cache.
-        let result = evaluate_asset_cached("my_table", &on_drift, None, &cached)
+        let result = evaluate_asset_cached("my_table", &on_drift, None, &cached, test_timeout())
             .await
             .unwrap();
         assert!(result.ready);
@@ -687,11 +765,13 @@ mod tests {
             query: "SELECT false".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         }]);
         let cached = HashMap::new();
-        let result = evaluate_asset_cached("my_table", &on_drift, Some(&conn), &cached)
-            .await
-            .unwrap();
+        let result =
+            evaluate_asset_cached("my_table", &on_drift, Some(&conn), &cached, test_timeout())
+                .await
+                .unwrap();
         assert!(!result.ready);
     }
 
@@ -706,12 +786,14 @@ mod tests {
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
             DesiredCondition::Sql {
                 name: "live-check".to_string(),
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
         ]);
         let cached: HashMap<String, ConditionResult> = [(
@@ -725,9 +807,10 @@ mod tests {
             },
         )]
         .into();
-        let result = evaluate_asset_cached("my_table", &on_drift, Some(&conn), &cached)
-            .await
-            .unwrap();
+        let result =
+            evaluate_asset_cached("my_table", &on_drift, Some(&conn), &cached, test_timeout())
+                .await
+                .unwrap();
         // cached-check is Drifted (from cache), live-check is Ready (evaluated)
         assert!(!result.ready);
         assert!(matches!(
@@ -801,9 +884,10 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            timeout: None,
             identity: None,
         }]);
-        let result = evaluate_asset("a", &on_drift, None, None).await;
+        let result = evaluate_asset("a", &on_drift, None, None, test_timeout()).await;
         assert!(
             matches!(result, Err(EvaluateError::CommandFailed(_))),
             "expected CommandFailed, got {result:?}"
@@ -818,13 +902,36 @@ mod tests {
             interval: None,
             env: HashMap::new(),
             evaluate_cache_ttl: None,
+            timeout: None,
             identity: None,
         }]);
-        let result = evaluate_asset("a", &on_drift, None, None).await.unwrap();
+        let result = evaluate_asset("a", &on_drift, None, None, test_timeout())
+            .await
+            .unwrap();
         assert!(!result.ready);
         assert!(matches!(
             result.conditions[0].status,
             ConditionStatus::Drifted { .. }
         ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn command_condition_times_out() {
+        let on_drift = on_drift_with(vec![DesiredCondition::Command {
+            name: "slow-cmd".to_string(),
+            run: vec!["sleep".to_string(), "5".to_string()],
+            interval: None,
+            env: HashMap::new(),
+            evaluate_cache_ttl: None,
+            timeout: Some(crate::runtime::duration::Duration::from_secs(0)),
+            identity: None,
+        }]);
+        // Per-condition timeout of 0s triggers immediate timeout.
+        let result = evaluate_asset("a", &on_drift, None, None, test_timeout()).await;
+        assert!(
+            matches!(result, Err(EvaluateError::Timeout { .. })),
+            "expected Timeout, got {result:?}"
+        );
     }
 }

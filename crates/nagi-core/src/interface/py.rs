@@ -175,6 +175,7 @@ fn execute_sync_proposal(
         .and_then(|e| e.get("evaluationId"))
         .and_then(|id| id.as_str());
 
+    let default_timeout = crate::runtime::config::resolve_default_timeout();
     TOKIO_RT
         .block_on(crate::interface::sync::sync_from_compiled(
             crate::interface::sync::SyncFromCompiledParams {
@@ -187,6 +188,7 @@ fn execute_sync_proposal(
                 dry_run: false,
                 force,
                 evaluation_id,
+                default_timeout,
             },
         ))
         .map_err(to_py_err)

@@ -1,4 +1,5 @@
 use std::process::Stdio;
+use std::time::Duration;
 
 use chrono::Utc;
 use tokio::process::Command;
@@ -10,8 +11,13 @@ use crate::runtime::subprocess;
 /// Executes a single sync step as a subprocess.
 ///
 /// The first element of `args` is the program, the rest are arguments passed
-/// to it. stdout and stderr are captured in full.
-pub async fn execute_step(stage: Stage, step: &SyncStep) -> Result<StageResult, SyncError> {
+/// to it. stdout and stderr are captured in full. The step is aborted after
+/// `timeout` elapses; a timed-out step is killed and returns `SyncError::Timeout`.
+pub async fn execute_step(
+    stage: Stage,
+    step: &SyncStep,
+    timeout: Duration,
+) -> Result<StageResult, SyncError> {
     let args = &step.args;
     let program = &args[0];
     let cmd_args = &args[1..];
@@ -22,14 +28,25 @@ pub async fn execute_step(stage: Stage, step: &SyncStep) -> Result<StageResult, 
     cmd.args(cmd_args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     cmd.env_clear();
     cmd.envs(subprocess::build_subprocess_env(None, &step.env)?);
-    let output = cmd
+    let child = cmd
         .spawn()
-        .map_err(|e| SyncError::SpawnFailed(format!("{program}: {e}")))?
-        .wait_with_output()
-        .await?;
+        .map_err(|e| SyncError::SpawnFailed(format!("{program}: {e}")))?;
+
+    // The child owned by `wait_with_output` is dropped on timeout, which
+    // triggers kill_on_drop and terminates the subprocess.
+    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(res) => res?,
+        Err(_) => {
+            return Err(SyncError::Timeout {
+                stage: stage_label(stage).to_string(),
+                seconds: timeout.as_secs(),
+            });
+        }
+    };
 
     let finished_at = Utc::now().to_rfc3339();
 
@@ -42,6 +59,14 @@ pub async fn execute_step(stage: Stage, step: &SyncStep) -> Result<StageResult, 
         finished_at,
         args: args.clone(),
     })
+}
+
+fn stage_label(stage: Stage) -> &'static str {
+    match stage {
+        Stage::Pre => "pre",
+        Stage::Run => "run",
+        Stage::Post => "post",
+    }
 }
 
 #[cfg(test)]
@@ -59,13 +84,19 @@ mod tests {
         step
     }
 
+    fn test_timeout() -> Duration {
+        Duration::from_secs(30)
+    }
+
     #[cfg(unix)]
     async fn run_echo_var(var_name: &str, step_env: &[(&str, &str)]) -> StageResult {
         let step = step_with_env(
             vec!["sh", "-c", &format!("printf %s \"${{{var_name}}}\"")],
             step_env,
         );
-        execute_step(Stage::Run, &step).await.unwrap()
+        execute_step(Stage::Run, &step, test_timeout())
+            .await
+            .unwrap()
     }
 
     #[cfg(windows)]
@@ -78,7 +109,9 @@ mod tests {
             ],
             step_env,
         );
-        execute_step(Stage::Run, &step).await.unwrap()
+        execute_step(Stage::Run, &step, test_timeout())
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -126,7 +159,9 @@ mod tests {
             vec!["powershell", "-Command", "exit 0"],
             &[("X", "${NAGI_DEFINITELY_UNSET_12345}")],
         );
-        let err = execute_step(Stage::Run, &step).await.unwrap_err();
+        let err = execute_step(Stage::Run, &step, test_timeout())
+            .await
+            .unwrap_err();
         match err {
             SyncError::EnvResolution(SubprocessEnvError::UndefinedVar(name)) => {
                 assert_eq!(name, "NAGI_DEFINITELY_UNSET_12345");
@@ -145,10 +180,22 @@ mod tests {
         let args = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
         let mut step = SyncStep::command(args);
         step.env = env;
-        let err = execute_step(Stage::Run, &step).await.unwrap_err();
+        let err = execute_step(Stage::Run, &step, test_timeout())
+            .await
+            .unwrap_err();
         assert!(matches!(
             err,
             SyncError::EnvResolution(SubprocessEnvError::InvalidKeyName(_))
         ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn times_out_when_step_exceeds_deadline() {
+        let step = SyncStep::command(vec!["sleep".into(), "5".into()]);
+        let err = execute_step(Stage::Run, &step, Duration::from_millis(100))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SyncError::Timeout { .. }));
     }
 }
