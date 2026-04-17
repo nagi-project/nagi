@@ -22,7 +22,7 @@ Connection resolved via dbt profiles.yml.
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `profile` | string | Yes | - | Profile name as defined in `~/.dbt/profiles.yml`. |
-| `dbtCloud` | DbtCloudSpec | — | - | Optional dbt Cloud configuration for running-job checks before sync. |
+| `dbtCloud.credentialsFile` | string | — | - | Path to the dbt Cloud credentials file. Defaults to `~/.dbt/dbt_cloud.yml`. |
 | `identity` | string | — | - | Reference to a `kind: Identity` resource for authentication scope. |
 | `profilesDir` | string | — | - | Directory containing profiles.yml. If omitted, uses `~/.dbt/`. |
 | `target` | string | — | - | If omitted, the default target in profiles.yml is used. |

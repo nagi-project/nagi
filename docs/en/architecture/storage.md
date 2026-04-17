@@ -32,6 +32,8 @@ Evaluate results are saved as files per Asset and desired state. [`nagi status`]
 
 <!-- schema:auto-generated:start:AssetEvalResult -->
 
+### AssetEvalResult
+
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `assetName` | string | Yes | - | Name of the evaluated Asset resource. |
@@ -58,6 +60,8 @@ File names correspond to the `metadata.name` of [kind: Asset](../reference/resou
 
 <!-- schema:auto-generated:start:LockInfo -->
 
+### LockInfo
+
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `acquired_at_epoch_secs` | integer | Yes | - | Unix epoch seconds when the lock was acquired. |
@@ -79,6 +83,8 @@ File names correspond to the `metadata.name` of [kind: Asset](../reference/resou
 ```
 
 <!-- schema:auto-generated:start:SuspendedInfo -->
+
+### SuspendedInfo
 
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
@@ -112,6 +118,8 @@ Execution logs are stored with metadata and log bodies separated.
 ```
 
 <!-- schema:auto-generated:start:SyncLogEntry -->
+
+### SyncLogEntry
 
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |

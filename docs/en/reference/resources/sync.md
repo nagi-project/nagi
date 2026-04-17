@@ -43,6 +43,8 @@ Each step (pre, run, post) can declare environment variables via the `env` field
 
 <!-- schema:auto-generated:start:SyncStep -->
 
+### SyncStep
+
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `args` | list[string] | Yes | - | Command and arguments in argv format. |

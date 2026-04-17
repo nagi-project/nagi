@@ -45,6 +45,8 @@ spec:
 
 <!-- schema:auto-generated:start:OnDriftEntry -->
 
+### OnDriftEntry
+
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `conditions` | string | Yes | - | Name of the `kind: Conditions` resource whose conditions define drift. |
