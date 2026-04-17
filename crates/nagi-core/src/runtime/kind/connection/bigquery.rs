@@ -610,7 +610,7 @@ fn extract_rows_from_query_response(
         .into_iter()
         .map(|row| {
             let mut obj = serde_json::Map::new();
-            for (field, cell) in fields.iter().zip(row.f.into_iter()) {
+            for (field, cell) in fields.iter().zip(row.f) {
                 obj.insert(field.name.clone(), cell.v);
             }
             Value::Object(obj)
