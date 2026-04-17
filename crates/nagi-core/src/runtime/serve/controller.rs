@@ -174,6 +174,7 @@ fn spawn_evaluates(
     cache_dir: &Option<PathBuf>,
     max_evaluate: Option<usize>,
     conn_semaphores: &ConnectionSemaphores,
+    default_timeout: std::time::Duration,
 ) {
     while let Some(name) = state.next_spawnable(max_evaluate) {
         if let Some(&yaml) = yaml_map.get(name.as_str()) {
@@ -186,7 +187,8 @@ fn spawn_evaluates(
                     Some(s) => Some(s.acquire().await.expect("semaphore closed")),
                     None => None,
                 };
-                reconciler::spawn_evaluate(name, yaml_owned, cache, skip_cache).await
+                reconciler::spawn_evaluate(name, yaml_owned, cache, skip_cache, default_timeout)
+                    .await
             });
         }
     }
@@ -200,6 +202,7 @@ struct SyncSpawnContext<'a> {
     notifier: &'a Option<Arc<dyn Notifier>>,
     max_sync: Option<usize>,
     conn_semaphores: &'a ConnectionSemaphores,
+    default_timeout: std::time::Duration,
 }
 
 /// Drains the sync queue and spawns sync tasks, respecting the concurrency limit.
@@ -219,12 +222,21 @@ fn spawn_syncs(
             let notifier = ctx.notifier.clone();
             let lock_config = ctx.lock_config;
             let yaml_owned = yaml.to_string();
+            let default_timeout = ctx.default_timeout;
             sync_tasks.spawn(async move {
                 let _permit = match &sem {
                     Some(s) => Some(s.acquire().await.expect("semaphore closed")),
                     None => None,
                 };
-                reconciler::spawn_sync(name, yaml_owned, sync_lock, lock_config, notifier).await
+                reconciler::spawn_sync(
+                    name,
+                    yaml_owned,
+                    sync_lock,
+                    lock_config,
+                    notifier,
+                    default_timeout,
+                )
+                .await
             });
         }
     }
@@ -280,16 +292,25 @@ fn handle_sync_completion(
     }
 }
 
+/// Runtime configuration passed to each Controller.
+pub(super) struct ControllerConfig {
+    pub lock_config: reconciler::LockConfig,
+    pub concurrency: ConcurrencyLimits,
+    pub default_timeout: std::time::Duration,
+}
+
 /// Runs the reconciliation loop for one connected component.
 pub(super) async fn run_controller(
     input: ControllerInput,
     backend: BackendStores,
     notifier: Option<Arc<dyn Notifier>>,
     log_store: Option<LogStore>,
-    lock_config: reconciler::LockConfig,
-    concurrency: ConcurrencyLimits,
+    config: ControllerConfig,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ServeError> {
+    let lock_config = config.lock_config;
+    let concurrency = config.concurrency;
+    let default_timeout = config.default_timeout;
     let ControllerInput {
         assets,
         edges,
@@ -315,7 +336,7 @@ pub(super) async fn run_controller(
         .map(|a| (a.name.as_str(), a.yaml.as_str()))
         .collect();
 
-    let conn_semaphores = build_connection_semaphores(&yaml_map);
+    let conn_semaphores = build_connection_semaphores(&yaml_map, default_timeout);
 
     loop {
         spawn_evaluates(
@@ -325,6 +346,7 @@ pub(super) async fn run_controller(
             &cache_dir,
             concurrency.max_evaluate,
             &conn_semaphores,
+            default_timeout,
         );
         let sync_ctx = SyncSpawnContext {
             yaml_map: &yaml_map,
@@ -333,6 +355,7 @@ pub(super) async fn run_controller(
             notifier: &notifier,
             max_sync: concurrency.max_sync,
             conn_semaphores: &conn_semaphores,
+            default_timeout,
         };
         spawn_syncs(&mut state, &mut sync_tasks, &sync_ctx);
 
@@ -414,16 +437,23 @@ type ConnectionSemaphores = HashMap<String, Arc<tokio::sync::Semaphore>>;
 /// Assets without a connection or with unlimited connections get no entry.
 fn resolve_connection_limit(
     conn: &crate::runtime::kind::connection::ResolvedConnection,
+    default_timeout: std::time::Duration,
 ) -> Option<usize> {
     use crate::runtime::kind::connection::ResolvedConnection;
     match conn {
         ResolvedConnection::DuckDb { .. } => Some(1),
-        ResolvedConnection::Dbt { .. } => conn.connect().ok().and_then(|c| c.max_concurrency()),
+        ResolvedConnection::Dbt { .. } => conn
+            .connect(default_timeout)
+            .ok()
+            .and_then(|c| c.max_concurrency()),
         _ => None,
     }
 }
 
-fn build_connection_semaphores(yaml_map: &HashMap<&str, &str>) -> ConnectionSemaphores {
+fn build_connection_semaphores(
+    yaml_map: &HashMap<&str, &str>,
+    default_timeout: std::time::Duration,
+) -> ConnectionSemaphores {
     let mut conn_limits: HashMap<String, usize> = HashMap::new();
     let mut asset_to_conn: HashMap<String, String> = HashMap::new();
 
@@ -435,7 +465,7 @@ fn build_connection_semaphores(yaml_map: &HashMap<&str, &str>) -> ConnectionSema
 
     for (asset_name, conn) in assets_with_conn {
         let conn_name = conn.name().to_string();
-        if let Some(n) = resolve_connection_limit(&conn) {
+        if let Some(n) = resolve_connection_limit(&conn, default_timeout) {
             conn_limits.entry(conn_name.clone()).or_insert(n);
         }
         asset_to_conn.insert(asset_name, conn_name);

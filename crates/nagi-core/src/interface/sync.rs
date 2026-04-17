@@ -35,15 +35,21 @@ pub(crate) async fn propose_sync(
     )?;
     let st = parse_sync_type(params.sync_type)?;
     let log_store = open_log_store(params.db_path, params.logs_dir)?;
+    let default_timeout = crate::runtime::config::resolve_default_timeout();
     let mut proposals = Vec::with_capacity(assets.len());
 
     for (name, yaml) in &assets {
         let compiled: CompiledAsset =
             serde_yaml::from_str(yaml).map_err(|e| SyncError::Parse(e.to_string()))?;
 
-        let evaluation = evaluate_for_proposal(&compiled, params.cache_dir, log_store.as_ref())
-            .await
-            .ok();
+        let evaluation = evaluate_for_proposal(
+            &compiled,
+            params.cache_dir,
+            log_store.as_ref(),
+            default_timeout,
+        )
+        .await
+        .ok();
 
         let dry_run_stages = match resolve_sync_spec(&compiled) {
             Ok(sync_spec) => {
@@ -70,16 +76,24 @@ async fn evaluate_for_proposal(
     compiled: &CompiledAsset,
     cache_dir: Option<&Path>,
     log_store: Option<&LogStore>,
+    default_timeout: std::time::Duration,
 ) -> Result<SyncProposalEvaluation, SyncError> {
     let conn = compiled
         .connection
         .as_ref()
         .map(|c| {
-            c.connect()
+            c.connect(default_timeout)
                 .map_err(|e| SyncError::Connection(e.to_string()))
         })
         .transpose()?;
-    let result = evaluate_and_cache(compiled, conn.as_deref(), log_store, cache_dir).await?;
+    let result = evaluate_and_cache(
+        compiled,
+        conn.as_deref(),
+        log_store,
+        cache_dir,
+        default_timeout,
+    )
+    .await?;
     Ok(eval_result_to_proposal(&result))
 }
 
@@ -144,6 +158,7 @@ pub(crate) struct SyncFromCompiledParams<'a> {
     pub dry_run: bool,
     pub force: bool,
     pub evaluation_id: Option<&'a str>,
+    pub default_timeout: std::time::Duration,
 }
 
 /// Deserializes compiled YAML, delegates to runtime, and serializes the result.
@@ -175,6 +190,7 @@ pub(crate) async fn sync_from_compiled(
         evaluation_id: params.evaluation_id,
         log_store: log_store.as_ref(),
         cache_dir: params.cache_dir,
+        default_timeout: params.default_timeout,
     })
     .await?;
 
@@ -279,6 +295,7 @@ spec:
             dry_run: true,
             force: false,
             evaluation_id: None,
+            default_timeout: std::time::Duration::from_secs(3600),
         };
         let json = sync_from_compiled(params).await.unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -298,6 +315,7 @@ spec:
             dry_run: true,
             force: false,
             evaluation_id: None,
+            default_timeout: std::time::Duration::from_secs(3600),
         };
         let result = sync_from_compiled(params).await;
         assert!(matches!(result, Err(SyncError::Parse(_))));
@@ -315,6 +333,7 @@ spec:
             dry_run: true,
             force: false,
             evaluation_id: None,
+            default_timeout: std::time::Duration::from_secs(3600),
         };
         let result = sync_from_compiled(params).await;
         assert!(result.is_err());

@@ -20,10 +20,14 @@ impl Duration {
 
     /// Creates a Duration from a number of seconds.
     pub fn from_secs(secs: u64) -> Self {
-        let inner = StdDuration::from_secs(secs);
+        Self::from_std(StdDuration::from_secs(secs))
+    }
+
+    /// Creates a Duration from a `std::time::Duration`.
+    pub fn from_std(d: StdDuration) -> Self {
         Self {
-            inner,
-            raw: humantime::format_duration(inner).to_string(),
+            inner: d,
+            raw: humantime::format_duration(d).to_string(),
         }
     }
 }

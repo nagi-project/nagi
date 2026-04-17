@@ -94,6 +94,9 @@ pub enum DesiredCondition {
         /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
         #[serde(default, rename = "evaluateCacheTtl")]
         evaluate_cache_ttl: Option<Duration>,
+        /// Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<Duration>,
     },
     /// Query must return a scalar boolean. Ready when the result is true.
     #[serde(rename = "SQL")]
@@ -108,6 +111,9 @@ pub enum DesiredCondition {
         /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
         #[serde(default, rename = "evaluateCacheTtl")]
         evaluate_cache_ttl: Option<Duration>,
+        /// Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<Duration>,
     },
     /// Runs an external command. Ready when the process exits with code 0.
     /// `run` is argv: the first element is the program, the rest are arguments.
@@ -125,6 +131,9 @@ pub enum DesiredCondition {
         /// Per-condition cache TTL override. Takes precedence over the Asset-level default.
         #[serde(default, rename = "evaluateCacheTtl")]
         evaluate_cache_ttl: Option<Duration>,
+        /// Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<Duration>,
         /// Reference to a `kind: Identity` resource for authentication scope.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         identity: Option<String>,
@@ -225,6 +234,15 @@ impl DesiredCondition {
             DesiredCondition::Command {
                 evaluate_cache_ttl, ..
             } => evaluate_cache_ttl.as_ref(),
+        }
+    }
+
+    /// Returns the per-condition timeout if configured.
+    pub fn timeout(&self) -> Option<&Duration> {
+        match self {
+            DesiredCondition::Freshness { timeout, .. } => timeout.as_ref(),
+            DesiredCondition::Sql { timeout, .. } => timeout.as_ref(),
+            DesiredCondition::Command { timeout, .. } => timeout.as_ref(),
         }
     }
 
@@ -398,12 +416,14 @@ autoSync: false
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
             DesiredCondition::Sql {
                 name: "check-b".to_string(),
                 query: "SELECT false".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
         ];
         assert!(validate_no_duplicate_condition_names(&conditions).is_ok());
@@ -417,12 +437,14 @@ autoSync: false
                 query: "SELECT true".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
             DesiredCondition::Sql {
                 name: "check-a".to_string(),
                 query: "SELECT false".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             },
         ];
         let err = validate_no_duplicate_condition_names(&conditions).unwrap_err();
@@ -437,6 +459,7 @@ autoSync: false
             query: "SELECT true".to_string(),
             interval: None,
             evaluate_cache_ttl: None,
+            timeout: None,
         };
         let err = condition.validate().unwrap_err();
         assert!(matches!(err, KindError::InvalidSpec { kind, .. } if kind == KIND));
@@ -526,6 +549,32 @@ run: [dbt, test, --select, my_model]
             &condition,
             DesiredCondition::Command { name, run, .. } if name == "dbt-test" && run == &["dbt", "test", "--select", "my_model"]
         ));
+    }
+
+    #[test]
+    fn parse_condition_with_timeout() {
+        let yaml = r#"
+name: slow-check
+type: Command
+run: [dbt, test]
+timeout: 5m
+"#;
+        let condition: DesiredCondition = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            condition.timeout().map(|d| d.as_std()),
+            Some(StdDuration::from_secs(300))
+        );
+    }
+
+    #[test]
+    fn parse_condition_timeout_omitted() {
+        let yaml = r#"
+name: check
+type: SQL
+query: "SELECT true"
+"#;
+        let condition: DesiredCondition = serde_yaml::from_str(yaml).unwrap();
+        assert!(condition.timeout().is_none());
     }
 
     #[test]

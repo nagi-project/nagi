@@ -8,6 +8,7 @@
 backend:
   type: local
 nagiDir: ~/.nagi
+defaultTimeout: 1h
 notify:
   slack:
     channel: "#nagi-alerts"
@@ -33,7 +34,12 @@ terminationGracePeriodSeconds: 300
 | `backend.prefix` | string | — | - | Path prefix for remote storage (e.g. `my-project/nagi`). When set, all remote paths are prefixed with this value. Ignored for the local backend. |
 | `backend.region` | string | — | - | AWS region for S3 backend (e.g. `us-east-1`). Required when type is `s3`. |
 | `backend.type` | string | — | local | Backend type identifier. One of `local`, `gcs`, `s3`. Defaults to `local`. |
-| `export` | ExportConfig | — | - | Log export configuration. When set, compile generates export Assets and logs are transferred to the remote data warehouse. |
+| `defaultTimeout` | Duration | — | 1h | Default timeout applied to evaluate, sync, and query operations when the individual resource does not specify its own `timeout`. Defaults to 1h. |
+| `export.connection` | string | Yes | - | Reference to a `kind: Connection` resource name. |
+| `export.dataset` | string | Yes | - | Data warehouse dataset (BigQuery) or schema (Snowflake) to export into. |
+| `export.format` | ExportFormat | — | - | Intermediate file format for export. |
+| `export.interval` | Duration | — | 30m | Condition evaluation interval and export throttling threshold. |
+| `export.timeout` | Duration | — | - | Timeout for export operations. Falls back to `defaultTimeout` when omitted. |
 | `lockRetryIntervalSeconds` | integer | — | 900 | Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes). |
 | `lockRetryMaxAttempts` | integer | — | 3 | Maximum number of lock acquisition retry attempts before skipping. Defaults to 3. |
 | `lockTtlSeconds` | integer | — | 3600 | Time-to-live in seconds for sync lock files. Locks expire after this duration, preventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour). |
@@ -41,7 +47,7 @@ terminationGracePeriodSeconds: 300
 | `maxEvaluateConcurrency` | integer | — | - | Maximum number of concurrent evaluate tasks per Controller. When omitted, no limit is applied. |
 | `maxSyncConcurrency` | integer | — | - | Maximum number of concurrent sync tasks per Controller. When omitted, no limit is applied. |
 | `nagiDir` | NagiDir | — | - | Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`. |
-| `notify.slack` | SlackConfig | — | - | Slack notification settings. When set, notifications are sent to the specified channel. |
+| `notify.slack.channel` | string | Yes | - | Slack channel to send notifications to (e.g. `#nagi-alerts`). |
 | `terminationGracePeriodSeconds` | integer | — | - | Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown. When omitted, waits indefinitely. |
 
 <!-- schema:auto-generated:end:NagiConfig -->

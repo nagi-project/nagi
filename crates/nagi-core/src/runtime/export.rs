@@ -408,18 +408,21 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
             env: Default::default(),
             evaluate_cache_ttl: None,
             identity: None,
+            timeout: config.timeout.clone(),
         }]),
     };
 
+    let mut sync_step = kind::sync::SyncStep::command(vec![
+        "nagi".to_string(),
+        "export".to_string(),
+        "--select".to_string(),
+        "{{ sync.table }}".to_string(),
+    ]);
+    sync_step.timeout = config.timeout.clone();
     let sync_resource = NagiKind::Sync {
         api_version: kind::API_VERSION.to_string(),
         metadata: kind::Metadata::new(sync_name),
-        spec: kind::SyncSpec::new(kind::sync::SyncStep::command(vec![
-            "nagi".to_string(),
-            "export".to_string(),
-            "--select".to_string(),
-            "{{ sync.table }}".to_string(),
-        ])),
+        spec: Box::new(kind::SyncSpec::new(sync_step)),
     };
 
     let mut resources = vec![conditions, sync_resource];
@@ -478,7 +481,12 @@ pub fn resolve_export_connection(
     )
     .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
-    resolved.connect().map_err(ExportError::Connection)
+    let default_timeout = crate::runtime::config::load_config(resources_dir)
+        .unwrap_or_default()
+        .default_timeout;
+    resolved
+        .connect(default_timeout.as_std())
+        .map_err(ExportError::Connection)
 }
 
 /// Checks whether enough time has elapsed since the last export.
@@ -630,6 +638,7 @@ mod tests {
             dataset: "nagi_logs".to_string(),
             format: crate::runtime::config::ExportFormat::Jsonl,
             interval: serde_yaml::from_str("30m").unwrap(),
+            timeout: None,
         };
         let resources = generate_export_resources(&config);
         assert_eq!(resources.len(), 5);
@@ -647,12 +656,72 @@ mod tests {
     }
 
     #[test]
+    fn generate_export_resources_propagates_timeout() {
+        let config = ExportConfig {
+            connection: "my-bq".to_string(),
+            dataset: "nagi_logs".to_string(),
+            format: crate::runtime::config::ExportFormat::Jsonl,
+            interval: serde_yaml::from_str("30m").unwrap(),
+            timeout: Some(crate::runtime::duration::Duration::from_secs(600)),
+        };
+        let resources = generate_export_resources(&config);
+
+        let conditions = resources.iter().find(|r| r.kind() == "Conditions").unwrap();
+        if let NagiKind::Conditions { spec, .. } = conditions {
+            let cond = &spec.0[0];
+            assert_eq!(
+                cond.timeout().map(|d| d.as_std()),
+                Some(std::time::Duration::from_secs(600))
+            );
+        } else {
+            panic!("expected Conditions");
+        }
+
+        let sync = resources.iter().find(|r| r.kind() == "Sync").unwrap();
+        if let NagiKind::Sync { spec, .. } = sync {
+            assert_eq!(
+                spec.run.timeout.as_ref().map(|d| d.as_std()),
+                Some(std::time::Duration::from_secs(600))
+            );
+        } else {
+            panic!("expected Sync");
+        }
+    }
+
+    #[test]
+    fn generate_export_resources_no_timeout_when_omitted() {
+        let config = ExportConfig {
+            connection: "my-bq".to_string(),
+            dataset: "nagi_logs".to_string(),
+            format: crate::runtime::config::ExportFormat::Jsonl,
+            interval: serde_yaml::from_str("30m").unwrap(),
+            timeout: None,
+        };
+        let resources = generate_export_resources(&config);
+
+        let conditions = resources.iter().find(|r| r.kind() == "Conditions").unwrap();
+        if let NagiKind::Conditions { spec, .. } = conditions {
+            assert!(spec.0[0].timeout().is_none());
+        } else {
+            panic!("expected Conditions");
+        }
+
+        let sync = resources.iter().find(|r| r.kind() == "Sync").unwrap();
+        if let NagiKind::Sync { spec, .. } = sync {
+            assert!(spec.run.timeout.is_none());
+        } else {
+            panic!("expected Sync");
+        }
+    }
+
+    #[test]
     fn generate_export_resources_assets_pass_table_via_with() {
         let config = ExportConfig {
             connection: "my-bq".to_string(),
             dataset: "nagi_logs".to_string(),
             format: crate::runtime::config::ExportFormat::Jsonl,
             interval: serde_yaml::from_str("30m").unwrap(),
+            timeout: None,
         };
         let resources = generate_export_resources(&config);
 
@@ -790,6 +859,7 @@ mod tests {
             dataset: "nagi_logs".to_string(),
             format: crate::runtime::config::ExportFormat::Jsonl,
             interval: serde_yaml::from_str("30m").unwrap(),
+            timeout: None,
         };
         let resources = generate_export_resources(&config);
         for r in &resources {

@@ -32,17 +32,25 @@ spec:
 | `run.args` | list[string] | Yes | - | Command and arguments in argv format. |
 | `run.type` | StepType | Yes | - | Execution type for this step (currently only `Command`). |
 | `run.env` | map[string, string] | — | {} | Environment variables to set for the subprocess. |
+| `run.identity` | string | — | - | Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage. |
+| `run.timeout` | Duration | — | - | Per-step timeout. Overrides the Sync-level `timeout` for this stage. |
+| `identity` | string | — | - | Reference to a `kind: Identity` resource. Applied to all stages unless overridden per-stage. |
 | `post` | SyncStep | — | - | Optional step executed after the main sync command. |
 | `pre` | SyncStep | — | - | Optional step executed before the main sync command. |
+| `timeout` | Duration | — | - | Sync-wide timeout applied to each step unless overridden. Falls back to `NagiConfig::default_timeout` when omitted. |
 
 <!-- schema:auto-generated:end:SyncSpec -->
 
 <!-- schema:auto-generated:start:SyncStep -->
+
+### SyncStep
 
 | Attribute | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `args` | list[string] | Yes | - | Command and arguments in argv format. |
 | `type` | StepType | Yes | - | Execution type for this step (currently only `Command`). |
 | `env` | map[string, string] | — | {} | Environment variables to set for the subprocess. |
+| `identity` | string | — | - | Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage. |
+| `timeout` | Duration | — | - | Per-step timeout. Overrides the Sync-level `timeout` for this stage. |
 
 <!-- schema:auto-generated:end:SyncStep -->

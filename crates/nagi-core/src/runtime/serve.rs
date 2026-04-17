@@ -166,6 +166,8 @@ fn spawn_controllers(
         max_sync: config.max_sync_concurrency,
     };
 
+    let default_timeout = config.default_timeout.as_std();
+
     let (shutdown_tx, _) = watch::channel(false);
 
     let mut handles = Vec::new();
@@ -175,13 +177,17 @@ fn spawn_controllers(
         let store = LogStore::open(&db_path, &logs_dir)
             .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
         let backend = base_backend.clone();
+        let ctrl_config = controller::ControllerConfig {
+            lock_config: lc,
+            concurrency,
+            default_timeout,
+        };
         handles.push(tokio::spawn(run_controller(
             input,
             backend,
             n,
             Some(store),
-            lc,
-            concurrency,
+            ctrl_config,
             rx,
         )));
     }

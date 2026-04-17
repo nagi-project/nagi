@@ -101,6 +101,11 @@ def get_default(prop: dict) -> str:
     return ""
 
 
+# Types that have their own dedicated doc table (registered in SCHEMA_MAP).
+# These should NOT be flattened into dotted fields when referenced.
+_TYPES_WITH_OWN_TABLE: set[str] = set(SCHEMA_MAP.keys())
+
+
 def render_properties_table(
     properties: dict, required: list[str], definitions: dict, prefix: str = ""
 ) -> list[str]:
@@ -128,10 +133,14 @@ def render_properties_table(
                         break
 
             if ref_to_resolve:
+                ref_name = ref_to_resolve.split("/")[-1]
                 resolved = resolve_ref(ref_to_resolve, definitions)
-                # Only flatten required $ref objects (not Option<T>)
+                # Skip flattening for Optional refs to types that have
+                # their own dedicated doc table (e.g. Option<SyncStep>).
+                # Required refs (e.g. run: SyncStep) are always flattened.
+                skip = is_optional_ref and ref_name in _TYPES_WITH_OWN_TABLE
                 if (
-                    not is_optional_ref
+                    not skip
                     and resolved.get("type") == "object"
                     and "properties" in resolved
                 ):
@@ -234,6 +243,11 @@ def render_schema(schema: dict, table_only: bool = False) -> list[str]:
         if not table_only:
             lines.append("## Attributes")
             lines.append("")
+        else:
+            title = schema.get("title", "")
+            if title:
+                lines.append(f"### {title}")
+                lines.append("")
         lines.extend(render_properties_table(props, required, definitions))
         lines.append("")
 

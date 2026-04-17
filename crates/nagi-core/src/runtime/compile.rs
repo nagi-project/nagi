@@ -526,9 +526,11 @@ spec:
                 args: args.iter().map(|s| s.to_string()).collect(),
                 env: HashMap::new(),
                 identity: None,
+                timeout: None,
             },
             post: None,
             identity: None,
+            timeout: None,
         }
     }
 
@@ -562,6 +564,7 @@ spec:
                 query: "SELECT 1".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }])],
         ) => Some(ReadinessWarning::NoEvalTriggers);
 
@@ -576,6 +579,7 @@ spec:
                 interval: crate::runtime::duration::Duration::from_secs(3600),
                 check_at: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }])],
         ) => None;
 
@@ -588,6 +592,7 @@ spec:
                 query: "SELECT 1".to_string(),
                 interval: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }])],
         ) => None;
     }
@@ -604,6 +609,7 @@ spec:
                 interval: crate::runtime::duration::Duration::from_secs(21600),
                 check_at: None,
                 evaluate_cache_ttl: None,
+                timeout: None,
             }],
         )])
     }
@@ -674,6 +680,7 @@ spec:
                     interval: None,
                     env: HashMap::new(),
                     evaluate_cache_ttl: None,
+                    timeout: None,
                     identity: None,
                 }],
             ),
@@ -685,6 +692,7 @@ spec:
                     interval: None,
                     env: HashMap::new(),
                     evaluate_cache_ttl: None,
+                    timeout: None,
                     identity: None,
                 }],
             ),
@@ -730,6 +738,7 @@ spec:
                 interval: None,
                 env: HashMap::new(),
                 evaluate_cache_ttl: None,
+                timeout: None,
                 identity: None,
             }],
         )]);
@@ -1517,7 +1526,7 @@ spec:
                 execution_project: None,
                 method: None,
                 keyfile: None,
-                timeout_seconds: None,
+                timeout: None,
                 identity: Some("nonexistent".to_string()),
             },
         );

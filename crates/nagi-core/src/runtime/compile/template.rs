@@ -42,6 +42,7 @@ pub(super) fn expand_step(
             .collect(),
         env: step.env.clone(),
         identity: step.identity.clone(),
+        timeout: step.timeout.clone(),
     }
 }
 
@@ -62,6 +63,7 @@ pub(super) fn expand_sync_templates(
             .as_ref()
             .map(|s| expand_step(s, asset_name, model_name, with)),
         identity: sync_spec.identity.clone(),
+        timeout: sync_spec.timeout.clone(),
     }
 }
 
@@ -80,6 +82,7 @@ pub(super) fn expand_condition_templates(
             env,
             evaluate_cache_ttl,
             identity,
+            timeout,
         } => DesiredCondition::Command {
             name: name.clone(),
             run: run
@@ -90,6 +93,7 @@ pub(super) fn expand_condition_templates(
             env: env.clone(),
             evaluate_cache_ttl: evaluate_cache_ttl.clone(),
             identity: identity.clone(),
+            timeout: timeout.clone(),
         },
         other => other.clone(),
     }
@@ -185,6 +189,7 @@ mod tests {
             ],
             env: HashMap::new(),
             identity: None,
+            timeout: None,
         };
         let result = expand_step(&step, "origin.model", "model", &HashMap::new());
         assert_eq!(result.args, vec!["dbt", "run", "--select", "origin.model"]);
@@ -197,6 +202,7 @@ mod tests {
             args: vec!["{{ sync.target }}".into()],
             env: HashMap::new(),
             identity: None,
+            timeout: None,
         };
         let mut with = HashMap::new();
         with.insert("target".into(), "prod".into());

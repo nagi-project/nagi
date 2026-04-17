@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::KindError;
+use crate::runtime::duration::Duration;
 use crate::runtime::subprocess;
 
 pub const KIND: &str = "Sync";
@@ -21,6 +22,10 @@ pub struct SyncSpec {
     /// Reference to a `kind: Identity` resource. Applied to all stages unless overridden per-stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
+    /// Sync-wide timeout applied to each step unless overridden.
+    /// Falls back to `NagiConfig::default_timeout` when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<Duration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -36,6 +41,9 @@ pub struct SyncStep {
     /// Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
+    /// Per-step timeout. Overrides the Sync-level `timeout` for this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<Duration>,
 }
 
 /// Currently only `Command` (subprocess execution) is supported.
@@ -51,6 +59,7 @@ impl SyncStep {
             args,
             env: HashMap::new(),
             identity: None,
+            timeout: None,
         }
     }
 
@@ -73,6 +82,7 @@ impl SyncSpec {
             run,
             post: None,
             identity: None,
+            timeout: None,
         }
     }
 
@@ -205,5 +215,37 @@ run:
         step.env = env;
         let spec = SyncSpec::new(step);
         assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn parse_sync_spec_with_timeout() {
+        let yaml = r#"
+timeout: 30m
+run:
+  type: Command
+  args: ["dbt", "run"]
+  timeout: 10m
+"#;
+        let spec: SyncSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            spec.timeout.as_ref().map(|d| d.as_std()),
+            Some(std::time::Duration::from_secs(30 * 60))
+        );
+        assert_eq!(
+            spec.run.timeout.as_ref().map(|d| d.as_std()),
+            Some(std::time::Duration::from_secs(10 * 60))
+        );
+    }
+
+    #[test]
+    fn parse_sync_spec_timeout_omitted() {
+        let yaml = r#"
+run:
+  type: Command
+  args: ["dbt", "run"]
+"#;
+        let spec: SyncSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(spec.timeout.is_none());
+        assert!(spec.run.timeout.is_none());
     }
 }

@@ -51,6 +51,9 @@ pub enum SyncError {
 
     #[error("subprocess env resolution error: {0}")]
     EnvResolution(#[from] SubprocessEnvError),
+
+    #[error("sync step '{stage}' timed out after {seconds}s")]
+    Timeout { stage: String, seconds: u64 },
 }
 
 /// Which type of sync operation is being executed.
@@ -195,8 +198,10 @@ pub async fn execute_sync(
     sync_type: SyncType,
     stages: Option<&[Stage]>,
     log_store: Option<&LogStore>,
+    default_timeout: std::time::Duration,
 ) -> Result<SyncExecutionResult, SyncError> {
-    let result = execute_sync_core(asset_name, sync_spec, sync_type, stages).await?;
+    let result =
+        execute_sync_core(asset_name, sync_spec, sync_type, stages, default_timeout).await?;
 
     if let Some(store) = log_store {
         store.write_sync_log(&result)?;
@@ -213,6 +218,7 @@ pub async fn execute_sync_core(
     sync_spec: &SyncSpec,
     sync_type: SyncType,
     stages: Option<&[Stage]>,
+    default_timeout: std::time::Duration,
 ) -> Result<SyncExecutionResult, SyncError> {
     let execution_id = generate_uuid();
     let stages_to_run = resolve_stages(sync_spec, stages);
@@ -222,7 +228,8 @@ pub async fn execute_sync_core(
 
     for stage in stages_to_run {
         let step = step_for_stage(sync_spec, stage);
-        let result = command::execute_step(stage, step).await?;
+        let timeout = resolve_step_timeout(step, sync_spec, default_timeout);
+        let result = command::execute_step(stage, step, timeout).await?;
         let succeeded = result.success();
         results.push(result);
         if !succeeded {
@@ -238,6 +245,21 @@ pub async fn execute_sync_core(
         stages: results,
         success: overall_success,
     })
+}
+
+/// Resolves the effective timeout for a step: step > sync > default.
+fn resolve_step_timeout(
+    step: &crate::runtime::kind::sync::SyncStep,
+    sync_spec: &SyncSpec,
+    default_timeout: std::time::Duration,
+) -> std::time::Duration {
+    if let Some(t) = step.timeout.as_ref() {
+        return t.as_std();
+    }
+    if let Some(t) = sync_spec.timeout.as_ref() {
+        return t.as_std();
+    }
+    default_timeout
 }
 
 /// Returns a dry-run summary without executing anything.
@@ -372,12 +394,14 @@ pub(crate) async fn evaluate_and_cache(
     conn: Option<&dyn crate::runtime::kind::connection::Connection>,
     log_store: Option<&LogStore>,
     cache_dir: Option<&Path>,
+    default_timeout: std::time::Duration,
 ) -> Result<crate::runtime::evaluate::AssetEvalResult, SyncError> {
     let result = crate::runtime::evaluate::evaluate_asset(
         &compiled.metadata.name,
         &compiled.spec.on_drift,
         conn,
         log_store,
+        default_timeout,
     )
     .await
     .map_err(|e| SyncError::Evaluate(e.to_string()))?;
@@ -395,6 +419,7 @@ pub(crate) struct SyncWorkflowParams<'a> {
     pub evaluation_id: Option<&'a str>,
     pub log_store: Option<&'a LogStore>,
     pub cache_dir: Option<&'a Path>,
+    pub default_timeout: std::time::Duration,
 }
 
 /// Re-evaluates after sync and links the evaluation to the execution.
@@ -404,12 +429,13 @@ async fn re_evaluate_and_link(
     log_store: Option<&LogStore>,
     cache_dir: Option<&Path>,
     execution_id: &str,
+    default_timeout: std::time::Duration,
 ) {
     let conn = match compiled
         .connection
         .as_ref()
         .map(|c| {
-            c.connect()
+            c.connect(default_timeout)
                 .map_err(|e| SyncError::Connection(e.to_string()))
         })
         .transpose()
@@ -420,7 +446,15 @@ async fn re_evaluate_and_link(
             return;
         }
     };
-    match evaluate_and_cache(compiled, conn.as_deref(), log_store, cache_dir).await {
+    match evaluate_and_cache(
+        compiled,
+        conn.as_deref(),
+        log_store,
+        cache_dir,
+        default_timeout,
+    )
+    .await
+    {
         Ok(eval_result) => {
             link_evaluation(
                 log_store,
@@ -449,6 +483,7 @@ pub(crate) async fn run_sync_workflow(
         params.sync_type,
         params.stages,
         params.log_store,
+        params.default_timeout,
     )
     .await?;
 
@@ -460,6 +495,7 @@ pub(crate) async fn run_sync_workflow(
             params.log_store,
             params.cache_dir,
             &result.execution_id,
+            params.default_timeout,
         )
         .await;
     }
@@ -549,13 +585,62 @@ mod tests {
         assert!(matches!(err, SyncError::StageNotDefined { stage } if stage == "invalid"));
     }
 
+    // ── resolve_step_timeout ──────────────────────────────────────────────
+
+    #[test]
+    fn resolve_step_timeout_prefers_step() {
+        let mut step = SyncStep::command(vec!["echo".into()]);
+        step.timeout = Some(crate::runtime::duration::Duration::from_secs(10));
+        let mut spec = SyncSpec::new(SyncStep::command(vec!["echo".into()]));
+        spec.timeout = Some(crate::runtime::duration::Duration::from_secs(20));
+        let global = std::time::Duration::from_secs(30);
+        assert_eq!(
+            resolve_step_timeout(&step, &spec, global),
+            std::time::Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn resolve_step_timeout_falls_back_to_sync() {
+        let step = SyncStep::command(vec!["echo".into()]);
+        let mut spec = SyncSpec::new(SyncStep::command(vec!["echo".into()]));
+        spec.timeout = Some(crate::runtime::duration::Duration::from_secs(20));
+        let global = std::time::Duration::from_secs(30);
+        assert_eq!(
+            resolve_step_timeout(&step, &spec, global),
+            std::time::Duration::from_secs(20)
+        );
+    }
+
+    #[test]
+    fn resolve_step_timeout_falls_back_to_global() {
+        let step = SyncStep::command(vec!["echo".into()]);
+        let spec = SyncSpec::new(SyncStep::command(vec!["echo".into()]));
+        let global = std::time::Duration::from_secs(30);
+        assert_eq!(
+            resolve_step_timeout(&step, &spec, global),
+            std::time::Duration::from_secs(30)
+        );
+    }
+
     // ── execute_sync ─────────────────────────────────────────────────────
+
+    fn test_timeout() -> std::time::Duration {
+        std::time::Duration::from_secs(30)
+    }
 
     #[tokio::test]
     async fn execute_run_only_success() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
-            .await
-            .unwrap();
+        let result = execute_sync(
+            "test-asset",
+            &run_only_spec(),
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert!(result.success);
         assert_eq!(result.stages.len(), 1);
         assert_eq!(result.stages[0].stage, Stage::Run);
@@ -567,9 +652,16 @@ mod tests {
 
     #[tokio::test]
     async fn execute_full_spec_success() {
-        let result = execute_sync("test-asset", &full_spec(), SyncType::Sync, None, None)
-            .await
-            .unwrap();
+        let result = execute_sync(
+            "test-asset",
+            &full_spec(),
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert!(result.success);
         assert_eq!(result.stages.len(), 3);
         assert_eq!(result.stages[0].stage, Stage::Pre);
@@ -583,9 +675,16 @@ mod tests {
             "echo".to_string(),
             "hello world".to_string(),
         ]));
-        let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
-            .await
-            .unwrap();
+        let result = execute_sync(
+            "test-asset",
+            &spec,
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.stages[0].stdout.trim(), "hello world");
     }
 
@@ -596,9 +695,16 @@ mod tests {
             "-c".to_string(),
             "echo error >&2".to_string(),
         ]));
-        let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
-            .await
-            .unwrap();
+        let result = execute_sync(
+            "test-asset",
+            &spec,
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.stages[0].stderr.trim(), "error");
     }
 
@@ -609,9 +715,16 @@ mod tests {
             "should not run".to_string(),
         ]));
         spec.pre = Some(SyncStep::command(vec!["false".to_string()]));
-        let result = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
-            .await
-            .unwrap();
+        let result = execute_sync(
+            "test-asset",
+            &spec,
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert!(!result.success);
         assert_eq!(result.stages.len(), 1, "only pre should have run");
         assert_eq!(result.stages[0].stage, Stage::Pre);
@@ -626,6 +739,7 @@ mod tests {
             SyncType::Sync,
             Some(&[Stage::Run]),
             None,
+            test_timeout(),
         )
         .await
         .unwrap();
@@ -636,9 +750,16 @@ mod tests {
 
     #[tokio::test]
     async fn execute_records_args() {
-        let result = execute_sync("test-asset", &run_only_spec(), SyncType::Sync, None, None)
-            .await
-            .unwrap();
+        let result = execute_sync(
+            "test-asset",
+            &run_only_spec(),
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.stages[0].args, vec!["echo", "hello"]);
     }
 
@@ -647,9 +768,16 @@ mod tests {
         let spec = SyncSpec::new(SyncStep::command(vec![
             "__nagi_no_such_command__".to_string()
         ]));
-        let err = execute_sync("test-asset", &spec, SyncType::Sync, None, None)
-            .await
-            .unwrap_err();
+        let err = execute_sync(
+            "test-asset",
+            &spec,
+            SyncType::Sync,
+            None,
+            None,
+            test_timeout(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, SyncError::SpawnFailed(_)));
     }
 
@@ -736,6 +864,7 @@ mod tests {
                         interval: None,
                         env: HashMap::new(),
                         evaluate_cache_ttl: None,
+                        timeout: None,
                         identity: None,
                     }],
                     conditions_ref: "test-conditions".to_string(),
@@ -758,9 +887,15 @@ mod tests {
         let cache_dir = dir.path().join("cache");
         let compiled = test_compiled_asset();
 
-        let result = evaluate_and_cache(&compiled, None, None, Some(cache_dir.as_path()))
-            .await
-            .unwrap();
+        let result = evaluate_and_cache(
+            &compiled,
+            None,
+            None,
+            Some(cache_dir.as_path()),
+            test_timeout(),
+        )
+        .await
+        .unwrap();
 
         assert!(result.ready);
         assert!(cache_dir.join("test-asset.json").exists());
@@ -772,7 +907,7 @@ mod tests {
         let store = LogStore::open_in_memory(dir.path()).unwrap();
         let compiled = test_compiled_asset();
 
-        let result = evaluate_and_cache(&compiled, None, Some(&store), None)
+        let result = evaluate_and_cache(&compiled, None, Some(&store), None, test_timeout())
             .await
             .unwrap();
 
@@ -783,7 +918,7 @@ mod tests {
     async fn evaluate_and_cache_no_evaluation_id_without_log_store() {
         let compiled = test_compiled_asset();
 
-        let result = evaluate_and_cache(&compiled, None, None, None)
+        let result = evaluate_and_cache(&compiled, None, None, None, test_timeout())
             .await
             .unwrap();
 
@@ -804,6 +939,7 @@ mod tests {
             Some(&store),
             Some(cache_dir.as_path()),
             "exec-42",
+            test_timeout(),
         )
         .await;
 
@@ -816,7 +952,14 @@ mod tests {
         let cache_dir = dir.path().join("cache");
         let compiled = test_compiled_asset();
 
-        re_evaluate_and_link(&compiled, None, Some(cache_dir.as_path()), "exec-1").await;
+        re_evaluate_and_link(
+            &compiled,
+            None,
+            Some(cache_dir.as_path()),
+            "exec-1",
+            test_timeout(),
+        )
+        .await;
 
         assert!(cache_dir.join("test-asset.json").exists());
     }

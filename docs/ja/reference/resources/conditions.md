@@ -79,6 +79,7 @@ Can transition to Not Ready as time passes beyond `maxAge`.
 | `checkAt` | CronSchedule | — | - | Optional cron expression for additional evaluation at a specific time. |
 | `column` | string | — | - | If omitted, freshness is determined from table metadata instead of a column value. |
 | `evaluateCacheTtl` | Duration | — | - | Per-condition cache TTL override. Takes precedence over the Asset-level default. |
+| `timeout` | Duration | — | - | Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted. |
 
 ### type: SQL
 
@@ -90,6 +91,7 @@ Query must return a scalar boolean. Ready when the result is true.
 | `query` | string | Yes | - | SQL query that must return a scalar boolean. |
 | `evaluateCacheTtl` | Duration | — | - | Per-condition cache TTL override. Takes precedence over the Asset-level default. |
 | `interval` | Duration | — | - | Optional polling interval. If omitted, only evaluated on upstream state change or after sync. |
+| `timeout` | Duration | — | - | Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted. |
 
 ### type: Command
 
@@ -101,6 +103,8 @@ Runs an external command. Ready when the process exits with code 0. `run` is arg
 | `run` | list[string] | Yes | - | Command and arguments in argv format. |
 | `env` | map[string, string] | — | {} | Environment variables to set for the subprocess. |
 | `evaluateCacheTtl` | Duration | — | - | Per-condition cache TTL override. Takes precedence over the Asset-level default. |
+| `identity` | string | — | - | Reference to a `kind: Identity` resource for authentication scope. |
 | `interval` | Duration | — | - | Optional polling interval. If omitted, only evaluated on upstream state change or after sync. |
+| `timeout` | Duration | — | - | Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted. |
 
 <!-- schema:auto-generated:end:ConditionsSpec -->
