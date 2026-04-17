@@ -55,6 +55,17 @@
           "$ref": "#/$defs/Duration",
           "default": "30m",
           "description": "Condition evaluation interval and export throttling threshold."
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Timeout for export operations. Falls back to `defaultTimeout` when omitted."
         }
       },
       "required": [
@@ -109,6 +120,11 @@
     "backend": {
       "$ref": "#/$defs/BackendConfig",
       "description": "State storage backend configuration."
+    },
+    "defaultTimeout": {
+      "$ref": "#/$defs/Duration",
+      "default": "1h",
+      "description": "Default timeout applied to evaluate, sync, and query operations when\nthe individual resource does not specify its own `timeout`. Defaults to 1h."
     },
     "export": {
       "anyOf": [

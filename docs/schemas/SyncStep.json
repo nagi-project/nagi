@@ -1,5 +1,10 @@
 {
   "$defs": {
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
     "StepType": {
       "description": "Currently only `Command` (subprocess execution) is supported.",
       "enum": [
@@ -24,6 +29,24 @@
       "default": {},
       "description": "Environment variables to set for the subprocess.",
       "type": "object"
+    },
+    "identity": {
+      "description": "Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timeout": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Per-step timeout. Overrides the Sync-level `timeout` for this stage."
     },
     "type": {
       "$ref": "#/$defs/StepType",

@@ -12,6 +12,11 @@
         }
       },
       "type": "object"
+    },
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -30,6 +35,13 @@
             }
           ],
           "description": "Optional dbt Cloud configuration for running-job checks before sync."
+        },
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource for authentication scope.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "profile": {
           "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
@@ -74,6 +86,13 @@
             "null"
           ]
         },
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource for authentication scope.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "keyfile": {
           "description": "Path to the service account JSON key file. Required when `method` is `service-account`.",
           "type": [
@@ -92,14 +111,16 @@
           "description": "GCP project ID that contains the dataset.",
           "type": "string"
         },
-        "timeoutSeconds": {
-          "description": "Query timeout in seconds.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Query timeout (e.g. \"30s\", \"1h\"). Falls back to `NagiConfig::default_timeout` when omitted."
         },
         "type": {
           "const": "bigquery",
@@ -116,6 +137,13 @@
     {
       "description": "DuckDB connection via the `duckdb` CLI.",
       "properties": {
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource for authentication scope.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "description": "Path to the DuckDB database file.",
           "type": "string"
@@ -142,6 +170,13 @@
           "description": "Database name.",
           "type": "string"
         },
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource for authentication scope.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "privateKeyPath": {
           "description": "Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.",
           "type": "string"
@@ -156,6 +191,17 @@
         "schema": {
           "description": "Schema name.",
           "type": "string"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Query timeout (e.g. \"30s\", \"1h\"). Falls back to `NagiConfig::default_timeout` when omitted."
         },
         "type": {
           "const": "snowflake",

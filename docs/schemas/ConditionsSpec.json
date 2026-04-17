@@ -53,6 +53,17 @@
               "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted."
+            },
             "type": {
               "const": "Freshness",
               "type": "string"
@@ -101,6 +112,17 @@
               "description": "SQL query that must return a scalar boolean.",
               "type": "string"
             },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted."
+            },
             "type": {
               "const": "SQL",
               "type": "string"
@@ -136,6 +158,13 @@
               "default": null,
               "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
             },
+            "identity": {
+              "description": "Reference to a `kind: Identity` resource for authentication scope.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "interval": {
               "anyOf": [
                 {
@@ -158,6 +187,17 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted."
             },
             "type": {
               "const": "Command",

@@ -8,6 +8,7 @@
 backend:
   type: local
 nagiDir: ~/.nagi
+defaultTimeout: 1h
 notify:
   slack:
     channel: "#nagi-alerts"
@@ -33,6 +34,7 @@ terminationGracePeriodSeconds: 300
 | `backend.prefix` | string | — | - | Path prefix for remote storage (e.g. `my-project/nagi`). When set, all remote paths are prefixed with this value. Ignored for the local backend. |
 | `backend.region` | string | — | - | AWS region for S3 backend (e.g. `us-east-1`). Required when type is `s3`. |
 | `backend.type` | string | — | local | Backend type identifier. One of `local`, `gcs`, `s3`. Defaults to `local`. |
+| `defaultTimeout` | Duration | — | 1h | Default timeout applied to evaluate, sync, and query operations when the individual resource does not specify its own `timeout`. Defaults to 1h. |
 | `export` | ExportConfig | — | - | Log export configuration. When set, compile generates export Assets and logs are transferred to the remote data warehouse. |
 | `lockRetryIntervalSeconds` | integer | — | 900 | Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes). |
 | `lockRetryMaxAttempts` | integer | — | 3 | Maximum number of lock acquisition retry attempts before skipping. Defaults to 3. |
