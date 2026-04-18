@@ -187,6 +187,7 @@ mod tests {
             method: None,
             keyfile: None,
             timeout: None,
+            location: None,
             identity_env: None,
         });
 
@@ -205,6 +206,7 @@ mod tests {
             method: None,
             keyfile: None,
             timeout: None,
+            location: None,
             identity_env: None,
         });
 

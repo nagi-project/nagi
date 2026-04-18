@@ -60,6 +60,37 @@ Evaluate is executed directly by Nagi.
 
 Executes dbt CLI as a subprocess (e.g., `dbt run --select daily_sales`).
 
+### Propagating execution_id to BigQuery jobs
+
+To let [`nagi inspect`](../../reference/cli.md#inspect) show the BigQuery jobs executed during Sync, propagate the [`NAGI_EXECUTION_ID`](../../reference/environment-variables.md#nagi-injected-variables) environment variable to BigQuery job labels.
+
+Add the following to `dbt_project.yml`.
+
+```yaml
+query-comment:
+  comment: "{{ query_comment(node) }}"
+  job-label: true
+```
+
+Then create `macros/query_comment.sql`.
+
+```sql
+{% macro query_comment(node) %}
+  {%- set comment_dict = {} -%}
+  {%- do comment_dict.update(
+      app='dbt',
+      dbt_version=dbt_version,
+      nagi_execution_id=env_var('NAGI_EXECUTION_ID', ''),
+  ) -%}
+  {%- if node is not none -%}
+    {%- do comment_dict.update(node_id=node.unique_id) -%}
+  {%- endif -%}
+  {% do return(tojson(comment_dict)) %}
+{% endmacro %}
+```
+
+With `job-label: true`, dbt-bigquery parses the JSON comment and attaches the keys as BigQuery job labels. `nagi inspect` matches jobs by the `nagi_execution_id` label.
+
 ## Customization
 
 If you define an Asset with the same name as an Origin-generated Asset in `resources/`, the `onDrift` lists are concatenated. For merge rules and examples, see [Resource Generation - Merge with User-defined Resources](./resource-generation.md#merge-with-user-defined-resources).

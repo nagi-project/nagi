@@ -160,6 +160,107 @@ pub fn ls_to_text(json_str: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// Formats inspection JSON (array of SyncInspection) as human-readable text.
+pub fn inspect_to_text(json_str: &str) -> Result<String, String> {
+    use crate::runtime::inspect::SyncInspection;
+
+    let inspections: Vec<SyncInspection> =
+        serde_json::from_str(json_str).map_err(|e| e.to_string())?;
+
+    if inspections.is_empty() {
+        return Ok("No inspections found.".to_string());
+    }
+
+    let mut out = String::new();
+    for insp in &inspections {
+        writeln!(
+            out,
+            "=== {}  execution_id: {} ===",
+            insp.asset_name, insp.execution_id
+        )
+        .unwrap();
+        writeln!(out).unwrap();
+
+        if !insp.comparisons.is_empty() {
+            write_comparison_table(&mut out, &insp.comparisons);
+            writeln!(out).unwrap();
+        }
+
+        if !insp.jobs.is_empty() {
+            write_jobs_section(&mut out, &insp.jobs);
+            writeln!(out).unwrap();
+        }
+    }
+
+    Ok(out)
+}
+
+fn write_comparison_table(out: &mut String, items: &[crate::runtime::inspect::ComparisonItem]) {
+    let headers = ["Type", "Name", "Before", "After"];
+    let rows: Vec<[String; 4]> = items
+        .iter()
+        .map(|item| {
+            [
+                item.item_type.clone(),
+                item.name.clone(),
+                value_to_cell(&item.before),
+                value_to_cell(&item.after),
+            ]
+        })
+        .collect();
+
+    let widths: [usize; 4] = std::array::from_fn(|col| {
+        let header_len = headers[col].len();
+        let max_row = rows.iter().map(|r| r[col].len()).max().unwrap_or(0);
+        header_len.max(max_row) + 2
+    });
+
+    write!(out, "  ").unwrap();
+    for (i, h) in headers.iter().enumerate() {
+        write!(out, "{:<width$}", h, width = widths[i]).unwrap();
+    }
+    writeln!(out).unwrap();
+
+    for row in &rows {
+        write!(out, "  ").unwrap();
+        for (i, cell) in row.iter().enumerate() {
+            write!(out, "{:<width$}", cell, width = widths[i]).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+}
+
+fn write_jobs_section(out: &mut String, jobs: &[crate::runtime::inspect::SyncJob]) {
+    writeln!(out, "Sync executed").unwrap();
+    for job in jobs {
+        let stmt = job.statement_type.as_deref().unwrap_or("");
+        writeln!(out, "  {}  {stmt}", job.job_id).unwrap();
+    }
+}
+
+/// Converts a comparison value to a display string.
+///
+/// Handles Nagi's `ConditionStatus` format (`{"state": "...", "reason": "..."}`).
+fn value_to_cell(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "-".to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Object(obj) => {
+            if let Some(state) = obj.get("state").and_then(|s| s.as_str()) {
+                match obj.get("reason").and_then(|r| r.as_str()) {
+                    Some(reason) if !reason.is_empty() => format!("{state} ({reason})"),
+                    _ => state.to_string(),
+                }
+            } else {
+                v.to_string()
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -361,5 +462,145 @@ mod tests {
         assert!(text.contains("raw-sales"));
         assert!(text.contains("true"));
         assert!(text.contains("my-bq"));
+    }
+
+    // ── inspect_to_text ─────────────────────────────────────────────
+
+    #[test]
+    fn inspect_to_text_empty() {
+        let text = inspect_to_text("[]").unwrap();
+        assert_eq!(text, "No inspections found.");
+    }
+
+    #[test]
+    fn inspect_to_text_with_data() {
+        let json = serde_json::json!([{
+            "schema_version": 2,
+            "execution_id": "exec-001",
+            "asset_name": "daily-sales",
+            "finished_at": "2026-04-16T09:30:00.000Z",
+            "comparisons": [
+                {
+                    "type": "condition",
+                    "name": "freshness-24h",
+                    "before": {"state": "drifted", "reason": "age 30h > max 24h"},
+                    "after": {"state": "ready"}
+                },
+                {
+                    "type": "table row count",
+                    "name": "daily_sales",
+                    "before": 1000,
+                    "after": 1500
+                }
+            ],
+            "jobs": [
+                {"job_id": "bqjob_001", "statement_type": "MERGE", "details": {}}
+            ]
+        }]);
+        let text = inspect_to_text(&json.to_string()).unwrap();
+        assert!(text.contains("daily-sales"));
+        assert!(text.contains("exec-001"));
+        assert!(text.contains("condition"));
+        assert!(text.contains("freshness-24h"));
+        assert!(text.contains("drifted (age 30h > max 24h)"));
+        assert!(text.contains("ready"));
+        assert!(text.contains("table row count"));
+        assert!(text.contains("daily_sales"));
+        assert!(text.contains("1000"));
+        assert!(text.contains("1500"));
+        assert!(text.contains("Sync executed"));
+        assert!(text.contains("bqjob_001"));
+        assert!(text.contains("MERGE"));
+    }
+
+    // ── value_to_cell ───────────────────────────────────────────────
+
+    #[test]
+    fn value_to_cell_null() {
+        assert_eq!(value_to_cell(&serde_json::Value::Null), "-");
+    }
+
+    #[test]
+    fn value_to_cell_number() {
+        assert_eq!(value_to_cell(&serde_json::json!(1500)), "1500");
+    }
+
+    #[test]
+    fn value_to_cell_string() {
+        assert_eq!(value_to_cell(&serde_json::json!("hello")), "hello");
+    }
+
+    #[test]
+    fn value_to_cell_condition_status_with_reason() {
+        let v = serde_json::json!({"state": "drifted", "reason": "age 30h"});
+        assert_eq!(value_to_cell(&v), "drifted (age 30h)");
+    }
+
+    #[test]
+    fn value_to_cell_condition_status_without_reason() {
+        let v = serde_json::json!({"state": "ready"});
+        assert_eq!(value_to_cell(&v), "ready");
+    }
+
+    #[test]
+    fn value_to_cell_unknown_object() {
+        let v = serde_json::json!({"foo": "bar"});
+        assert_eq!(value_to_cell(&v), v.to_string());
+    }
+
+    // ── write_comparison_table ────────────────────────────────��──────
+
+    #[test]
+    fn write_comparison_table_aligns_columns() {
+        use crate::runtime::inspect::ComparisonItem;
+        let items = vec![
+            ComparisonItem {
+                item_type: "condition".to_string(),
+                name: "freshness-24h".to_string(),
+                before: serde_json::json!({"state": "drifted", "reason": "age 30h"}),
+                after: serde_json::json!({"state": "ready"}),
+            },
+            ComparisonItem {
+                item_type: "table row count".to_string(),
+                name: "daily_sales".to_string(),
+                before: serde_json::json!(1000),
+                after: serde_json::json!(1500),
+            },
+        ];
+        let mut out = String::new();
+        write_comparison_table(&mut out, &items);
+        assert!(out.contains("Type"));
+        assert!(out.contains("Name"));
+        assert!(out.contains("Before"));
+        assert!(out.contains("After"));
+        assert!(out.contains("condition"));
+        assert!(out.contains("table row count"));
+        assert!(out.contains("1000"));
+        assert!(out.contains("1500"));
+    }
+
+    // ── write_jobs_section ──────────────────────────────────────────
+
+    #[test]
+    fn write_jobs_section_lists_jobs() {
+        use crate::runtime::inspect::SyncJob;
+        let jobs = vec![
+            SyncJob {
+                job_id: "bqjob_001".to_string(),
+                statement_type: Some("MERGE".to_string()),
+                details: std::collections::HashMap::new(),
+            },
+            SyncJob {
+                job_id: "bqjob_002".to_string(),
+                statement_type: None,
+                details: std::collections::HashMap::new(),
+            },
+        ];
+        let mut out = String::new();
+        write_jobs_section(&mut out, &jobs);
+        assert!(out.contains("Sync executed"));
+        assert!(out.contains("bqjob_001"));
+        assert!(out.contains("MERGE"));
+        assert!(out.contains("bqjob_002"));
     }
 }

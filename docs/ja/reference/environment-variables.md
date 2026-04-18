@@ -79,3 +79,12 @@ env:
 | Sync | `spec.pre.env`<br>`spec.run.env`<br>`spec.post.env` | Sync ステージのコマンド |
 | Conditions (`type: Command`) | `spec[].env` | `type: Command` のコマンド |
 | Origin (`type: DBT`) | `spec.env` | `dbt compile` |
+
+## Nagi-injected Variables
+
+Nagi は Sync サブプロセスに以下の変数を自動で注入します。ユーザー宣言の `env` よりも後に設定されるため、上書きはできません。
+
+| 変数 | 説明 |
+| --- | --- |
+| `NAGI_EXECUTION_ID` | Sync 実行を一意に識別する UUID。データウェアハウス上のジョブと Sync 実行を紐付けるために使用します（ジョブラベルやクエリタグなどとして）。設定例は [dbt Core 連携](../integrations/dbt/core.md#propagating-execution_id-to-bigquery-jobs) を参照してください。 |
+| `TRACEPARENT` | execution ID から導出された [W3C Trace Context](https://www.w3.org/TR/trace-context/) ヘッダー。OpenTelemetry 対応ツールが自動的に親トレースとして認識します。 |

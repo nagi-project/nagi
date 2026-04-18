@@ -2,6 +2,7 @@ pub mod evaluate;
 pub mod export;
 pub mod format;
 pub mod init;
+pub mod inspect;
 pub mod ls;
 #[cfg(feature = "python")]
 pub mod py;

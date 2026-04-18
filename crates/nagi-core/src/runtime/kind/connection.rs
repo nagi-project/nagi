@@ -82,6 +82,17 @@ pub trait Connection: Send + Sync {
         table: &str,
         jsonl_path: &std::path::Path,
     ) -> Result<(), ConnectionError>;
+
+    /// Executes a SQL query and returns all rows as a JSON array.
+    /// Each row is a JSON object with column names as keys.
+    async fn query_rows(&self, sql: &str) -> Result<Vec<serde_json::Value>, ConnectionError> {
+        // Default: fall back to query_scalar for connections that don't support multi-row queries.
+        let scalar = self.query_scalar(sql).await?;
+        match scalar {
+            serde_json::Value::Null => Ok(Vec::new()),
+            other => Ok(vec![other]),
+        }
+    }
 }
 
 /// Creates a `Connection` implementation based on the adapter type in the profile output.
@@ -134,6 +145,7 @@ pub enum ResolvedConnection {
         method: Option<String>,
         keyfile: Option<String>,
         timeout: Option<Duration>,
+        location: Option<String>,
         /// Unexpanded Identity env template. Excluded from serialization.
         #[serde(skip)]
         identity_env: Option<HashMap<String, String>>,
@@ -312,6 +324,7 @@ pub fn resolve_connection_by_name(
             ref method,
             ref keyfile,
             ref timeout,
+            ref location,
             ..
         } => Ok(ResolvedConnection::BigQuery {
             name: conn_name.to_string(),
@@ -321,6 +334,7 @@ pub fn resolve_connection_by_name(
             method: method.clone(),
             keyfile: keyfile.clone(),
             timeout: timeout.clone(),
+            location: location.clone(),
             identity_env: identity_env.clone(),
         }),
         ConnectionSpec::DuckDb { ref path, .. } => Ok(ResolvedConnection::DuckDb {
@@ -416,6 +430,7 @@ pub enum ConnectionSpec {
         /// Query timeout (e.g. "30s", "1h"). Falls back to `NagiConfig::default_timeout` when omitted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<Duration>,
+        location: Option<String>,
         /// Reference to a `kind: Identity` resource for authentication scope.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         identity: Option<String>,
@@ -708,6 +723,7 @@ dataset: raw
                 method: Some("oauth".to_string()),
                 keyfile: None,
                 timeout: None,
+                location: None,
                 identity: None,
             };
         validate_bigquery_service_account:
@@ -718,6 +734,7 @@ dataset: raw
                 method: Some("service-account".to_string()),
                 keyfile: Some("/path/to/key.json".to_string()),
                 timeout: None,
+                location: None,
                 identity: None,
             };
     }
@@ -756,6 +773,7 @@ dataset: raw
                 method: None,
                 keyfile: None,
                 timeout: None,
+                location: None,
                 identity: None,
             } => "project must not be empty";
         validate_bigquery_rejects_empty_dataset:
@@ -766,6 +784,7 @@ dataset: raw
                 method: None,
                 keyfile: None,
                 timeout: None,
+                location: None,
                 identity: None,
             } => "dataset must not be empty";
         validate_bigquery_rejects_empty_execution_project:
@@ -776,6 +795,7 @@ dataset: raw
                 method: None,
                 keyfile: None,
                 timeout: None,
+                location: None,
                 identity: None,
             } => "executionProject must not be empty";
     }
@@ -844,6 +864,7 @@ dataset: raw
                 method: Some("oauth".to_string()),
                 keyfile: None,
                 timeout: Some(Duration::from_secs(30)),
+                location: None,
                 identity: None,
             },
         );
