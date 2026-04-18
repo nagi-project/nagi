@@ -418,8 +418,9 @@ fn format_inspect_text(json_str: &str) -> PyResult<String> {
 /// Lists recent inspections for an asset as JSON.
 /// If `target_dir` is provided, attempts to backfill empty jobs
 /// from BigQuery INFORMATION_SCHEMA.JOBS.
-/// If `changed_only` is true, returns only inspections where before_sync
-/// differs from after_sync.
+/// If `changed_only` is true, returns only inspections where any
+/// comparison item has different before and after values.
+/// If `nagi_dir` is provided, uses it instead of resolving from config.
 #[pyfunction]
 #[pyo3(signature = (asset_name, limit=5, target_dir=None, changed_only=false, nagi_dir=None))]
 fn list_inspections(
