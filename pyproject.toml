@@ -104,3 +104,12 @@ features = ["python"]
 python-source = "python"
 module-name = "nagi_cli._nagi_core"
 include = [{ path = "LICENSE", format = "sdist" }]
+exclude = [
+    { path = ".claude/**", format = "sdist" },
+    { path = ".github/**", format = "sdist" },
+    { path = "crates/nagi-schema-gen/**", format = "sdist" },
+    { path = "docs/**", format = "sdist" },
+    { path = "examples/**", format = "sdist" },
+    { path = "python/tests/**", format = "sdist" },
+    { path = "scripts/**", format = "sdist" },
+]
