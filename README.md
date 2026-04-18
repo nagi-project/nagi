@@ -1,5 +1,7 @@
 # Nagi
 
+[![PyPI](https://img.shields.io/pypi/v/nagi-cli)](https://pypi.org/project/nagi-cli/) [![CI](https://github.com/nagi-project/nagi/actions/workflows/ci.yml/badge.svg)](https://github.com/nagi-project/nagi/actions/workflows/ci.yml) [![License](https://img.shields.io/pypi/l/nagi-cli)](https://github.com/nagi-project/nagi/blob/main/LICENSE) [![Python](https://img.shields.io/pypi/pyversions/nagi-cli)](https://pypi.org/project/nagi-cli/)
+
 Nagi keeps data in its desired state.
 
 ## Motivation
