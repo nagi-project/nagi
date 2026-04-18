@@ -98,6 +98,7 @@ fn compose_subprocess_env(
     compose_subprocess_env_with_allowlist(ALLOWLIST, parent_env, identity_env, declared)
 }
 
+#[cfg(any(unix, test))]
 fn compose_subprocess_env_with_allowlist(
     allowlist: &[&str],
     parent_env: &HashMap<String, String>,
