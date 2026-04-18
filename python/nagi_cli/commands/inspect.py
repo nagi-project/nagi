@@ -38,6 +38,11 @@ from nagi_cli.output import OUTPUT_FORMATS, echo_output
     default=False,
     help="Disable pager for terminal output.",
 )
+@click.option(
+    "--nagi-dir",
+    default=None,
+    help="Override Nagi state directory path.",
+)
 def inspect(
     asset_name: str,
     limit: int,
@@ -45,8 +50,9 @@ def inspect(
     changed_only: bool,
     output_format: str,
     no_pager: bool,
+    nagi_dir: str | None,
 ) -> None:
     """Show sync execution inspection records for an asset."""
-    json_str = list_inspections(asset_name, limit, target_dir, changed_only)
+    json_str = list_inspections(asset_name, limit, target_dir, changed_only, nagi_dir)
     output = format_inspect_text(json_str) if output_format == "text" else json_str
     echo_output(output, no_pager=no_pager)

@@ -421,15 +421,19 @@ fn format_inspect_text(json_str: &str) -> PyResult<String> {
 /// If `changed_only` is true, returns only inspections where before_sync
 /// differs from after_sync.
 #[pyfunction]
-#[pyo3(signature = (asset_name, limit=5, target_dir=None, changed_only=false))]
+#[pyo3(signature = (asset_name, limit=5, target_dir=None, changed_only=false, nagi_dir=None))]
 fn list_inspections(
     asset_name: &str,
     limit: usize,
     target_dir: Option<&str>,
     changed_only: bool,
+    nagi_dir: Option<&str>,
 ) -> PyResult<String> {
-    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
-    let store = crate::runtime::inspect::InspectionStore::new(nagi_dir.root());
+    let resolved_nagi_dir = match nagi_dir {
+        Some(d) => crate::runtime::config::NagiDir::new(std::path::PathBuf::from(d)),
+        None => crate::runtime::config::resolve_nagi_dir(std::path::Path::new(".")),
+    };
+    let store = crate::runtime::inspect::InspectionStore::new(resolved_nagi_dir.root());
     let mut inspections = if changed_only {
         store.list_changed(asset_name, limit).map_err(to_py_err)?
     } else {

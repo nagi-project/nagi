@@ -195,6 +195,7 @@ nagi inspect <ASSET_NAME> [OPTIONS]
 | `--target-dir` | `target` | Compiled directory |
 | `--output` | `text` | Output format (`json`, `text`) |
 | `--no-pager` | — | Disable pager for terminal output |
+| `--nagi-dir` | — | Override Nagi state directory path |
 
 Inspection data is cached under `<nagiDir>/inspections/<asset-name>/`.
 

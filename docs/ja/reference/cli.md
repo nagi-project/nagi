@@ -195,6 +195,7 @@ nagi inspect <ASSET_NAME> [OPTIONS]
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--output` | `text` | 出力形式（`json`, `text`） |
 | `--no-pager` | — | ページャーを無効にする |
+| `--nagi-dir` | — | Nagi 状態ディレクトリパスの上書き |
 
 観測データは `<nagiDir>/inspections/<asset-name>/` にキャッシュされます。
 

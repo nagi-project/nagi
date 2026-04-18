@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from nagi_cli.commands.inspect import inspect
 
@@ -10,13 +10,6 @@ from nagi_cli.commands.inspect import inspect
 @pytest.fixture()
 def nagi_dir(tmp_path: Path) -> Path:
     return tmp_path / ".nagi"
-
-
-@pytest.fixture()
-def home_env(nagi_dir: Path) -> dict[str, str]:
-    """Env dict that points both HOME (Unix) and USERPROFILE (Windows) to tmp."""
-    parent = str(nagi_dir.parent)
-    return {"HOME": parent, "USERPROFILE": parent}
 
 
 @pytest.fixture()
@@ -37,7 +30,10 @@ def _write_inspection(
             {
                 "type": "condition",
                 "name": "freshness-24h",
-                "before": {"state": "drifted", "reason": "age 30h > max 24h"},
+                "before": {
+                    "state": "drifted",
+                    "reason": "age 30h > max 24h",
+                },
                 "after": {"state": "ready"},
             },
             {
@@ -71,19 +67,28 @@ def _write_inspection(
     return path
 
 
+def _invoke(
+    args: list[str],
+    nagi_dir: Path,
+) -> Result:
+    runner = CliRunner()
+    return runner.invoke(
+        inspect,
+        [*args, "--nagi-dir", str(nagi_dir)],
+        catch_exceptions=False,
+    )
+
+
 class TestInspectCommand:
     def test_json_output(
         self,
+        nagi_dir: Path,
         inspection_dir: Path,
-        home_env: dict[str, str],
     ) -> None:
         _write_inspection(inspection_dir, "exec-001")
-        runner = CliRunner()
-        result = runner.invoke(
-            inspect,
+        result = _invoke(
             ["daily-sales", "--output", "json", "--no-pager"],
-            catch_exceptions=False,
-            env=home_env,
+            nagi_dir,
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
@@ -92,16 +97,13 @@ class TestInspectCommand:
 
     def test_text_output(
         self,
+        nagi_dir: Path,
         inspection_dir: Path,
-        home_env: dict[str, str],
     ) -> None:
         _write_inspection(inspection_dir, "exec-001")
-        runner = CliRunner()
-        result = runner.invoke(
-            inspect,
+        result = _invoke(
             ["daily-sales", "--output", "text", "--no-pager"],
-            catch_exceptions=False,
-            env=home_env,
+            nagi_dir,
         )
         assert result.exit_code == 0, result.output
         assert "daily-sales" in result.output
@@ -111,8 +113,8 @@ class TestInspectCommand:
 
     def test_limit_restricts_output(
         self,
+        nagi_dir: Path,
         inspection_dir: Path,
-        home_env: dict[str, str],
     ) -> None:
         for i in range(1, 6):
             _write_inspection(
@@ -120,12 +122,16 @@ class TestInspectCommand:
                 f"exec-{i:03d}",
                 finished_at=f"20260416T09300{i}.000Z",
             )
-        runner = CliRunner()
-        result = runner.invoke(
-            inspect,
-            ["daily-sales", "--limit", "2", "--output", "json", "--no-pager"],
-            catch_exceptions=False,
-            env=home_env,
+        result = _invoke(
+            [
+                "daily-sales",
+                "--limit",
+                "2",
+                "--output",
+                "json",
+                "--no-pager",
+            ],
+            nagi_dir,
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
@@ -135,8 +141,8 @@ class TestInspectCommand:
 
     def test_changed_only(
         self,
+        nagi_dir: Path,
         inspection_dir: Path,
-        home_env: dict[str, str],
     ) -> None:
         _write_inspection(
             inspection_dir,
@@ -156,12 +162,15 @@ class TestInspectCommand:
             finished_at="20260416T093003.000Z",
             changed=True,
         )
-        runner = CliRunner()
-        result = runner.invoke(
-            inspect,
-            ["daily-sales", "--changed-only", "--output", "json", "--no-pager"],
-            catch_exceptions=False,
-            env=home_env,
+        result = _invoke(
+            [
+                "daily-sales",
+                "--changed-only",
+                "--output",
+                "json",
+                "--no-pager",
+            ],
+            nagi_dir,
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
@@ -169,13 +178,11 @@ class TestInspectCommand:
         assert data[0]["execution_id"] == "exec-001"
         assert data[1]["execution_id"] == "exec-003"
 
-    def test_empty_asset(self, home_env: dict[str, str]) -> None:
-        runner = CliRunner()
-        result = runner.invoke(
-            inspect,
+    def test_empty_asset(self, tmp_path: Path) -> None:
+        nagi_dir = tmp_path / ".nagi"
+        result = _invoke(
             ["nonexistent", "--output", "text", "--no-pager"],
-            catch_exceptions=False,
-            env=home_env,
+            nagi_dir,
         )
         assert result.exit_code == 0
         assert "No inspections found" in result.output
