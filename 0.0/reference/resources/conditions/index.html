@@ -2052,39 +2052,39 @@
 
 <h1 id="kind-conditions">kind: Conditions</h1>
 <p>A resource that groups desired state definitions. Used when multiple Assets share the same desired state. Referenced by specifying the name in the <code>conditions</code> field of an Asset's <code>onDrift</code> entry.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sla</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-24h</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">    </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-<span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no-nulls</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SQL</span>
-<span class="w">    </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SELECT</span><span class="nv"> </span><span class="s">COUNT(*)</span><span class="nv"> </span><span class="s">=</span><span class="nv"> </span><span class="s">0</span><span class="nv"> </span><span class="s">FROM</span><span class="nv"> </span><span class="s">daily_sales</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">id</span><span class="nv"> </span><span class="s">IS</span><span class="nv"> </span><span class="s">NULL&quot;</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: daily-sla
+spec:
+  - name: freshness-24h
+    type: Freshness
+    maxAge: 24h
+    interval: 6h
+  - name: no-nulls
+    type: SQL
+    query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE id IS NULL"</code></p>
 <p>Desired states within the same Conditions are AND-evaluated. If even one is Drifted, the Conditions is Drifted.</p>
 <h2 id="freshness">Freshness</h2>
 <p>Freshness applies to Assets backed by an SQL-queryable data source (e.g. a data warehouse). It uses the configured <a href="../connection/">Connection</a> to retrieve the last update time.</p>
 <p>Freshness changes how the last update time is retrieved depending on the configuration.</p>
 <h3 id="when-column-is-specified">When <code>column</code> Is Specified</h3>
 <p>Retrieves the maximum value of the column with <code>SELECT MAX(column)</code> and uses it as the logical last update time of the data. Targets timestamp columns such as <code>updated_at</code> or <code>created_at</code>.</p>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">  </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span>
-<span class="w">  </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">updated_at</span>
-</code></pre></div>
+<p><code>yaml
+- name: freshness
+  type: Freshness
+  maxAge: 24h
+  interval: 6h
+  column: updated_at</code></p>
 <h3 id="when-column-is-omitted">When <code>column</code> Is Omitted</h3>
 <p>Retrieves the physical last update time from table metadata. For BigQuery, uses <code>INFORMATION_SCHEMA.TABLE_STORAGE</code>. Works for all tables regardless of whether they are partitioned.</p>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">  </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span>
-<span class="w">  </span><span class="c1"># column omitted → retrieved from table metadata</span>
-</code></pre></div>
+<p><code>yaml
+- name: freshness
+  type: Freshness
+  maxAge: 24h
+  interval: 6h
+  # column omitted → retrieved from table metadata</code></p>
 <p>Omit <code>column</code> for tables without a timestamp column or where column values are not related to data freshness.</p>
 <h2 id="sql-read-only-constraint">SQL Read-Only Constraint</h2>
 <p>Applies to <code>SQL</code> and <code>Freshness</code> conditions. Nagi restricts SQL queries to read-only. Statements other than SELECT (INSERT, UPDATE, DELETE, DDL, etc.) and multi-statement queries are rejected.</p>
@@ -2150,6 +2150,13 @@
 <td>-</td>
 <td>Per-condition cache TTL override. Takes precedence over the Asset-level default.</td>
 </tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Per-condition timeout. Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="type-sql">type: SQL</h3>
@@ -2192,6 +2199,13 @@
 <td>—</td>
 <td>-</td>
 <td>Optional polling interval. If omitted, only evaluated on upstream state change or after sync.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Per-condition timeout. Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
 </tr>
 </tbody>
 </table>
@@ -2237,11 +2251,25 @@
 <td>Per-condition cache TTL override. Takes precedence over the Asset-level default.</td>
 </tr>
 <tr>
+<td><code>identity</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>Reference to a <code>kind: Identity</code> resource for authentication scope.</td>
+</tr>
+<tr>
 <td><code>interval</code></td>
 <td>Duration</td>
 <td>—</td>
 <td>-</td>
 <td>Optional polling interval. If omitted, only evaluated on upstream state change or after sync.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Per-condition timeout. Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
 </tr>
 </tbody>
 </table>

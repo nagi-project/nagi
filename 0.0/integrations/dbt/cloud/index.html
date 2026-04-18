@@ -2040,30 +2040,30 @@
 <p>This page describes how to use Nagi with a dbt Cloud environment.</p>
 <h2 id="recommended-approach">Recommended Approach</h2>
 <p>When using Nagi alongside dbt Cloud, we recommend starting with state evaluation and notifications. Setting <code>autoSync: false</code> on the <a href="../../../reference/resources/origin/">Origin</a> applies this to all automatically generated Assets.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Origin</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-</code></pre></div>
+<p><code>yaml
+kind: Origin
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  autoSync: false</code></p>
 <p>dbt Cloud jobs update models on their existing schedules, and Nagi periodically inspects the data state and sends notifications when drift is detected. For a gradual path toward automated convergence, see <a href="../../../overview/concepts/#from-monitoring-to-automation">Concepts — From Monitoring to Automation</a>.</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <p><a href="https://docs.getdbt.com/docs/core/installation-overview">dbt CLI</a> (dbt-core &gt;= 1.0) must be installed in the environment where Nagi runs.</p>
 <h2 id="init">Init</h2>
 <p>Running <a href="../../../reference/cli/#init"><code>nagi init</code></a> generates Connection and Origin in <code>resources/</code>, the same as <a href="../core/#init">dbt Core</a>.</p>
 <p>When using dbt Cloud, add the <code>dbtCloud</code> field to the generated Connection.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">dbtProfile</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_project</span>
-<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-<span class="w">  </span><span class="nt">dbtCloud</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">credentialsFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.dbt/dbt_cloud.yml</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  dbtProfile:
+    profile: my_project
+    target: dev
+  dbtCloud:
+    credentialsFile: ~/.dbt/dbt_cloud.yml</code></p>
 <p><code>credentialsFile</code> is optional and defaults to <code>~/.dbt/dbt_cloud.yml</code>.</p>
 <p>This credentials file can be downloaded from the <a href="https://docs.getdbt.com/docs/cloud/configure-cloud-cli#configure-the-dbt-cli">dbt Cloud UI</a> (project settings CLI section -&gt; "Download CLI configuration file"). Save it to <code>~/.dbt/dbt_cloud.yml</code>.</p>
 <h2 id="compile">Compile</h2>

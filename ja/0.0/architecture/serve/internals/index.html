@@ -2152,11 +2152,11 @@
 <p>Controller は、単一の連結成分を担当する async イベントループです。</p>
 <h3 id="graph-partitioning">Graph Partitioning</h3>
 <p>依存グラフの連結成分を自動検出し、依存関係のある Asset をグループとみなして分割します。そのグループごとに Controller が起動し、並列に動作します。</p>
-<div class="highlight"><pre><span></span><code>serve
+<p><code>text
+serve
 ├── Controller A (raw-sales → daily-sales → monthly-report)
 ├── Controller B (raw-logs → access-stats)
-└── shutdown watch
-</code></pre></div>
+└── shutdown watch</code></p>
 <p><code>nagi serve</code> を実行すると、グラフの構造に合わせて controller が複数起動します。分割を意識する必要はありません。</p>
 <h3 id="controlled-events">Controlled Events</h3>
 <p>Controller は 4 種類のイベントを待ち受け、そのイベントに対応する処理を実行します。</p>

@@ -1952,16 +1952,16 @@
 
 <h1 id="kind-origin">kind: Origin</h1>
 <p>A resource that auto-generates Assets. During <a href="../../cli/#compile"><code>nagi compile</code></a>, reads data structure information from other software and auto-generates Asset / Conditions / Sync resources.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Origin</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-dbt-project</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">           </span><span class="c1"># Optional. Propagates to all auto-generated Assets.</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: my-dbt-project
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  autoSync: false           # Optional. Propagates to all auto-generated Assets.</code></p>
 <h2 id="asset-naming">Asset Naming</h2>
 <p>Origin-generated Asset names are prefixed with the Origin name: <code>{origin}.{model}</code>.</p>
 <p>For the example above (Origin name <code>my-dbt-project</code>):</p>
@@ -1975,38 +1975,38 @@
 </div>
 <h2 id="auto-generated-sync">Auto-generated Sync</h2>
 <p><code>type: DBT</code> auto-generates a Sync resource named <code>{origin}-dbt-run</code> (e.g. <code>my-dbt-project-dbt-run</code>):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-dbt-project-dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.modelName</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--project-dir&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;../dbt-project&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--profile&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;my_project&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--target&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;dev&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: my-dbt-project-dbt-run
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.modelName }}", "--project-dir", "../dbt-project", "--profile", "my_project", "--target", "dev"]</code></p>
 <p>The <code>--project-dir</code>, <code>--profile</code>, and <code>--target</code> values are resolved from the Origin's Connection at compile time. <code>{{ asset.modelName }}</code> is a <a href="../#template-variables">template variable</a> that is replaced at compile time with the dbt model name without the Origin prefix (e.g. <code>orders</code>).</p>
 <p>Assets for dbt models that have tests will have an <code>onDrift</code> entry referencing this Sync.</p>
 <h2 id="overriding-with-defaultsync">Overriding with defaultSync</h2>
 <p>To use a user-defined Sync instead of the auto-generated one, specify it with <code>defaultSync</code>. It has the same interface as an <code>onDrift</code> entry (<code>sync</code> + <code>with</code>):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
-<span class="w">  </span><span class="nt">defaultSync</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-custom-sync</span>
-<span class="w">    </span><span class="nt">with</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;+{{</span><span class="nv"> </span><span class="s">asset.modelName</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</code></pre></div>
+<p><code>yaml
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  defaultSync:
+    sync: my-custom-sync
+    with:
+      selector: "+{{ asset.modelName }}"</code></p>
 <p>When <code>defaultSync</code> is specified, the <code>{origin}-dbt-run</code> Sync is not generated.</p>
 <h2 id="environment-variables">Environment Variables</h2>
 <p><code>type: DBT</code> Origins can declare environment variables via the <code>env</code> field. These are passed to the <code>dbt compile</code> subprocess. Only declared values and a minimal set of OS essentials reach the subprocess — the parent shell's environment is not inherited. Values can reference the Nagi process's own environment using <code>${VAR}</code> syntax.</p>
 <p>If your <code>profiles.yml</code> uses <code>{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}</code> or similar, declare the referenced variable in <code>env</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
-<span class="w">  </span><span class="nt">env</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${GOOGLE_APPLICATION_CREDENTIALS}</span>
-</code></pre></div>
+<p><code>yaml
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}</code></p>
 <p>See <a href="../../environment-variables/">Environment Variables</a> for details.</p>
 <!-- schema:auto-generated:start:OriginSpec -->
 
@@ -2045,11 +2045,18 @@
 <td>Override <code>autoSync</code> for all auto-generated Assets. When <code>None</code>, each Asset uses its own default (<code>true</code>).</td>
 </tr>
 <tr>
-<td><code>defaultSync</code></td>
-<td>DefaultSync</td>
-<td>—</td>
+<td><code>defaultSync.sync</code></td>
+<td>string</td>
+<td>Yes</td>
 <td>-</td>
-<td>User-defined Sync to override the auto-generated Sync (e.g. <code>my-project-dbt-run</code> for Origin named <code>my-project</code>).</td>
+<td>Name of the user-defined Sync resource to use instead of the auto-generated one.</td>
+</tr>
+<tr>
+<td><code>defaultSync.with</code></td>
+<td>map[string, string]</td>
+<td>—</td>
+<td>{}</td>
+<td>Template variables passed to the Sync and Conditions resources for argument interpolation.</td>
 </tr>
 <tr>
 <td><code>env</code></td>

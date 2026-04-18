@@ -813,78 +813,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#auto-generated-resources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Auto-generated resources
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Auto-generated resources">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#conditions-nagi-export-drift" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conditions (nagi-export-drift)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#sync-nagi-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sync (nagi-export)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#asset-nagi-export-table" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Asset (nagi-export-&lt;table&gt;)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#destination-tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Destination tables
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#watermarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Watermarks
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1902,78 +1830,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#auto-generated-resources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Auto-generated resources
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Auto-generated resources">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#conditions-nagi-export-drift" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conditions (nagi-export-drift)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#sync-nagi-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sync (nagi-export)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#asset-nagi-export-table" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Asset (nagi-export-&lt;table&gt;)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#destination-tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Destination tables
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#watermarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Watermarks
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2004,13 +1860,14 @@
 </ol>
 <p>省略するとログはローカルの <code>logs.db</code> のみに保持され、リソースの自動生成は行われません。</p>
 <h2 id="configuration">Configuration</h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># nagi.yaml</span>
-<span class="nt">export</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span><span class="w">          </span><span class="c1"># kind: Connection の metadata.name</span>
-<span class="w">  </span><span class="nt">dataset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_project.nagi_logs</span><span class="w">    </span><span class="c1"># BigQuery dataset</span>
-<span class="w">  </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jsonl</span><span class="w">                    </span><span class="c1"># 中間ファイル形式 (jsonl | duckdb)</span>
-<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30m</span><span class="w">                    </span><span class="c1"># エクスポート間隔（デフォルト: 30m）</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="nagiyaml">nagi.yaml</h1>
+<p>export:
+  connection: my-bigquery          # kind: Connection の metadata.name
+  dataset: my_project.nagi_logs    # BigQuery dataset
+  format: jsonl                    # 中間ファイル形式 (jsonl | duckdb)
+  interval: 30m                    # エクスポート間隔（デフォルト: 30m）
+```</p>
 <table>
 <thead>
 <tr>
@@ -2056,40 +1913,40 @@
 <p><code>nagi compile</code> は以下の 5 リソースを自動生成します。ユーザーが <code>resources/</code> に配置する必要はありません。</p>
 <h3 id="conditions-nagi-export-drift">Conditions (<code>nagi-export-drift</code>)</h3>
 <p>未エクスポートの行がないかチェックします。<code>{{ sync.table }}</code> は Asset の <code>with</code> から展開されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.dev/v1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi-export-drift</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unexported-rows</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;sh&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;-c&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;nagi</span><span class="nv"> </span><span class="s">export</span><span class="nv"> </span><span class="s">--select</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">sync.table</span><span class="nv"> </span><span class="s">}}</span><span class="nv"> </span><span class="s">--dry-run</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">jq</span><span class="nv"> </span><span class="s">-e</span><span class="nv"> </span><span class="s">&#39;.[]</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">.count</span><span class="nv"> </span><span class="s">==</span><span class="nv"> </span><span class="s">0&#39;&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30m</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.dev/v1
+kind: Conditions
+metadata:
+  name: nagi-export-drift
+spec:
+  - name: unexported-rows
+    run: ["sh", "-c", "nagi export --select {{ sync.table }} --dry-run | jq -e '.[] | .count == 0'"]
+    interval: 30m</code></p>
 <h3 id="sync-nagi-export">Sync (<code>nagi-export</code>)</h3>
 <p>テーブル単位でエクスポートします。<code>{{ sync.table }}</code> は Asset の <code>with</code> から渡されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.dev/v1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi-export</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;nagi&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;export&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">sync.table</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.dev/v1
+kind: Sync
+metadata:
+  name: nagi-export
+spec:
+  run:
+    type: Command
+    args: ["nagi", "export", "--select", "{{ sync.table }}"]</code></p>
 <h3 id="asset-nagi-export-table">Asset (<code>nagi-export-&lt;table&gt;</code>)</h3>
 <p>テーブルごとに 1 つ生成されます（<code>evaluate_logs</code>、<code>sync_logs</code>、<code>sync_evaluations</code>）。<code>with</code> でテーブル名を Sync に渡します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.dev/v1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi-export-evaluate_logs</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi-export-drift</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi-export</span>
-<span class="w">      </span><span class="nt">with</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">evaluate_logs</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.dev/v1
+kind: Asset
+metadata:
+  name: nagi-export-evaluate_logs
+spec:
+  autoSync: true
+  onDrift:
+    - conditions: nagi-export-drift
+      sync: nagi-export
+      with:
+        table: evaluate_logs</code></p>
 <h2 id="destination-tables">Destination tables</h2>
 <p>エクスポート先のデータウェアハウスには <code>dataset</code> で指定したデータセット内に以下のテーブルが作成されます。</p>
 <table>
@@ -2121,11 +1978,11 @@
 <p>データは MERGE（upsert）で書き込まれるため、再実行しても重複しません。</p>
 <h2 id="watermarks">Watermarks</h2>
 <p>エクスポート済みの位置は <code>~/.nagi/watermarks/</code> にテーブルごとのファイルとして記録されます。各ファイルは最後にエクスポートした <code>rowid</code> を保持し、差分転送を実現します。</p>
-<div class="highlight"><pre><span></span><code>~/.nagi/watermarks/
+<p><code>text
+~/.nagi/watermarks/
 ├── evaluate_logs.json
 ├── sync_logs.json
-└── sync_evaluations.json
-</code></pre></div>
+└── sync_evaluations.json</code></p>
 <p>詳細は <a href="../storage/#watermarks">Storage</a> を参照してください。</p>
 
 

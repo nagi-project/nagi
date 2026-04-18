@@ -2024,11 +2024,11 @@
 <li>Windows (x86_64)</li>
 </ul>
 <h2 id="install">Install</h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>nagi-cli
-</code></pre></div>
+<p><code>bash
+pip install nagi-cli</code></p>
 <p><a href="../../architecture/mcp/">MCP サーバー</a>を使用する場合は、<code>mcp</code> extra を指定してインストールします。</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>nagi-cli<span class="o">[</span>mcp<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+pip install nagi-cli[mcp]</code></p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>セットアップなしですぐに試してみたい場合は <a href="../quickstart/">Quickstart</a> を参照してください。</p>
@@ -2036,19 +2036,19 @@
 <h2 id="project-structure">Project Structure</h2>
 <p>このページでは、<code>my-project/</code> ディレクトリで Nagi をセットアップする前提で記載します。</p>
 <p>セットアップが完了すると、ディレクトリの構造は以下のようになります。</p>
-<div class="highlight"><pre><span></span><code>my-project/
+<p><code>text
+my-project/
 ├── nagi.yaml          # Nagi の設定ファイル
 ├── resources/         # リソース定義を配置するディレクトリ
 │   └── ...
 └── target/            # Nagi が Sync や Evaluate で参照するディレクトリ
     ├── assets/        # コンパイル後のリソース定義を配置するディレクトリ
     │   └── ...
-    └── graph.json     # Asset の依存グラフ
-</code></pre></div>
+    └── graph.json     # Asset の依存グラフ</code></p>
 <h2 id="setup">Setup</h2>
 <h3 id="1-init">1. Init</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>init
-</code></pre></div>
+<p><code>bash
+nagi init</code></p>
 <p>対話形式で <code>nagi.yaml</code> と <code>resources/</code> ディレクトリを生成します。</p>
 <p>他ソフトウェアと連携する場合は、<a href="../../reference/resources/origin/">Origin</a> と <a href="../../reference/resources/connection/">Connection</a> の設定も合わせて行います。</p>
 <p>これらを設定すると、連携対象のソフトウェア設定を読み取って、Nagi の定義ファイルを自動生成できます。対応しているソフトウェアは <a href="../../integrations/">Integrations</a> を参照してください。</p>
@@ -2072,37 +2072,37 @@
 </tbody>
 </table>
 <p>init 完了後に、下記の状態になっていることを確認してください。</p>
-<div class="highlight"><pre><span></span><code>my-project/
+<p><code>text
+my-project/
 ├── nagi.yaml
 └── resources/
     ├── connection.yaml    # Origin 設定時のみ
-    └── origin.yaml        # Origin 設定時のみ
-</code></pre></div>
+    └── origin.yaml        # Origin 設定時のみ</code></p>
 <h3 id="2-define-resources">2. Define Resources</h3>
 <p><code>resources/</code> にリソース定義用の YAML ファイルを配置します。</p>
 <p>Origin を設定済みの場合、Asset は <code>nagi compile</code> で自動生成されるため、ここでは <a href="../../reference/resources/conditions/">Conditions</a> を配置します。</p>
 <p>Origin を使用しない場合は、<a href="../../reference/resources/asset/">Asset</a>、<a href="../../reference/resources/conditions/">Conditions</a>、<a href="../../reference/resources/connection/">Connection</a> を配置します。</p>
 <p>各リソースの定義方法は <a href="../../reference/resources/">Resource Configurations</a> を参照してください。</p>
 <h3 id="3-compile">3. Compile</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>compile
-</code></pre></div>
+<p><code>bash
+nagi compile</code></p>
 <p><code>resources/</code> のリソース定義を検証・結合し、Evaluate と Sync の設定情報として <code>target/</code> へ出力します。</p>
-<div class="highlight"><pre><span></span><code>my-project/
+<p><code>text
+my-project/
 ├── nagi.yaml
 ├── resources/
 │   └── ...
 └── target/                # nagi compile で生成
     ├── assets/
     │   └── *.yaml         # コンパイル済み Asset
-    └── graph.json          # 依存グラフ
-</code></pre></div>
+    └── graph.json          # 依存グラフ</code></p>
 <h3 id="4-evaluate">4. Evaluate</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>evaluate
-</code></pre></div>
+<p><code>bash
+nagi evaluate</code></p>
 <p><code>target/</code> の Asset に対して期待状態の評価を実行します。すべて満たしていれば Ready、1つでも満たしていなければ Drifted と判定されます。</p>
 <p>特定の Asset のみを評価するには <code>--select</code> を使います。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span>&lt;asset-name&gt;
-</code></pre></div>
+<p><code>bash
+nagi evaluate --select &lt;asset-name&gt;</code></p>
 <h2 id="whats-next">What's Next</h2>
 <ul>
 <li><a href="../concepts/#from-monitoring-to-automation">Concepts — From Monitoring to Automation</a> — 自動収束へ段階的に進める流れを知る</li>

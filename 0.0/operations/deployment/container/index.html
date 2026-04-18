@@ -1101,17 +1101,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#log-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Log Export
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1863,17 +1852,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#log-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Log Export
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1902,12 +1880,13 @@
 <p>When a stop signal is received, it stops issuing new tasks and waits for running Sync operations to complete. The wait timeout is configured via <code>terminationGracePeriodSeconds</code> in <code>nagi.yaml</code>. Set this value to match the shutdown grace period of your container environment.</p>
 <h2 id="storage-backend">Storage Backend</h2>
 <p>Uses a remote backend (GCS / S3). Since local files are lost when the container restarts, cache, locks, and halt flags are stored remotely.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># nagi.yaml</span>
-<span class="nt">backend</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gcs</span>
-<span class="w">  </span><span class="nt">bucket</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-nagi-bucket</span>
-<span class="w">  </span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="nagiyaml">nagi.yaml</h1>
+<p>backend:
+  type: gcs
+  bucket: my-nagi-bucket
+  prefix: my-project
+```</p>
 <p>For storage backend details, see <a href="../../../architecture/storage/">Storage</a>.</p>
 <h2 id="log-export">Log Export</h2>
 <p><code>logs.db</code> (execution history) uses SQLite and is stored locally. Since local <code>logs.db</code> is lost when the container restarts, configure <a href="../../../architecture/export/">Export</a> to periodically export data to a data warehouse.</p>

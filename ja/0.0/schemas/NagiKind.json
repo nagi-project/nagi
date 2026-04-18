@@ -71,6 +71,13 @@
               ],
               "description": "Optional dbt Cloud configuration for running-job checks before sync."
             },
+            "identity": {
+              "description": "Reference to a `kind: Identity` resource for authentication scope.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "profile": {
               "description": "Profile name as defined in `~/.dbt/profiles.yml`.",
               "type": "string"
@@ -114,6 +121,13 @@
                 "null"
               ]
             },
+            "identity": {
+              "description": "Reference to a `kind: Identity` resource for authentication scope.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "keyfile": {
               "description": "Path to the service account JSON key file. Required when `method` is `service-account`.",
               "type": [
@@ -132,14 +146,16 @@
               "description": "GCP project ID that contains the dataset.",
               "type": "string"
             },
-            "timeoutSeconds": {
-              "description": "Query timeout in seconds.",
-              "format": "uint32",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Query timeout (e.g. \"30s\", \"1h\"). Falls back to `NagiConfig::default_timeout` when omitted."
             },
             "type": {
               "const": "bigquery",
@@ -156,6 +172,13 @@
         {
           "description": "DuckDB connection via the `duckdb` CLI.",
           "properties": {
+            "identity": {
+              "description": "Reference to a `kind: Identity` resource for authentication scope.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "path": {
               "description": "Path to the DuckDB database file.",
               "type": "string"
@@ -182,6 +205,13 @@
               "description": "Database name.",
               "type": "string"
             },
+            "identity": {
+              "description": "Reference to a `kind: Identity` resource for authentication scope.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "privateKeyPath": {
               "description": "Path to the RSA private key file (PKCS#8 PEM format) for JWT authentication.",
               "type": "string"
@@ -196,6 +226,17 @@
             "schema": {
               "description": "Schema name.",
               "type": "string"
+            },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Query timeout (e.g. \"30s\", \"1h\"). Falls back to `NagiConfig::default_timeout` when omitted."
             },
             "type": {
               "const": "snowflake",
@@ -310,6 +351,17 @@
               "description": "Unique identifier for this condition within the Asset.",
               "type": "string"
             },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted."
+            },
             "type": {
               "const": "Freshness",
               "type": "string"
@@ -358,6 +410,17 @@
               "description": "SQL query that must return a scalar boolean.",
               "type": "string"
             },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted."
+            },
             "type": {
               "const": "SQL",
               "type": "string"
@@ -393,6 +456,13 @@
               "default": null,
               "description": "Per-condition cache TTL override. Takes precedence over the Asset-level default."
             },
+            "identity": {
+              "description": "Reference to a `kind: Identity` resource for authentication scope.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "interval": {
               "anyOf": [
                 {
@@ -416,6 +486,17 @@
               },
               "type": "array"
             },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Per-condition timeout. Falls back to `NagiConfig::default_timeout` when omitted."
+            },
             "type": {
               "const": "Command",
               "type": "string"
@@ -434,6 +515,31 @@
       "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
       "format": "duration",
       "type": "string"
+    },
+    "IdentitySpec": {
+      "description": "Spec for `kind: Identity`. Declares an authentication scope that can be referenced\nfrom Connection / Sync / Command conditions to control which credentials are exposed\nto in-process DB clients and subprocess execution.",
+      "oneOf": [
+        {
+          "description": "Declares environment variables to inject into the target scope. Values may contain\n`${VAR}` references that are expanded from the Nagi process environment at use time.",
+          "properties": {
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": {
+              "const": "env",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "env"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "MergePosition": {
       "description": "Controls where an overlay onDrift entry is placed relative to Origin-generated entries\nduring Asset overlay merge.",
@@ -566,6 +672,13 @@
     "SyncSpec": {
       "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps.\nReusable across multiple Assets via `ref`.",
       "properties": {
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource. Applied to all stages unless overridden per-stage.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "post": {
           "anyOf": [
             {
@@ -591,6 +704,17 @@
         "run": {
           "$ref": "#/$defs/SyncStep",
           "description": "The main convergence step."
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sync-wide timeout applied to each step unless overridden.\nFalls back to `NagiConfig::default_timeout` when omitted."
         }
       },
       "required": [
@@ -614,6 +738,24 @@
           "default": {},
           "description": "Environment variables to set for the subprocess.",
           "type": "object"
+        },
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-step timeout. Overrides the Sync-level `timeout` for this stage."
         },
         "type": {
           "$ref": "#/$defs/StepType",
@@ -740,6 +882,30 @@
         },
         "spec": {
           "$ref": "#/$defs/OriginSpec"
+        }
+      },
+      "required": [
+        "kind",
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "apiVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Identity",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/IdentitySpec"
         }
       },
       "required": [

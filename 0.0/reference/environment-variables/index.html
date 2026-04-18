@@ -1559,6 +1559,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#nagi-injected-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nagi-injected Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1986,6 +1997,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#nagi-injected-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nagi-injected Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2065,24 +2087,24 @@
 <p>If the user profile has cloud credentials registered as persistent user environment variables, those will be present in the base. To exclude them, avoid registering credentials as persistent user environment variables. Use <code>env</code> with <code>${VAR}</code> to pass credentials from the Nagi process explicitly.</p>
 <h2 id="declaring-environment-variables">Declaring Environment Variables</h2>
 <p>Use the <code>env</code> field on Sync steps, Conditions <code>type: Command</code>, or Origin <code>type: DBT</code> to declare environment variables for the subprocess:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.modelName</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">env</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${GOOGLE_APPLICATION_CREDENTIALS}</span>
-<span class="w">      </span><span class="nt">DBT_PROFILES_DIR</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/custom/profiles</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.modelName }}"]
+    env:
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+      DBT_PROFILES_DIR: /custom/profiles</code></p>
 <h2 id="referencing-parent-process-variables">Referencing Parent Process Variables</h2>
 <p>To pass an environment variable from the shell that started Nagi through to a subprocess, reference it in <code>env</code> using <code>${VAR}</code> syntax:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">env</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${GOOGLE_APPLICATION_CREDENTIALS}</span>
-<span class="w">  </span><span class="nt">CUSTOM_PATH</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${HOME}/custom</span>
-<span class="w">  </span><span class="nt">LITERAL_VALUE</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-fixed-value</span>
-</code></pre></div>
+<p><code>yaml
+env:
+  GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+  CUSTOM_PATH: ${HOME}/custom
+  LITERAL_VALUE: my-fixed-value</code></p>
 <h3 id="syntax">Syntax</h3>
 <ul>
 <li>Only <code>${VAR}</code> syntax is supported</li>
@@ -2119,6 +2141,26 @@
 <td>Origin (<code>type: DBT</code>)</td>
 <td><code>spec.env</code></td>
 <td><code>dbt compile</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="nagi-injected-variables">Nagi-injected Variables</h2>
+<p>Nagi automatically injects the following variables into Sync subprocesses. These are set after user-declared <code>env</code> and cannot be overridden.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NAGI_EXECUTION_ID</code></td>
+<td>UUID that uniquely identifies the current Sync execution. Use this to correlate Sync runs with jobs in your data warehouse (e.g. as a job label or query tag). See <a href="../../integrations/dbt/core/#propagating-execution_id-to-bigquery-jobs">dbt Core integration</a> for an example.</td>
+</tr>
+<tr>
+<td><code>TRACEPARENT</code></td>
+<td><a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> header derived from the execution ID. OpenTelemetry-instrumented tools automatically pick this up as the parent trace.</td>
 </tr>
 </tbody>
 </table>

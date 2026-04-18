@@ -1853,15 +1853,16 @@
 <h1 id="local">Local</h1>
 <p>A pattern for development and testing.</p>
 <h2 id="setup">Setup</h2>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve
-</code></pre></div>
+<p><code>bash
+nagi serve</code></p>
 <p><code>nagi serve</code> automatically runs compile on startup. If you modify resource definitions or <code>nagi.yaml</code>, stop the process with <code>Ctrl-C</code> and run it again.</p>
 <h2 id="storage-backend">Storage Backend</h2>
 <p>Uses the default <code>local</code> backend. State data is stored in <code>nagiDir</code> (default: <code>~/.nagi</code>).</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># nagi.yaml</span>
-<span class="nt">backend</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="nagiyaml">nagi.yaml</h1>
+<p>backend:
+  type: local
+```</p>
 
 
 

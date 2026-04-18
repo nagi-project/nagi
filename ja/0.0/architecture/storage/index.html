@@ -772,6 +772,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Caches">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#assetevalresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AssetEvalResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -782,6 +799,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Locks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lockinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LockInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -794,6 +828,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Suspended">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#suspendedinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SuspendedInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -804,6 +855,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Logs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#synclogentry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SyncLogEntry
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1850,6 +1918,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Caches">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#assetevalresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AssetEvalResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1860,6 +1945,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Locks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lockinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LockInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1872,6 +1974,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Suspended">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#suspendedinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SuspendedInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1882,6 +2001,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Logs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#synclogentry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SyncLogEntry
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1970,17 +2106,18 @@
 <p>リモートバックエンドを選択すると、<a href="../../reference/cli/#serve"><code>nagi serve</code></a> がリモートサーバーで動いている場合には、クライアント環境から <a href="../../reference/cli/#status"><code>nagi status</code></a> や <a href="../../reference/cli/#serve"><code>nagi serve resume</code></a> を実行できます。</p>
 <h2 id="caches">Caches</h2>
 <p>Evaluate の結果を Asset・期待状態ごとにファイルとして保存します。<a href="../../reference/cli/#status"><code>nagi status</code></a> はこのキャッシュを読み取るため、評価は実行しません。<code>nagi serve</code> では期待状態ごとの <code>evaluateCacheTtl</code> に基づき、TTL 内であればキャッシュ済みの結果を再利用してクエリの実行をスキップします。</p>
-<div class="highlight"><pre><span></span><code>~/.nagi/cache/evaluate/
+<p><code>text
+~/.nagi/cache/evaluate/
 ├── daily-sales/
 │   ├── freshness-check.json
 │   └── data-test.json
 ├── raw-sales/
 │   └── freshness-check.json
 └── monthly-report/
-    └── freshness-check.json
-</code></pre></div>
+    └── freshness-check.json</code></p>
 <!-- schema:auto-generated:start:AssetEvalResult -->
 
+<h3 id="assetevalresult">AssetEvalResult</h3>
 <table>
 <thead>
 <tr>
@@ -2031,12 +2168,13 @@
 <p>すべてのロックは TTL（有効期限）付きで、プロセスが異常終了した場合でも期限切れにより自動で解放されます。TTL は <a href="../../reference/project/"><code>nagi.yaml</code></a> の <code>lockTtlSeconds</code> で変更できます（デフォルト: 3600秒）。</p>
 </div>
 <p>ファイル名は <a href="../../reference/resources/asset/">kind: Asset</a> の <code>metadata.name</code> に対応します。</p>
-<div class="highlight"><pre><span></span><code>~/.nagi/locks/
+<p><code>text
+~/.nagi/locks/
 ├── {asset-name-01}.lock
-└── {asset-name-02}.lock
-</code></pre></div>
+└── {asset-name-02}.lock</code></p>
 <!-- schema:auto-generated:start:LockInfo -->
 
+<h3 id="lockinfo">LockInfo</h3>
 <table>
 <thead>
 <tr>
@@ -2076,12 +2214,13 @@
 <h2 id="suspended">Suspended</h2>
 <p>Guardrails が sync を停止した Asset のフラグです。停止理由、停止時刻、起動元となった sync の実行 ID を含みます。<a href="../../reference/cli/#serve-resume"><code>nagi serve resume</code></a> で解除します。</p>
 <p>ファイル名は <a href="../../reference/resources/asset/">kind: Asset</a> の <code>metadata.name</code> に対応します。</p>
-<div class="highlight"><pre><span></span><code>~/.nagi/suspended/
+<p><code>text
+~/.nagi/suspended/
 ├── {asset-name-01}.json
-└── {asset-name-02}.json
-</code></pre></div>
+└── {asset-name-02}.json</code></p>
 <!-- schema:auto-generated:start:SuspendedInfo -->
 
+<h3 id="suspendedinfo">SuspendedInfo</h3>
 <table>
 <thead>
 <tr>
@@ -2129,7 +2268,8 @@
 <p>実行ログは、メタデータとログ本体を分離して保存します。</p>
 <p><code>logs.db</code> は SQLite データベースで、evaluate と sync の実行履歴を記録します。<a href="../../reference/cli/#init"><code>nagi init</code></a> でスキーマが初期化されます。既にデータベースが存在する場合は既存のデータを保持します。<a href="../../reference/cli/#status"><code>nagi status</code></a> はこのデータベースから直近の実行結果を読み取ります。</p>
 <p><code>logs/</code> は sync の各ステージの stdout / stderr をファイルとして保存します。<code>logs.db</code> のレコードからこれらのファイルパスを参照できます。</p>
-<div class="highlight"><pre><span></span><code>~/.nagi/logs/
+<p><code>text
+~/.nagi/logs/
 └── {asset-name-01}/
     └── 2026/
         └── 03/
@@ -2139,10 +2279,10 @@
                 ├── 20260321T030015Z_run.stdout
                 ├── 20260321T030015Z_run.stderr
                 ├── 20260321T030120Z_post.stdout
-                └── 20260321T030120Z_post.stderr
-</code></pre></div>
+                └── 20260321T030120Z_post.stderr</code></p>
 <!-- schema:auto-generated:start:SyncLogEntry -->
 
+<h3 id="synclogentry">SyncLogEntry</h3>
 <table>
 <thead>
 <tr>
@@ -2232,11 +2372,11 @@
 <p><code>logs.db</code> のデータは <a href="../../reference/cli/#export"><code>nagi export</code></a> でデータウェアハウスへエクスポートできます。設定方法や仕組みの解説は <a href="../export/">Export</a> を参照してください。</p>
 <h2 id="watermarks">Watermarks</h2>
 <p><a href="../../reference/cli/#export"><code>nagi export</code></a> が データウェアハウスにエクスポート済みの位置を記録するファイルです。テーブルごとにウォーターマーク（最後にエクスポートした <code>rowid</code>）を保持し、差分転送を実現します。詳細は <a href="../export/">Export</a> を参照してください。</p>
-<div class="highlight"><pre><span></span><code>~/.nagi/watermarks/
+<p><code>text
+~/.nagi/watermarks/
 ├── evaluate_logs.json
 ├── sync_logs.json
-└── sync_evaluations.json
-</code></pre></div>
+└── sync_evaluations.json</code></p>
 
 
 

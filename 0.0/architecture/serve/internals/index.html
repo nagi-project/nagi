@@ -2152,11 +2152,11 @@
 <p>A Controller is an async event loop responsible for a single connected component.</p>
 <h3 id="graph-partitioning">Graph Partitioning</h3>
 <p>Connected components of the dependency graph are automatically detected, and Assets are partitioned into groups by connected component. A Controller is started for each group and operates in parallel.</p>
-<div class="highlight"><pre><span></span><code>serve
+<p><code>text
+serve
 ├── Controller A (raw-sales → daily-sales → monthly-report)
 ├── Controller B (raw-logs → access-stats)
-└── shutdown watch
-</code></pre></div>
+└── shutdown watch</code></p>
 <p>When you run <code>nagi serve</code>, multiple controllers are started according to the graph structure. You do not need to think about partitioning.</p>
 <h3 id="controlled-events">Controlled Events</h3>
 <p>The Controller listens for 4 types of events and executes the corresponding processing for each.</p>

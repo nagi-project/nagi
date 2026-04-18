@@ -2040,30 +2040,30 @@
 <p>dbt Cloud を使用している環境での Nagi の利用方法について記載しています。</p>
 <h2 id="recommended-approach">Recommended Approach</h2>
 <p>dbt Cloud 環境と併用する場合は、Nagi は状態評価と通知から始めることを推奨します。<a href="../../../reference/resources/origin/">Origin</a> に <code>autoSync: false</code> を設定すると、自動生成されるすべての Asset に適用されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Origin</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-</code></pre></div>
+<p><code>yaml
+kind: Origin
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project
+  autoSync: false</code></p>
 <p>dbt Cloud のジョブが既存のスケジュールでモデルを更新し、Nagi は定期的にデータの状態を検査して drift を検出したら通知します。段階的に自動収束へ進める流れは <a href="../../../overview/concepts/#from-monitoring-to-automation">Concepts — From Monitoring to Automation</a> を参照してください。</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <p>Nagi を実行する環境に <a href="https://docs.getdbt.com/docs/core/installation-overview">dbt CLI</a>（dbt-core &gt;= 1.0）のインストールが必要です。</p>
 <h2 id="init">Init</h2>
 <p><a href="../../../reference/cli/#init"><code>nagi init</code></a> を実行すると、<a href="../core/#init">dbt Core</a> と同様に Connection と Origin が <code>resources/</code> に生成されます。</p>
 <p>dbt Cloud を使用する場合は、生成された Connection に <code>dbtCloud</code> フィールドを追加します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">dbtProfile</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_project</span>
-<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-<span class="w">  </span><span class="nt">dbtCloud</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">credentialsFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.dbt/dbt_cloud.yml</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  dbtProfile:
+    profile: my_project
+    target: dev
+  dbtCloud:
+    credentialsFile: ~/.dbt/dbt_cloud.yml</code></p>
 <p><code>credentialsFile</code> は省略可能で、デフォルトは <code>~/.dbt/dbt_cloud.yml</code> です。</p>
 <p>この認証ファイルは <a href="https://docs.getdbt.com/docs/cloud/configure-cloud-cli#configure-the-dbt-cli">dbt Cloud の UI</a> からダウンロードできます（プロジェクト設定の CLI セクション → "Download CLI configuration file"）。<code>~/.dbt/dbt_cloud.yml</code> に保存してください。</p>
 <h2 id="compile">Compile</h2>

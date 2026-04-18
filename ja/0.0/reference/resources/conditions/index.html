@@ -2052,39 +2052,39 @@
 
 <h1 id="kind-conditions">kind: Conditions</h1>
 <p>期待状態の定義をまとめたリソースです。複数の Asset が同じ期待状態を共有する場合に使います。Asset の <code>onDrift</code> エントリの <code>conditions</code> フィールドで名前を指定して参照します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sla</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-24h</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">    </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-<span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no-nulls</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SQL</span>
-<span class="w">    </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SELECT</span><span class="nv"> </span><span class="s">COUNT(*)</span><span class="nv"> </span><span class="s">=</span><span class="nv"> </span><span class="s">0</span><span class="nv"> </span><span class="s">FROM</span><span class="nv"> </span><span class="s">daily_sales</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">id</span><span class="nv"> </span><span class="s">IS</span><span class="nv"> </span><span class="s">NULL&quot;</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: daily-sla
+spec:
+  - name: freshness-24h
+    type: Freshness
+    maxAge: 24h
+    interval: 6h
+  - name: no-nulls
+    type: SQL
+    query: "SELECT COUNT(*) = 0 FROM daily_sales WHERE id IS NULL"</code></p>
 <p>同一 Conditions 内の期待状態は AND 評価されます。1つでも Drifted であればその Conditions は Drifted です。</p>
 <h2 id="freshness">Freshness</h2>
 <p>Freshness は、SQL でクエリ可能なデータソース（データウェアハウスなど）を背後に持つ Asset を対象とします。設定された <a href="../connection/">Connection</a> を通じて最終更新時刻を取得します。</p>
 <p>Freshness は、設定方法によって最終更新時刻の取得方法が変わります。</p>
 <h3 id="when-column-is-specified">When <code>column</code> Is Specified</h3>
 <p><code>SELECT MAX(column)</code> でカラムの最大値を取得し、データの論理的な最終更新時刻として使用します。<code>updated_at</code> や <code>created_at</code> のようなタイムスタンプカラムが対象です。</p>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">  </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span>
-<span class="w">  </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">updated_at</span>
-</code></pre></div>
+<p><code>yaml
+- name: freshness
+  type: Freshness
+  maxAge: 24h
+  interval: 6h
+  column: updated_at</code></p>
 <h3 id="when-column-is-omitted">When <code>column</code> Is Omitted</h3>
 <p>テーブルメタデータから物理的な最終更新時刻を取得します。BigQuery の場合は <code>INFORMATION_SCHEMA.TABLE_STORAGE</code> を使用します。パーティションの有無にかかわらず全テーブルに対応します。</p>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">  </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6h</span>
-<span class="w">  </span><span class="c1"># column 省略 → テーブルメタデータから取得</span>
-</code></pre></div>
+<p><code>yaml
+- name: freshness
+  type: Freshness
+  maxAge: 24h
+  interval: 6h
+  # column 省略 → テーブルメタデータから取得</code></p>
 <p>タイムスタンプ列がないテーブルや、列の値がデータの鮮度と関連しない場合は <code>column</code> を省略してください。</p>
 <h2 id="sql-read-only-constraint">SQL Read-Only Constraint</h2>
 <p><code>SQL</code> および <code>Freshness</code> の Conditions に適用されます。Nagi は SQL クエリを読み取り専用に制限します。SELECT 以外の文（INSERT, UPDATE, DELETE, DDL 等）やmulti-statement query は拒否されます。</p>
@@ -2150,6 +2150,13 @@
 <td>-</td>
 <td>Per-condition cache TTL override. Takes precedence over the Asset-level default.</td>
 </tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Per-condition timeout. Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="type-sql">type: SQL</h3>
@@ -2192,6 +2199,13 @@
 <td>—</td>
 <td>-</td>
 <td>Optional polling interval. If omitted, only evaluated on upstream state change or after sync.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Per-condition timeout. Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
 </tr>
 </tbody>
 </table>
@@ -2237,11 +2251,25 @@
 <td>Per-condition cache TTL override. Takes precedence over the Asset-level default.</td>
 </tr>
 <tr>
+<td><code>identity</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>Reference to a <code>kind: Identity</code> resource for authentication scope.</td>
+</tr>
+<tr>
 <td><code>interval</code></td>
 <td>Duration</td>
 <td>—</td>
 <td>-</td>
 <td>Optional polling interval. If omitted, only evaluated on upstream state change or after sync.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Per-condition timeout. Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
 </tr>
 </tbody>
 </table>

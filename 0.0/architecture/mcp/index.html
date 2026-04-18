@@ -1911,9 +1911,9 @@
 <p>By default, only read-only tools (<code>nagi_status</code>, <code>nagi_evaluate</code>) are exposed. Specifying <code>--allow-sync</code> also exposes <code>nagi_sync</code>.</p>
 </div>
 <h2 id="setup">Setup</h2>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>mcp<span class="w">                    </span><span class="c1"># read-only</span>
-nagi<span class="w"> </span>mcp<span class="w"> </span>--allow-sync<span class="w">       </span><span class="c1"># also allow sync</span>
-</code></pre></div>
+<p><code>bash
+nagi mcp                    # read-only
+nagi mcp --allow-sync       # also allow sync</code></p>
 <p>The MCP server communicates via stdio. Connect from Claude Desktop or other MCP clients.</p>
 <h2 id="use-cases">Use Cases</h2>
 <p>AI agents can use Nagi for the following use cases:</p>

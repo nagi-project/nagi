@@ -548,69 +548,8 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#step-5-serve" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 5: Serve
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 5: Serve">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#upstream-changes-propagate-downstream" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Upstream Changes Propagate Downstream
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#only-downstream-becomes-drifted" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Only Downstream Becomes Drifted
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cleanup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cleanup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
   
 </li>
       
@@ -2008,69 +1947,8 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#step-5-serve" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 5: Serve
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 5: Serve">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#upstream-changes-propagate-downstream" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Upstream Changes Propagate Downstream
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#only-downstream-becomes-drifted" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Only Downstream Becomes Drifted
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cleanup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cleanup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
   
 </li>
       
@@ -2107,127 +1985,129 @@
 <p>自分のプロジェクトで新規に始める場合は、<a href="../../reference/cli/#init"><code>nagi init</code></a> を実行して <code>resources/</code> と <code>nagi.yaml</code> を生成してください。このサンプルでは作成済みの状態から始めます。</p>
 </div>
 <p><code>examples/quickstart/</code> にサンプルプロジェクトが用意されています。</p>
-<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>examples/quickstart
-</code></pre></div>
+<p><code>bash
+cd examples/quickstart</code></p>
 <p>このプロジェクトには2つの Asset が定義されています。<code>farewell</code> は <code>greeting</code> を上流として依存しています。</p>
-<div class="highlight"><pre><span></span><code>greeting → farewell
-</code></pre></div>
+<p><code>text
+greeting → farewell</code></p>
 <p><code>resources/conditions.yaml</code> — ファイルが存在していることを期待状態として定義</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">greeting-check</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">file-exists</span>
-<span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">test</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-f</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">greeting.txt</span><span class="p p-Indicator">]</span>
-<span class="nn">---</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">farewell-check</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">file-exists</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">test</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-f</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">farewell.txt</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p>```yaml
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: greeting-check
+spec:
+  - name: file-exists
+    interval: 30s
+    type: Command
+    run: [test, -f, greeting.txt]</p>
+<hr />
+<p>apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: farewell-check
+spec:
+  - name: file-exists
+    type: Command
+    run: [test, -f, farewell.txt]
+```</p>
 <p><code>resources/sync.yaml</code> — ファイルを作成する収束操作</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create-greeting</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-c</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">&#39;Hello</span><span class="nv"> </span><span class="s">from</span><span class="nv"> </span><span class="s">Nagi!&#39;</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">greeting.txt&quot;</span><span class="p p-Indicator">]</span>
-<span class="nn">---</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create-farewell</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-c</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">&#39;Goodbye</span><span class="nv"> </span><span class="s">from</span><span class="nv"> </span><span class="s">Nagi!&#39;</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">farewell.txt&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p>```yaml
+apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: create-greeting
+spec:
+  run:
+    type: Command
+    args: [sh, -c, "echo 'Hello from Nagi!' &gt; greeting.txt"]</p>
+<hr />
+<p>apiVersion: nagi.io/v1alpha1
+kind: Sync
+metadata:
+  name: create-farewell
+spec:
+  run:
+    type: Command
+    args: [sh, -c, "echo 'Goodbye from Nagi!' &gt; farewell.txt"]
+```</p>
 <p><code>resources/asset.yaml</code> — 期待状態とその収束操作を対応付ける Asset</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">greeting</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">greeting-check</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create-greeting</span>
-<span class="nn">---</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">farewell</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">greeting</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">farewell-check</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create-farewell</span>
-</code></pre></div>
+<p>```yaml
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: greeting
+spec:
+  onDrift:
+    - conditions: greeting-check
+      sync: create-greeting</p>
+<hr />
+<p>apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: farewell
+spec:
+  upstreams:
+    - greeting
+  onDrift:
+    - conditions: farewell-check
+      sync: create-farewell
+```</p>
 <h2 id="try-it-out">Try It Out</h2>
 <h3 id="step-1-compile">Step 1: Compile</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>compile<span class="w"> </span>-y
-</code></pre></div>
+<p><code>bash
+nagi compile -y</code></p>
 <p><code>resources/</code> のリソースを解決し、<code>target/</code> に出力します。</p>
 <h3 id="step-2-evaluate">Step 2: Evaluate</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>evaluate
-</code></pre></div>
+<p><code>bash
+nagi evaluate</code></p>
 <p>ファイルがまだ存在しないため、両方の Asset が Drifted と判定されます。</p>
-<div class="highlight"><pre><span></span><code><span class="p">[</span>
-<span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;assetName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;farewell&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;ready&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;conditions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<span class="w">      </span><span class="p">{</span>
-<span class="w">        </span><span class="nt">&quot;conditionName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;file-exists&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">&quot;conditionType&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Command&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;state&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;drifted&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;reason&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&#39;test&#39; exited with code 1&quot;</span><span class="w"> </span><span class="p">}</span>
-<span class="w">      </span><span class="p">}</span>
-<span class="w">    </span><span class="p">]</span>
-<span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;assetName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;greeting&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;ready&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;conditions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<span class="w">      </span><span class="p">{</span>
-<span class="w">        </span><span class="nt">&quot;conditionName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;file-exists&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">&quot;conditionType&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Command&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;state&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;drifted&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;reason&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&#39;test&#39; exited with code 1&quot;</span><span class="w"> </span><span class="p">}</span>
-<span class="w">      </span><span class="p">}</span>
-<span class="w">    </span><span class="p">]</span>
-<span class="w">  </span><span class="p">}</span>
-<span class="p">]</span>
-</code></pre></div>
+<p><code>json
+[
+  {
+    "assetName": "farewell",
+    "ready": false,
+    "conditions": [
+      {
+        "conditionName": "file-exists",
+        "conditionType": "Command",
+        "status": { "state": "drifted", "reason": "'test' exited with code 1" }
+      }
+    ]
+  },
+  {
+    "assetName": "greeting",
+    "ready": false,
+    "conditions": [
+      {
+        "conditionName": "file-exists",
+        "conditionType": "Command",
+        "status": { "state": "drifted", "reason": "'test' exited with code 1" }
+      }
+    ]
+  }
+]</code></p>
 <h3 id="step-3-sync">Step 3: Sync</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>sync
-</code></pre></div>
+<p><code>bash
+nagi sync</code></p>
 <p>プランが表示され、承認すると <code>greeting.txt</code> と <code>farewell.txt</code> が作成されます。</p>
 <h3 id="step-4-verify">Step 4: Verify</h3>
-<div class="highlight"><pre><span></span><code>cat<span class="w"> </span>greeting.txt
-<span class="c1"># Hello from Nagi!</span>
-
-cat<span class="w"> </span>farewell.txt
-<span class="c1"># Goodbye from Nagi!</span>
-
-nagi<span class="w"> </span>evaluate
-</code></pre></div>
+<p>```bash
+cat greeting.txt</p>
+<h1 id="hello-from-nagi">Hello from Nagi!</h1>
+<p>cat farewell.txt</p>
+<h1 id="goodbye-from-nagi">Goodbye from Nagi!</h1>
+<p>nagi evaluate
+```</p>
 <p>両方の Asset が Ready と判定されます。</p>
 <h3 id="step-5-serve">Step 5: Serve</h3>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve
-</code></pre></div>
+<p><code>bash
+nagi serve</code></p>
 <p><code>nagi serve</code> を起動すると、期待状態を定期的に評価し、Drifted を検知したら自動で Sync を実行します。</p>
 <h4 id="upstream-changes-propagate-downstream">Upstream Changes Propagate Downstream</h4>
 <p>別のターミナルで <code>greeting.txt</code> を削除します。</p>
-<div class="highlight"><pre><span></span><code>rm<span class="w"> </span>greeting.txt
-</code></pre></div>
+<p><code>bash
+rm greeting.txt</code></p>
 <p>以下の流れが自動で実行されます。</p>
 <ol>
 <li><code>greeting</code> が Drifted を検知 → <code>create-greeting</code> sync を実行 → <code>greeting.txt</code> を再作成</li>
@@ -2236,13 +2116,13 @@ nagi<span class="w"> </span>evaluate
 <p>上流 Asset が Ready に戻ると、下流 Asset は evaluate をスキップして直接 sync を実行します。</p>
 <h4 id="only-downstream-becomes-drifted">Only Downstream Becomes Drifted</h4>
 <p><code>farewell.txt</code> のみを削除します。</p>
-<div class="highlight"><pre><span></span><code>rm<span class="w"> </span>farewell.txt
-</code></pre></div>
+<p><code>bash
+rm farewell.txt</code></p>
 <p><code>greeting</code> は Ready のまま変化しません。<code>farewell</code> が次の定期評価で Drifted を検知し、<code>create-farewell</code> sync を実行して <code>farewell.txt</code> を再作成します。</p>
 <p><code>Ctrl-C</code> で停止します。</p>
 <h2 id="cleanup">Cleanup</h2>
-<div class="highlight"><pre><span></span><code>rm<span class="w"> </span>-rf<span class="w"> </span>target/<span class="w"> </span>greeting.txt<span class="w"> </span>farewell.txt
-</code></pre></div>
+<p><code>bash
+rm -rf target/ greeting.txt farewell.txt</code></p>
 <h2 id="next-steps">Next Steps</h2>
 <ul>
 <li><a href="../concepts/">Concepts</a> — コンセプトを理解する</li>

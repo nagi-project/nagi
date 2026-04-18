@@ -1292,6 +1292,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Attributes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ondriftentry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OnDriftEntry
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1806,6 +1823,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Attributes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ondriftentry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OnDriftEntry
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1830,26 +1864,26 @@
 
 <h1 id="kind-asset">kind: Asset</h1>
 <p>A unit of data that Nagi evaluates against a declared desired state and converges through Sync. The central resource of the reconciliation loop.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">raw-sales</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sla</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-default</span>
-<span class="w">      </span><span class="nt">with</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;+daily_sales&quot;</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sales-quality</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sales-full-reload</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
+spec:
+  connection: my-bigquery
+  upstreams:
+    - raw-sales
+  onDrift:
+    - conditions: daily-sla
+      sync: dbt-default
+      with:
+        selector: "+daily_sales"
+    - conditions: sales-quality
+      sync: sales-full-reload
+  autoSync: true</code></p>
 <p>Each entry in <code>onDrift</code> specifies a pair of <a href="../conditions/">Conditions</a> and <a href="../sync/">Sync</a> names. Entries are evaluated from top to bottom, and the sync of the first entry that evaluates to Drifted is executed (first-match). If all entries evaluate to Ready, the Asset is Ready.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
@@ -1910,6 +1944,7 @@
 
 <!-- schema:auto-generated:start:OnDriftEntry -->
 
+<h3 id="ondriftentry">OnDriftEntry</h3>
 <table>
 <thead>
 <tr>

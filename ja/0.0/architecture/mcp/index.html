@@ -1911,9 +1911,9 @@
 <p>デフォルトでは読み取り専用ツール（<code>nagi_status</code>、<code>nagi_evaluate</code>）のみが公開されます。<code>--allow-sync</code> を指定すると、<code>nagi_sync</code> も公開されます。</p>
 </div>
 <h2 id="setup">Setup</h2>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>mcp<span class="w">                    </span><span class="c1"># 読み取り専用</span>
-nagi<span class="w"> </span>mcp<span class="w"> </span>--allow-sync<span class="w">       </span><span class="c1"># sync も許可</span>
-</code></pre></div>
+<p><code>bash
+nagi mcp                    # 読み取り専用
+nagi mcp --allow-sync       # sync も許可</code></p>
 <p>MCP サーバーは stdio で通信します。Claude Desktop や他の MCP クライアントから接続してください。</p>
 <h2 id="use-cases">Use Cases</h2>
 <p>AI エージェントが Nagi を操作することで、以下のようなユースケースが実現できます。</p>

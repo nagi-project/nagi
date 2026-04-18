@@ -1996,68 +1996,68 @@
 
 <h1 id="kind-identity">kind: Identity</h1>
 <p>認証スコープを宣言するリソースです。Connection、Sync、Command 条件から名前で参照し、操作ごとに使用するクレデンシャルを切り替えます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Identity</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-evaluator</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env</span>
-<span class="w">  </span><span class="nt">env</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${NAGI_EVAL_KEYFILE}</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Identity
+metadata:
+  name: bq-evaluator
+spec:
+  type: env
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: ${NAGI_EVAL_KEYFILE}</code></p>
 <h2 id="how-it-works">How It Works</h2>
 <p>Connection、Sync ステージ、Command 条件が Identity を名前で参照すると、Identity の <code>spec.env</code> に定義された環境変数が対象スコープに注入されます。</p>
 <p>Connection の場合、env マップはクエリ実行時の認証情報解決に使われます。サブプロセス（Sync ステージと Command 条件）の場合、env マップは OS 基本セットとステップレベルの <code>env</code> 宣言の間に注入されます。レイヤー構成の詳細は<a href="../../environment-variables/">環境変数</a>を参照してください。</p>
 <p>値は <code>${VAR}</code> 形式で Nagi プロセスの環境変数を参照できます。参照はパース時ではなく使用時に解決されるため、展開後のクレデンシャル値が構造体フィールドに保持されることはありません。</p>
 <h2 id="referencing-an-identity">Referencing an Identity</h2>
 <h3 id="from-connection">From Connection</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bigquery</span>
-<span class="w">  </span><span class="nt">project</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project</span>
-<span class="w">  </span><span class="nt">dataset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">analytics</span>
-<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-evaluator</span>
-</code></pre></div>
+<p><code>yaml
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  type: bigquery
+  project: my-project
+  dataset: analytics
+  identity: bq-evaluator</code></p>
 <p>BigQuery Connection に <code>identity</code> フィールドを指定すると、Identity の env が認証に使われます。Identity の env に <code>GOOGLE_APPLICATION_CREDENTIALS</code> がある場合、その値が ADC ファイルパスとして使用されます。</p>
 <p>DuckDB と Snowflake の Connection は Identity をまだサポートしていません。<code>identity</code> を指定した場合、compile 時に warning が出力されます。</p>
 <h3 id="from-sync">From Sync</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-syncer</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: bq-syncer
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.name }}"]</code></p>
 <p>Sync レベルの <code>identity</code> は、ステージごとに上書きされない限り、すべてのステージ（pre, run, post）に適用されます。</p>
 <h3 id="from-a-sync-stage">From a Sync Stage</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default-id</span>
-<span class="w">  </span><span class="nt">pre</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;prepare.py&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pre-id</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: default-id
+  pre:
+    type: Command
+    args: ["python", "prepare.py"]
+    identity: pre-id
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.name }}"]</code></p>
 <p><code>pre</code> は <code>pre-id</code> を使用します。<code>run</code> と <code>post</code> は Sync レベルの <code>default-id</code> を継承します。</p>
 <h3 id="from-command-condition">From Command Condition</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">check-data</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">validate</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;validate.py&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">validator-id</span>
-</code></pre></div>
+<p><code>yaml
+kind: Conditions
+metadata:
+  name: check-data
+spec:
+  - name: validate
+    type: Command
+    run: ["python", "validate.py"]
+    identity: validator-id</code></p>
 <h2 id="identity-resolution-order">Identity Resolution Order</h2>
 <p>各 Sync ステージで適用される Identity は次の順で決定します。</p>
 <ol>

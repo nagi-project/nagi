@@ -1762,67 +1762,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#annotations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        annotations
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kind" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kind
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#template-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Template Variables
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Template Variables">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#assetname-and-assetmodelname" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        {{ asset.name }} and {{ asset.modelName }}
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#synckey" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        {{ sync.&lt;key&gt; }}
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1851,18 +1790,18 @@
 <h1 id="resource-configurations">Resource Configurations</h1>
 <p>Nagi の動作に必要な定義は、すべてリソースとして <code>resources/</code> に配置します。</p>
 <p>すべてのリソースは Kubernetes と同じ構造を持ちます。リソース種別は kind として指定します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;リソース種別&gt;</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;一意な名前&gt;</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data-eng</span>
-<span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;...&quot;</span>
-<span class="w">    </span><span class="nt">owner</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;data-team@example.com&quot;</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">...</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: &lt;リソース種別&gt;
+metadata:
+  name: &lt;一意な名前&gt;
+  labels:
+    team: data-eng
+  annotations:
+    description: "..."
+    owner: "data-team@example.com"
+spec:
+  ...</code></p>
 <!-- schema:auto-generated:start:Metadata -->
 
 <h2 id="attributes">Attributes</h2>
@@ -1904,33 +1843,33 @@
 
 <h3 id="labels">labels</h3>
 <p>labels は <code>--select</code> セレクターで Asset の絞り込みに使用します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data-eng</span>
-<span class="w">    </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># team ラベルが存在する Asset を選択</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team&quot;</span>
-
-<span class="c1"># team=data-eng の Asset を選択</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team=data-eng&quot;</span>
-</code></pre></div>
+<p><code>yaml
+metadata:
+  name: daily-sales
+  labels:
+    team: data-eng
+    env: prod</code></p>
+<p>```bash</p>
+<h1 id="team-asset">team ラベルが存在する Asset を選択</h1>
+<p>nagi evaluate --select "label:team"</p>
+<h1 id="teamdata-eng-asset">team=data-eng の Asset を選択</h1>
+<p>nagi evaluate --select "label:team=data-eng"
+```</p>
 <p>Origin (dbt) から自動生成された Asset では、dbt のタグが <code>dbt/</code> プレフィックス付きで labels に変換されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-</code></pre></div>
+<p><code>yaml
+metadata:
+  name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""</code></p>
 <h3 id="annotations">annotations</h3>
 <p>annotations はリソースの補足情報を格納します。Nagi はこの値を処理に使用しません。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sales</span>
-<span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;日次売上の集計指標&quot;</span>
-<span class="w">    </span><span class="nt">owner</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;data-team@example.com&quot;</span>
-</code></pre></div>
+<p><code>yaml
+metadata:
+  name: daily-sales
+  annotations:
+    description: "日次売上の集計指標"
+    owner: "data-team@example.com"</code></p>
 <h2 id="kind">kind</h2>
 <p>kind ごとに reconciliation loop の中での役割が異なります。</p>
 <table>
@@ -1993,33 +1932,35 @@ nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class=
 </table>
 <h3 id="assetname-and-assetmodelname"><code>{{ asset.name }}</code> and <code>{{ asset.modelName }}</code></h3>
 <p>これらの変数は常に利用可能で、<code>with</code> の指定は不要です。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-sync</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;echo&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="c1"># Origin 名 my-project, model 名 orders の場合 &quot;my-project.orders&quot; に展開</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: my-sync
+spec:
+  run:
+    type: Command
+    args: ["echo", "{{ asset.name }}"]
+    # Origin 名 my-project, model 名 orders の場合 "my-project.orders" に展開</code></p>
 <h3 id="synckey"><code>{{ sync.&lt;key&gt; }}</code></h3>
 <p>Asset の <code>onDrift[].with</code> でキーと値のペアを Sync に渡します。各キーが <code>{{ sync.&lt;key&gt; }}</code> 変数になります。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Sync 定義: {{ sync.selector }} をプレースホルダーとして使用</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-default</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">sync.selector</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># Asset 側で with を使って値を渡す</span>
-<span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily-sla</span>
-<span class="w">    </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-default</span>
-<span class="w">    </span><span class="nt">with</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;+daily_sales&quot;</span><span class="w">   </span><span class="c1"># {{ sync.selector }} が &quot;+daily_sales&quot; に展開される</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="sync-syncselector">Sync 定義: {{ sync.selector }} をプレースホルダーとして使用</h1>
+<p>kind: Sync
+metadata:
+  name: dbt-default
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ sync.selector }}"]
+```</p>
+<p>```yaml</p>
+<h1 id="asset-with">Asset 側で with を使って値を渡す</h1>
+<p>onDrift:
+  - conditions: daily-sla
+    sync: dbt-default
+    with:
+      selector: "+daily_sales"   # {{ sync.selector }} が "+daily_sales" に展開される
+```</p>
 <p><code>with</code> を省略した場合、<code>{{ asset.name }}</code> と <code>{{ asset.modelName }}</code> は展開されますが、<code>{{ sync.&lt;key&gt; }}</code> は展開されずそのまま残ります。</p>
 
 

@@ -1853,17 +1853,18 @@
 <h1 id="project-configurations">Project Configurations</h1>
 <h2 id="nagiyaml">nagi.yaml</h2>
 <p>プロジェクト設定ファイルです。<a href="../cli/#init"><code>nagi init</code></a> で生成され、プロジェクトルート（<code>resources/</code> と同階層）に配置します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">backend</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
-<span class="nt">nagiDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.nagi</span>
-<span class="nt">notify</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">slack</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#nagi-alerts&quot;</span>
-<span class="nt">export</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">dataset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_project.nagi_logs</span>
-<span class="nt">terminationGracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
-</code></pre></div>
+<p><code>yaml
+backend:
+  type: local
+nagiDir: ~/.nagi
+defaultTimeout: 1h
+notify:
+  slack:
+    channel: "#nagi-alerts"
+export:
+  connection: my-bigquery
+  dataset: my_project.nagi_logs
+terminationGracePeriodSeconds: 300</code></p>
 <p><code>nagiDir</code> は Nagi の状態ディレクトリのパスを指定します。<code>cache/</code>、<code>locks/</code>、<code>suspended/</code>、<code>logs.db</code>、<code>logs/</code>、<code>watermarks/</code> がこのディレクトリに配置されます。省略時は <code>~/.nagi</code> です。</p>
 <p><code>notify.slack</code> を設定すると Slack 通知が有効になります。省略すると通知機能は OFF になります。設定方法は <a href="../../architecture/notifications/">Notifications</a> を参照してください。</p>
 <p><code>export</code> を設定すると、実行ログをデータウェアハウスにエクスポートできます。compile がエクスポート用リソースを自動生成し、ユーザーのデータウェアハウスにテーブルを作成します。詳細は <a href="../../architecture/export/">Export</a> を参照してください。</p>
@@ -1910,11 +1911,46 @@
 <td>Backend type identifier. One of <code>local</code>, <code>gcs</code>, <code>s3</code>. Defaults to <code>local</code>.</td>
 </tr>
 <tr>
-<td><code>export</code></td>
-<td>ExportConfig</td>
+<td><code>defaultTimeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>1h</td>
+<td>Default timeout applied to evaluate, sync, and query operations when the individual resource does not specify its own <code>timeout</code>. Defaults to 1h.</td>
+</tr>
+<tr>
+<td><code>export.connection</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>-</td>
+<td>Reference to a <code>kind: Connection</code> resource name.</td>
+</tr>
+<tr>
+<td><code>export.dataset</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>-</td>
+<td>Data warehouse dataset (BigQuery) or schema (Snowflake) to export into.</td>
+</tr>
+<tr>
+<td><code>export.format</code></td>
+<td>ExportFormat</td>
 <td>—</td>
 <td>-</td>
-<td>Log export configuration. When set, compile generates export Assets and logs are transferred to the remote data warehouse.</td>
+<td>Intermediate file format for export.</td>
+</tr>
+<tr>
+<td><code>export.interval</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>30m</td>
+<td>Condition evaluation interval and export throttling threshold.</td>
+</tr>
+<tr>
+<td><code>export.timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Timeout for export operations. Falls back to <code>defaultTimeout</code> when omitted.</td>
 </tr>
 <tr>
 <td><code>lockRetryIntervalSeconds</code></td>
@@ -1966,11 +2002,11 @@
 <td>Base directory for Nagi state (logs, cache, locks, etc.). Defaults to <code>~/.nagi</code>.</td>
 </tr>
 <tr>
-<td><code>notify.slack</code></td>
-<td>SlackConfig</td>
-<td>—</td>
+<td><code>notify.slack.channel</code></td>
+<td>string</td>
+<td>Yes</td>
 <td>-</td>
-<td>Slack notification settings. When set, notifications are sent to the specified channel.</td>
+<td>Slack channel to send notifications to (e.g. <code>#nagi-alerts</code>).</td>
 </tr>
 <tr>
 <td><code>terminationGracePeriodSeconds</code></td>

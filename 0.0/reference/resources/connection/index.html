@@ -2013,11 +2013,18 @@
 <td>Profile name as defined in <code>~/.dbt/profiles.yml</code>.</td>
 </tr>
 <tr>
-<td><code>dbtCloud</code></td>
-<td>DbtCloudSpec</td>
+<td><code>dbtCloud.credentialsFile</code></td>
+<td>string</td>
 <td>—</td>
 <td>-</td>
-<td>Optional dbt Cloud configuration for running-job checks before sync.</td>
+<td>Path to the dbt Cloud credentials file. Defaults to <code>~/.dbt/dbt_cloud.yml</code>.</td>
+</tr>
+<tr>
+<td><code>identity</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>Reference to a <code>kind: Identity</code> resource for authentication scope.</td>
 </tr>
 <tr>
 <td><code>profilesDir</code></td>
@@ -2070,6 +2077,13 @@
 <td>GCP project ID used for query execution billing. Defaults to <code>project</code> if omitted.</td>
 </tr>
 <tr>
+<td><code>identity</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>Reference to a <code>kind: Identity</code> resource for authentication scope.</td>
+</tr>
+<tr>
 <td><code>keyfile</code></td>
 <td>string</td>
 <td>—</td>
@@ -2084,11 +2098,18 @@
 <td>Authentication method. <code>oauth</code> (Application Default Credentials) or <code>service-account</code>. Defaults to <code>oauth</code>.</td>
 </tr>
 <tr>
-<td><code>timeoutSeconds</code></td>
-<td>integer</td>
+<td><code>timeout</code></td>
+<td>Duration</td>
 <td>—</td>
 <td>-</td>
-<td>Query timeout in seconds.</td>
+<td>Query timeout (e.g. "30s", "1h"). Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
+</tr>
+<tr>
+<td><code>location</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>BigQuery region (e.g. <code>us</code>, <code>asia-northeast1</code>). Used for <code>INFORMATION_SCHEMA</code> queries by <code>nagi inspect</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -2111,6 +2132,13 @@
 <td>Yes</td>
 <td>-</td>
 <td>Path to the DuckDB database file.</td>
+</tr>
+<tr>
+<td><code>identity</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>Reference to a <code>kind: Identity</code> resource for authentication scope.</td>
 </tr>
 </tbody>
 </table>
@@ -2170,11 +2198,25 @@
 <td>Warehouse name.</td>
 </tr>
 <tr>
+<td><code>identity</code></td>
+<td>string</td>
+<td>—</td>
+<td>-</td>
+<td>Reference to a <code>kind: Identity</code> resource for authentication scope.</td>
+</tr>
+<tr>
 <td><code>role</code></td>
 <td>string</td>
 <td>—</td>
 <td>-</td>
 <td>Role to use for the session. Uses the user's default role if omitted.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Duration</td>
+<td>—</td>
+<td>-</td>
+<td>Query timeout (e.g. "30s", "1h"). Falls back to <code>NagiConfig::default_timeout</code> when omitted.</td>
 </tr>
 </tbody>
 </table>

@@ -1885,10 +1885,11 @@
 <p>When a stop signal (SIGINT on Linux/macOS, Ctrl+C or CTRL_BREAK_EVENT on Windows) is received, it stops issuing new tasks and waits for running Sync operations to complete. The wait timeout is configured via <code>terminationGracePeriodSeconds</code> in <code>nagi.yaml</code>.</p>
 <h2 id="storage-backend">Storage Backend</h2>
 <p>Uses the <code>local</code> backend.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># nagi.yaml</span>
-<span class="nt">backend</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="nagiyaml">nagi.yaml</h1>
+<p>backend:
+  type: local
+```</p>
 
 
 

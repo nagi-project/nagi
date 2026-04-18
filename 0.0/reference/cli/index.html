@@ -1648,6 +1648,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        inspect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1663,17 +1674,6 @@
     <span class="md-ellipsis">
       
         --select syntax
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#-exclude-syntax" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        --exclude syntax
       
     </span>
   </a>
@@ -2140,6 +2140,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        inspect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2155,17 +2166,6 @@
     <span class="md-ellipsis">
       
         --select syntax
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#-exclude-syntax" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        --exclude syntax
       
     </span>
   </a>
@@ -2247,6 +2247,10 @@
 <td>Export execution logs to a data warehouse</td>
 </tr>
 <tr>
+<td><code>inspect</code></td>
+<td>Show the state change before and after Sync executions</td>
+</tr>
+<tr>
 <td><code>mcp</code></td>
 <td>Start the MCP server on stdio</td>
 </tr>
@@ -2271,13 +2275,13 @@
 </table>
 <h2 id="init">init</h2>
 <p>Prepares the environment so that <code>compile</code> can run.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>init
-</code></pre></div>
+<p><code>bash
+nagi init</code></p>
 <p>Interactively configures the Origin, generates a Connection, and verifies the connection. You select an Origin type and proceed with type-specific settings. Idempotent and safe to re-run.</p>
 <h2 id="compile">compile</h2>
 <p>Compiles resource definitions from <code>resources/</code> and outputs them to <code>target/</code>. If an existing <code>target/</code> is present, prompts for overwrite confirmation.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>compile<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi compile [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2306,8 +2310,8 @@
 </table>
 <h2 id="ls">ls</h2>
 <p>Lists all compiled resources.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>ls<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi ls [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2336,8 +2340,8 @@
 </table>
 <h2 id="evaluate">evaluate</h2>
 <p>Evaluates Assets against their desired state and determines Ready / Drifted.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>evaluate<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi evaluate [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2386,8 +2390,8 @@
 </table>
 <h2 id="sync">sync</h2>
 <p>Executes Asset Sync operations. Displays a plan before execution and asks for user approval.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>sync<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi sync [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2441,8 +2445,8 @@
 </table>
 <h2 id="status">status</h2>
 <p>Shows cached evaluation results and recent Sync logs. Does not run Evaluate.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>status<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi status [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2486,8 +2490,8 @@
 </table>
 <h2 id="serve">serve</h2>
 <p>Starts compilation and a continuous reconciliation loop.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi serve [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2531,8 +2535,8 @@
 </table>
 <h3 id="serve-resume">serve resume</h3>
 <p>Resumes suspended Assets.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve<span class="w"> </span>resume<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi serve resume [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2549,8 +2553,8 @@
 </table>
 <h3 id="serve-halt">serve halt</h3>
 <p>Halts all Assets at once.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve<span class="w"> </span>halt<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi serve halt [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2569,8 +2573,8 @@
 </table>
 <h2 id="export">export</h2>
 <p>Exports execution logs (<code>logs.db</code>) to a data warehouse. Requires the <code>export</code> setting in <a href="../project/"><code>nagi.yaml</code></a>.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span><span class="nb">export</span><span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi export [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2592,10 +2596,60 @@
 </tr>
 </tbody>
 </table>
+<h2 id="inspect">inspect</h2>
+<p>Shows the state change before and after Sync executions for an Asset.</p>
+<ul>
+<li>Condition evaluation results (Ready / Drifted)</li>
+<li>Row count and object type (table, view, etc.)</li>
+</ul>
+<p><code>bash
+nagi inspect &lt;ASSET_NAME&gt; [OPTIONS]</code></p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--limit</code></td>
+<td><code>5</code></td>
+<td>Maximum number of Sync executions to show</td>
+</tr>
+<tr>
+<td><code>--changed-only</code></td>
+<td>—</td>
+<td>Show only executions where state changed</td>
+</tr>
+<tr>
+<td><code>--target-dir</code></td>
+<td><code>target</code></td>
+<td>Compiled directory</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>text</code></td>
+<td>Output format (<code>json</code>, <code>text</code>)</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>Disable pager for terminal output</td>
+</tr>
+<tr>
+<td><code>--nagi-dir</code></td>
+<td>—</td>
+<td>Override Nagi state directory path</td>
+</tr>
+</tbody>
+</table>
+<p>Inspection data is cached under <code>&lt;nagiDir&gt;/inspections/&lt;asset-name&gt;/</code>.</p>
 <h2 id="mcp">mcp</h2>
 <p>Starts the MCP server on stdio.</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi mcp [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2664,26 +2718,24 @@
 </tbody>
 </table>
 <p>Multiple <code>--select</code> arguments are combined as union (OR). Comma-separated patterns within a single argument are intersected (AND).</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># OR: Assets matching either selector</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span>daily-sales<span class="w"> </span>--select<span class="w"> </span>access-stats
-
-<span class="c1"># AND: Assets with both labels</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span>
-
-<span class="c1"># Combined: (label:dbt/finance AND label:dbt/daily) OR access-stats</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span><span class="w"> </span>--select<span class="w"> </span>access-stats
-
-<span class="c1"># Select by label key-value pair</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team=data-eng&quot;</span>
-</code></pre></div>
+<p>```bash</p>
+<h1 id="or-assets-matching-either-selector">OR: Assets matching either selector</h1>
+<p>nagi evaluate --select daily-sales --select access-stats</p>
+<h1 id="and-assets-with-both-labels">AND: Assets with both labels</h1>
+<p>nagi evaluate --select "label:dbt/finance,label:dbt/daily"</p>
+<h1 id="combined-labeldbtfinance-and-labeldbtdaily-or-access-stats">Combined: (label:dbt/finance AND label:dbt/daily) OR access-stats</h1>
+<p>nagi evaluate --select "label:dbt/finance,label:dbt/daily" --select access-stats</p>
+<h1 id="select-by-label-key-value-pair">Select by label key-value pair</h1>
+<p>nagi evaluate --select "label:team=data-eng"
+```</p>
 <h2 id="-exclude-syntax">--exclude syntax</h2>
 <p><code>--exclude</code> uses the same selector syntax as <code>--select</code>. Assets matching any <code>--exclude</code> selector are removed from the result after <code>--select</code> is applied.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Evaluate all assets except monthly-report</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--exclude<span class="w"> </span>monthly-report
-
-<span class="c1"># Evaluate finance-labeled assets, excluding daily-labeled ones</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance&quot;</span><span class="w"> </span>--exclude<span class="w"> </span><span class="s2">&quot;label:dbt/daily&quot;</span>
-</code></pre></div>
+<p>```bash</p>
+<h1 id="evaluate-all-assets-except-monthly-report">Evaluate all assets except monthly-report</h1>
+<p>nagi evaluate --exclude monthly-report</p>
+<h1 id="evaluate-finance-labeled-assets-excluding-daily-labeled-ones">Evaluate finance-labeled assets, excluding daily-labeled ones</h1>
+<p>nagi evaluate --select "label:dbt/finance" --exclude "label:dbt/daily"
+```</p>
 
 
 

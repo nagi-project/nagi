@@ -1885,10 +1885,11 @@
 <p>停止シグナル（Linux/macOS では SIGINT、Windows では Ctrl+C または CTRL_BREAK_EVENT）を受け取ると、新規タスクの発行を停止し、実行中の Sync の完了を待ちます。待機上限は <code>nagi.yaml</code> の <code>terminationGracePeriodSeconds</code> で設定できます。</p>
 <h2 id="storage-backend">Storage Backend</h2>
 <p><code>local</code> バックエンドを使用します。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># nagi.yaml</span>
-<span class="nt">backend</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="nagiyaml">nagi.yaml</h1>
+<p>backend:
+  type: local
+```</p>
 
 
 

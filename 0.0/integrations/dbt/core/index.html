@@ -1761,6 +1761,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Sync">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#propagating-execution_id-to-bigquery-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Propagating execution_id to BigQuery jobs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1916,6 +1933,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Sync">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#propagating-execution_id-to-bigquery-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Propagating execution_id to BigQuery jobs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1985,24 +2019,24 @@ Specify the dbt project path and the profile / target to use.</p>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">dbtProfile</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_project</span>
-<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Origin</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-dbt-project</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DBT</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">projectDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">../dbt-project</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  dbtProfile:
+    profile: my_project
+    target: dev</code></p>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Origin
+metadata:
+  name: my-dbt-project
+spec:
+  type: DBT
+  connection: my-bigquery
+  projectDir: ../dbt-project</code></p>
 <p>The Connection's <code>profile</code> and <code>target</code> are passed as the <code>--profile</code> / <code>--target</code> options to dbt commands.
 The Origin's <code>projectDir</code> is used as the <code>--project-dir</code> option.</p>
 <h2 id="compile">Compile</h2>
@@ -2017,6 +2051,28 @@ The Origin's <code>projectDir</code> is used as the <code>--project-dir</code> o
 </ul>
 <h2 id="sync">Sync</h2>
 <p>Executes dbt CLI as a subprocess (e.g., <code>dbt run --select daily_sales</code>).</p>
+<h3 id="propagating-execution_id-to-bigquery-jobs">Propagating execution_id to BigQuery jobs</h3>
+<p>To let <a href="../../../reference/cli/#inspect"><code>nagi inspect</code></a> show the BigQuery jobs executed during Sync, propagate the <a href="../../../reference/environment-variables/#nagi-injected-variables"><code>NAGI_EXECUTION_ID</code></a> environment variable to BigQuery job labels.</p>
+<p>Add the following to <code>dbt_project.yml</code>.</p>
+<p><code>yaml
+query-comment:
+  comment: "{{ query_comment(node) }}"
+  job-label: true</code></p>
+<p>Then create <code>macros/query_comment.sql</code>.</p>
+<p><code>sql
+{% macro query_comment(node) %}
+  {%- set comment_dict = {} -%}
+  {%- do comment_dict.update(
+      app='dbt',
+      dbt_version=dbt_version,
+      nagi_execution_id=env_var('NAGI_EXECUTION_ID', ''),
+  ) -%}
+  {%- if node is not none -%}
+    {%- do comment_dict.update(node_id=node.unique_id) -%}
+  {%- endif -%}
+  {% do return(tojson(comment_dict)) %}
+{% endmacro %}</code></p>
+<p>With <code>job-label: true</code>, dbt-bigquery parses the JSON comment and attaches the keys as BigQuery job labels. <code>nagi inspect</code> matches jobs by the <code>nagi_execution_id</code> label.</p>
 <h2 id="customization">Customization</h2>
 <p>If you define an Asset with the same name as an Origin-generated Asset in <code>resources/</code>, the <code>onDrift</code> lists are concatenated. For merge rules and examples, see <a href="../resource-generation/#merge-with-user-defined-resources">Resource Generation - Merge with User-defined Resources</a>.</p>
 <h2 id="multi-projects">Multi Projects</h2>

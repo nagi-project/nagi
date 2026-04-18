@@ -1837,56 +1837,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#2-user-defined-resources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. User-defined resources
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-compiled-result" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Compiled result
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Compiled result">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#beforeorigin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        beforeOrigin
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#afterorigin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        afterOrigin
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2160,56 +2110,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#2-user-defined-resources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. User-defined resources
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-compiled-result" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Compiled result
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Compiled result">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#beforeorigin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        beforeOrigin
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#afterorigin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        afterOrigin
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2271,49 +2171,49 @@
 <h3 id="dbt-source">dbt source</h3>
 <p>dbt source は Asset リソースに変換されます。</p>
 <p>Origin の設定からは、<code>connection</code>, <code>autoSync</code> が付与されます。<code>upstreams</code> は設定されません。dbt source のタグは <code>dbt/</code> プレフィックス付きで <code>metadata.labels</code> に変換されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.raw-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi-skip-sync</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.raw-sales
+spec:
+  connection: my-bigquery
+  autoSync: true
+  onDrift:
+    - conditions: dbt-tests-my-project.raw-sales
+      sync: nagi-skip-sync</code></p>
 <h3 id="dbt-model">dbt model</h3>
 <p>dbt model は Asset リソースに変換されます。</p>
 <p>Origin の設定からは、<code>connection</code>, <code>autoSync</code> が付与されます。</p>
 <p>dbt のリネージ（dbt model 間の依存関係、dbt source → dbt model の依存関係）は <code>spec.upstreams</code> に、dbt model のタグは <code>dbt/</code> プレフィックス付きで <code>metadata.labels</code> に変換されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">autoSync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
+spec:
+  connection: my-bigquery
+  autoSync: true
+  upstreams:
+    - my-project.raw-sales
+  onDrift:
+    - conditions: dbt-tests-my-project.daily-sales
+      sync: my-project-dbt-run</code></p>
 <h3 id="dbt-test">dbt test</h3>
 <p>dbt test は Conditions リソースに変換されます。</p>
 <p>生成された Conditions は、その dbt test の対象である dbt model / dbt source の Asset に <code>onDrift</code> として設定されます。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-test-daily-sales</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dbt</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">test</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">--select</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily_sales</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: dbt-tests-my-project.daily-sales
+spec:
+  - name: dbt-test-daily-sales
+    type: Command
+    run: [dbt, test, --select, daily_sales]</code></p>
 <h2 id="drift-detection-and-sync">Drift Detection and Sync</h2>
 <p>期待状態からの変化を検知（Drifted）した際に、dbt resource によって Nagi が実行する Sync は異なります。</p>
 <h3 id="drift-on-dbt-source">Drift on dbt source</h3>
@@ -2323,14 +2223,14 @@
 <h3 id="drift-on-dbt-model">Drift on dbt model</h3>
 <p>Nagi は <code>dbt run --select &lt;model&gt;</code> を実行してデータを再構築します。</p>
 <p>Origin はこの動作を行う <code>{origin}-dbt-run</code>（例: <code>my-project-dbt-run</code>）という <a href="../../../reference/resources/sync/">Sync</a> を自動生成します。Sync は <code>{{ asset.modelName }}</code> を使って Origin プレフィックスなしの元の dbt model 名を渡します。</p>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.modelName</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--project-dir&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;../dbt-project&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--profile&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;my_project&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--target&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;dev&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: my-project-dbt-run
+spec:
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.modelName }}", "--project-dir", "../dbt-project", "--profile", "my_project", "--target", "dev"]</code></p>
 <p>Origin の <code>defaultSync</code> フィールドで、この Sync を別の Sync に変更できます。</p>
 <h2 id="merge-with-user-defined-resources">Merge with User-defined Resources</h2>
 <p>Origin が自動生成した Asset に対して、期待状態の定義を追加したい場合があります。<code>resources/</code> に同じ名前の <code>kind: Asset</code> を定義すると、両者の <code>onDrift</code> がリスト結合されます。マージが動作するのは <code>kind: Asset</code> のみです。</p>
@@ -2349,108 +2249,115 @@
 <p>dbt model <code>daily_sales</code> に対して Freshness の期待状態を追加してデータの鮮度を監視する例を示します。<code>daily_sales</code> は、毎朝の dbt run で更新する日次集計テーブルとします。</p>
 <h4 id="1-origin-generated-resources">1. Origin-generated resources</h4>
 <p>Origin が自動生成した Conditions と Asset です。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># target/conditions/dbt-tests-my-project.daily-sales.yaml（Origin 自動生成）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-test-daily-sales</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dbt</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">test</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">--select</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">daily_sales</span><span class="p p-Indicator">]</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># target/assets/my-project.daily-sales.yaml（Origin 自動生成）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="targetconditionsdbt-tests-my-projectdaily-salesyamlorigin">target/conditions/dbt-tests-my-project.daily-sales.yaml（Origin 自動生成）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: dbt-tests-my-project.daily-sales
+spec:
+  - name: dbt-test-daily-sales
+    type: Command
+    run: [dbt, test, --select, daily_sales]
+```</p>
+<p>```yaml</p>
+<h1 id="targetassetsmy-projectdaily-salesyamlorigin">target/assets/my-project.daily-sales.yaml（Origin 自動生成）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
+spec:
+  connection: my-bigquery
+  upstreams:
+    - my-project.raw-sales
+  onDrift:
+    - conditions: dbt-tests-my-project.daily-sales
+      sync: my-project-dbt-run
+```</p>
 <h4 id="2-user-defined-resources">2. User-defined resources</h4>
 <p>毎朝更新されるテーブルなので、1日1回チェックし、25時間以上更新がなければ <code>dbt run</code> で再構築します（24時間 + ジョブ実行時間のバッファ 1時間）。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># resources/freshness-daily-sales.yaml（ユーザー定義）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-daily-sales</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">updated-within-25h</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Freshness</span>
-<span class="w">    </span><span class="nt">maxAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25h</span>
-<span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24h</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># resources/daily-sales.yaml（ユーザー定義）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-<span class="w">      </span><span class="c1"># mergePosition: afterOrigin</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="resourcesfreshness-daily-salesyaml">resources/freshness-daily-sales.yaml（ユーザー定義）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Conditions
+metadata:
+  name: freshness-daily-sales
+spec:
+  - name: updated-within-25h
+    type: Freshness
+    maxAge: 25h
+    interval: 24h
+```</p>
+<p>```yaml</p>
+<h1 id="resourcesdaily-salesyaml">resources/daily-sales.yaml（ユーザー定義）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.daily-sales
+spec:
+  onDrift:
+    - conditions: freshness-daily-sales
+      sync: my-project-dbt-run
+      # mergePosition: afterOrigin
+```</p>
 <h4 id="3-compiled-result">3. Compiled result</h4>
 <h5 id="beforeorigin"><code>beforeOrigin</code></h5>
 <p>デフォルト設定では、ユーザー定義のエントリが Origin エントリの前に配置されます。Freshness が先に評価されるため、データが25時間以上古ければ dbt test の結果にかかわらず <code>dbt run</code> が実行されます。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># target/assets/my-project.daily-sales.yaml（compile 後）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="targetassetsmy-projectdaily-salesyamlcompile">target/assets/my-project.daily-sales.yaml（compile 後）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
+spec:
+  connection: my-bigquery
+  upstreams:
+    - my-project.raw-sales
+  onDrift:
+    - conditions: freshness-daily-sales
+      sync: my-project-dbt-run
+    - conditions: dbt-tests-my-project.daily-sales
+      sync: my-project-dbt-run
+```</p>
 <h5 id="afterorigin"><code>afterOrigin</code></h5>
 <p><code>mergePosition: afterOrigin</code> を指定すると、ユーザー定義のエントリが Origin エントリの後に配置されます。dbt test が先に評価され、テストが通過した場合のみ Freshness が評価されます。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># resources/freshness-daily-sales.yaml（afterOrigin を指定）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-<span class="w">      </span><span class="nt">mergePosition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">afterOrigin</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># target/assets/my-project.daily-sales.yaml（compile 後）</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Asset</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.daily-sales</span>
-<span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">dbt/finance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="w">    </span><span class="nt">dbt/daily</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="w">  </span><span class="nt">upstreams</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project.raw-sales</span>
-<span class="w">  </span><span class="nt">onDrift</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-tests-my-project.daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">conditions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">freshness-daily-sales</span>
-<span class="w">      </span><span class="nt">sync</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project-dbt-run</span>
-</code></pre></div>
+<p>```yaml</p>
+<h1 id="resourcesfreshness-daily-salesyamlafterorigin">resources/freshness-daily-sales.yaml（afterOrigin を指定）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.daily-sales
+spec:
+  onDrift:
+    - conditions: freshness-daily-sales
+      sync: my-project-dbt-run
+      mergePosition: afterOrigin
+```</p>
+<p>```yaml</p>
+<h1 id="targetassetsmy-projectdaily-salesyamlcompile_1">target/assets/my-project.daily-sales.yaml（compile 後）</h1>
+<p>apiVersion: nagi.io/v1alpha1
+kind: Asset
+metadata:
+  name: my-project.daily-sales
+  labels:
+    dbt/finance: ""
+    dbt/daily: ""
+spec:
+  connection: my-bigquery
+  upstreams:
+    - my-project.raw-sales
+  onDrift:
+    - conditions: dbt-tests-my-project.daily-sales
+      sync: my-project-dbt-run
+    - conditions: freshness-daily-sales
+      sync: my-project-dbt-run
+```</p>
 
 
 

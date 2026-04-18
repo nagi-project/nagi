@@ -1,5 +1,10 @@
 {
   "$defs": {
+    "Duration": {
+      "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
+      "format": "duration",
+      "type": "string"
+    },
     "StepType": {
       "description": "Currently only `Command` (subprocess execution) is supported.",
       "enum": [
@@ -24,6 +29,24 @@
           "description": "Environment variables to set for the subprocess.",
           "type": "object"
         },
+        "identity": {
+          "description": "Reference to a `kind: Identity` resource. Overrides the Sync-level identity for this stage.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-step timeout. Overrides the Sync-level `timeout` for this stage."
+        },
         "type": {
           "$ref": "#/$defs/StepType",
           "description": "Execution type for this step (currently only `Command`)."
@@ -39,6 +62,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Spec for `kind: Sync`. Defines convergence operations as a pre/run/post sequence of steps.\nReusable across multiple Assets via `ref`.",
   "properties": {
+    "identity": {
+      "description": "Reference to a `kind: Identity` resource. Applied to all stages unless overridden per-stage.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "post": {
       "anyOf": [
         {
@@ -64,6 +94,17 @@
     "run": {
       "$ref": "#/$defs/SyncStep",
       "description": "The main convergence step."
+    },
+    "timeout": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Sync-wide timeout applied to each step unless overridden.\nFalls back to `NagiConfig::default_timeout` when omitted."
     }
   },
   "required": [

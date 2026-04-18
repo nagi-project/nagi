@@ -1648,6 +1648,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        inspect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1663,17 +1674,6 @@
     <span class="md-ellipsis">
       
         --select syntax
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#-exclude-syntax" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        --exclude syntax
       
     </span>
   </a>
@@ -2140,6 +2140,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        inspect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2155,17 +2166,6 @@
     <span class="md-ellipsis">
       
         --select syntax
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#-exclude-syntax" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        --exclude syntax
       
     </span>
   </a>
@@ -2247,6 +2247,10 @@
 <td>実行ログをデータウェアハウス にエクスポートする</td>
 </tr>
 <tr>
+<td><code>inspect</code></td>
+<td>Sync 実行の前後の状態変化を表示する</td>
+</tr>
+<tr>
 <td><code>mcp</code></td>
 <td>MCP サーバーを stdio で起動する</td>
 </tr>
@@ -2271,13 +2275,13 @@
 </table>
 <h2 id="init">init</h2>
 <p>環境を準備し、<code>compile</code> が実行できる状態にします。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>init
-</code></pre></div>
+<p><code>bash
+nagi init</code></p>
 <p>対話形式で Origin の設定、Connection の生成、接続確認を行います。Origin type を選択し、type に応じた設定を進めます。冪等で、再実行可能です。</p>
 <h2 id="compile">compile</h2>
 <p><code>resources/</code> のリソース定義をコンパイルし、<code>target/</code> に出力します。既存の <code>target/</code> がある場合は上書きの確認を求めます。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>compile<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi compile [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2306,8 +2310,8 @@
 </table>
 <h2 id="ls">ls</h2>
 <p>コンパイル済みの全リソースを一覧表示します。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>ls<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi ls [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2336,8 +2340,8 @@
 </table>
 <h2 id="evaluate">evaluate</h2>
 <p>Asset の期待状態を評価し、Ready / Drifted を判定します。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>evaluate<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi evaluate [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2386,8 +2390,8 @@
 </table>
 <h2 id="sync">sync</h2>
 <p>Asset の sync 操作を実行します。実行前にプランを表示し、ユーザーの承認を求めます。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>sync<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi sync [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2441,8 +2445,8 @@
 </table>
 <h2 id="status">status</h2>
 <p>キャッシュされた評価結果と直近の sync ログを表示します。Evaluate は実行しません。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>status<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi status [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2486,8 +2490,8 @@
 </table>
 <h2 id="serve">serve</h2>
 <p>コンパイルと継続的な reconciliation loop を開始します。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi serve [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2531,8 +2535,8 @@
 </table>
 <h3 id="serve-resume">serve resume</h3>
 <p>停止した Asset を再開します。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve<span class="w"> </span>resume<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi serve resume [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2549,8 +2553,8 @@
 </table>
 <h3 id="serve-halt">serve halt</h3>
 <p>全 Asset を一括停止します。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>serve<span class="w"> </span>halt<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi serve halt [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2569,8 +2573,8 @@
 </table>
 <h2 id="export">export</h2>
 <p>実行ログ（<code>logs.db</code>）をデータウェアハウス にエクスポートします。<a href="../project/"><code>nagi.yaml</code></a> の <code>export</code> 設定が必要です。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span><span class="nb">export</span><span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi export [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2592,10 +2596,60 @@
 </tr>
 </tbody>
 </table>
+<h2 id="inspect">inspect</h2>
+<p>Sync 実行の前後の状態変化を表示します。</p>
+<ul>
+<li>条件評価結果（Ready / Drifted）</li>
+<li>行数とオブジェクト種別（テーブル、ビューなど）</li>
+</ul>
+<p><code>bash
+nagi inspect &lt;ASSET_NAME&gt; [OPTIONS]</code></p>
+<table>
+<thead>
+<tr>
+<th>オプション</th>
+<th>デフォルト</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--limit</code></td>
+<td><code>5</code></td>
+<td>表示する最大件数</td>
+</tr>
+<tr>
+<td><code>--changed-only</code></td>
+<td>—</td>
+<td>状態が変化した実行のみ表示</td>
+</tr>
+<tr>
+<td><code>--target-dir</code></td>
+<td><code>target</code></td>
+<td>コンパイル済みディレクトリ</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>text</code></td>
+<td>出力形式（<code>json</code>, <code>text</code>）</td>
+</tr>
+<tr>
+<td><code>--no-pager</code></td>
+<td>—</td>
+<td>ページャーを無効にする</td>
+</tr>
+<tr>
+<td><code>--nagi-dir</code></td>
+<td>—</td>
+<td>Nagi 状態ディレクトリパスの上書き</td>
+</tr>
+</tbody>
+</table>
+<p>観測データは <code>&lt;nagiDir&gt;/inspections/&lt;asset-name&gt;/</code> にキャッシュされます。</p>
 <h2 id="mcp">mcp</h2>
 <p>MCP サーバーを stdio で起動します。</p>
-<div class="highlight"><pre><span></span><code>nagi<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
-</code></pre></div>
+<p><code>bash
+nagi mcp [OPTIONS]</code></p>
 <table>
 <thead>
 <tr>
@@ -2664,26 +2718,24 @@
 </tbody>
 </table>
 <p>複数の <code>--select</code> 引数は和集合（OR）で結合されます。単一引数内のカンマ区切りパターンは積集合（AND）で結合されます。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># OR: いずれかのセレクターに一致する Asset</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span>daily-sales<span class="w"> </span>--select<span class="w"> </span>access-stats
-
-<span class="c1"># AND: 両方のラベルを持つ Asset</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span>
-
-<span class="c1"># 組み合わせ: (label:dbt/finance AND label:dbt/daily) OR access-stats</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance,label:dbt/daily&quot;</span><span class="w"> </span>--select<span class="w"> </span>access-stats
-
-<span class="c1"># ラベルの key-value ペアで選択</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:team=data-eng&quot;</span>
-</code></pre></div>
+<p>```bash</p>
+<h1 id="or-asset">OR: いずれかのセレクターに一致する Asset</h1>
+<p>nagi evaluate --select daily-sales --select access-stats</p>
+<h1 id="and-asset">AND: 両方のラベルを持つ Asset</h1>
+<p>nagi evaluate --select "label:dbt/finance,label:dbt/daily"</p>
+<h1 id="labeldbtfinance-and-labeldbtdaily-or-access-stats">組み合わせ: (label:dbt/finance AND label:dbt/daily) OR access-stats</h1>
+<p>nagi evaluate --select "label:dbt/finance,label:dbt/daily" --select access-stats</p>
+<h1 id="key-value">ラベルの key-value ペアで選択</h1>
+<p>nagi evaluate --select "label:team=data-eng"
+```</p>
 <h2 id="-exclude-syntax">--exclude syntax</h2>
 <p><code>--exclude</code> は <code>--select</code> と同じセレクター構文を使用します。<code>--select</code> の適用後に、<code>--exclude</code> に一致する Asset が結果から除外されます。</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># monthly-report 以外のすべての Asset を評価</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--exclude<span class="w"> </span>monthly-report
-
-<span class="c1"># finance ラベルの Asset から daily ラベルの Asset を除外して評価</span>
-nagi<span class="w"> </span>evaluate<span class="w"> </span>--select<span class="w"> </span><span class="s2">&quot;label:dbt/finance&quot;</span><span class="w"> </span>--exclude<span class="w"> </span><span class="s2">&quot;label:dbt/daily&quot;</span>
-</code></pre></div>
+<p>```bash</p>
+<h1 id="monthly-report-asset">monthly-report 以外のすべての Asset を評価</h1>
+<p>nagi evaluate --exclude monthly-report</p>
+<h1 id="finance-asset-daily-asset">finance ラベルの Asset から daily ラベルの Asset を除外して評価</h1>
+<p>nagi evaluate --select "label:dbt/finance" --exclude "label:dbt/daily"
+```</p>
 
 
 

@@ -1996,68 +1996,68 @@
 
 <h1 id="kind-identity">kind: Identity</h1>
 <p>Declares an authentication scope that can be referenced from Connection, Sync, and Command conditions. Binds a set of environment variables to a named identity so that each operation runs with specific credentials.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nagi.io/v1alpha1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Identity</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-evaluator</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env</span>
-<span class="w">  </span><span class="nt">env</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">GOOGLE_APPLICATION_CREDENTIALS</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${NAGI_EVAL_KEYFILE}</span>
-</code></pre></div>
+<p><code>yaml
+apiVersion: nagi.io/v1alpha1
+kind: Identity
+metadata:
+  name: bq-evaluator
+spec:
+  type: env
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: ${NAGI_EVAL_KEYFILE}</code></p>
 <h2 id="how-it-works">How It Works</h2>
 <p>When a Connection, Sync stage, or Command condition references an Identity by name, the environment variables defined in the Identity's <code>spec.env</code> are injected into the target scope.</p>
 <p>For Connections, the env map is used to resolve authentication credentials at query time. For subprocesses (Sync stages and Command conditions), the env map is injected into the subprocess environment between the OS essentials and the step-level <code>env</code> declarations. See <a href="../../environment-variables/">Environment Variables</a> for the full layering.</p>
 <p>Values can use <code>${VAR}</code> syntax to reference the Nagi process's own environment. The reference is resolved at the point of use, not at parse time. This means the expanded credential value is never stored in a struct field.</p>
 <h2 id="referencing-an-identity">Referencing an Identity</h2>
 <h3 id="from-connection">From Connection</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-bigquery</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bigquery</span>
-<span class="w">  </span><span class="nt">project</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project</span>
-<span class="w">  </span><span class="nt">dataset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">analytics</span>
-<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-evaluator</span>
-</code></pre></div>
+<p><code>yaml
+kind: Connection
+metadata:
+  name: my-bigquery
+spec:
+  type: bigquery
+  project: my-project
+  dataset: analytics
+  identity: bq-evaluator</code></p>
 <p>When a BigQuery Connection has an <code>identity</code> field, the Identity's env is used for authentication. If <code>GOOGLE_APPLICATION_CREDENTIALS</code> is present in the Identity's env, its value is used as the ADC file path.</p>
 <p>DuckDB and Snowflake connections do not yet support Identity. If <code>identity</code> is specified, a warning is emitted at compile time.</p>
 <h3 id="from-sync">From Sync</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bq-syncer</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: bq-syncer
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.name }}"]</code></p>
 <p><code>identity</code> on the Sync applies to all stages (pre, run, post) unless overridden at the stage level.</p>
 <h3 id="from-a-sync-stage">From a Sync Stage</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sync</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt-run</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default-id</span>
-<span class="w">  </span><span class="nt">pre</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;prepare.py&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pre-id</span>
-<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;dbt&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;run&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--select&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">asset.name</span><span class="nv"> </span><span class="s">}}&quot;</span><span class="p p-Indicator">]</span>
-</code></pre></div>
+<p><code>yaml
+kind: Sync
+metadata:
+  name: dbt-run
+spec:
+  identity: default-id
+  pre:
+    type: Command
+    args: ["python", "prepare.py"]
+    identity: pre-id
+  run:
+    type: Command
+    args: ["dbt", "run", "--select", "{{ asset.name }}"]</code></p>
 <p><code>pre</code> uses <code>pre-id</code>. <code>run</code> and <code>post</code> inherit <code>default-id</code> from the Sync level.</p>
 <h3 id="from-command-condition">From Command Condition</h3>
-<div class="highlight"><pre><span></span><code><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conditions</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">check-data</span>
-<span class="nt">spec</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">validate</span>
-<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Command</span>
-<span class="w">    </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;python&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;validate.py&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">validator-id</span>
-</code></pre></div>
+<p><code>yaml
+kind: Conditions
+metadata:
+  name: check-data
+spec:
+  - name: validate
+    type: Command
+    run: ["python", "validate.py"]
+    identity: validator-id</code></p>
 <h2 id="identity-resolution-order">Identity Resolution Order</h2>
 <p>For each Sync stage, the Identity is determined as follows:</p>
 <ol>
