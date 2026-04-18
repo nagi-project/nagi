@@ -8,6 +8,11 @@ use crate::runtime::kind::connection::dbt::DbtProfilesFile;
 static TOKIO_RT: LazyLock<tokio::runtime::Runtime> =
     LazyLock::new(|| tokio::runtime::Runtime::new().expect("failed to create tokio runtime"));
 
+/// Default project directory for CLI commands.
+fn project_dir() -> &'static std::path::Path {
+    std::path::Path::new(".")
+}
+
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
@@ -47,7 +52,7 @@ fn evaluate_all(
     dry_run: bool,
 ) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
-    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
+    let nagi_dir = crate::runtime::config::resolve_nagi_dir(project_dir());
     let resolved_cache = cache_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
@@ -189,6 +194,7 @@ fn execute_sync_proposal(
                 force,
                 evaluation_id,
                 default_timeout,
+                project_dir: Some(project_dir()),
             },
         ))
         .map_err(to_py_err)
@@ -208,8 +214,7 @@ fn asset_status(
     logs_dir: Option<&str>,
     suspended_dir: Option<&str>,
 ) -> PyResult<String> {
-    let config =
-        crate::runtime::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
+    let config = crate::runtime::config::load_config(project_dir()).map_err(to_py_err)?;
     let db = db_path
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| config.nagi_dir.db_path());
@@ -247,8 +252,7 @@ fn asset_status(
 #[pyfunction]
 #[pyo3(signature = (select=None))]
 fn export_dry_run(select: Option<&str>) -> PyResult<String> {
-    let config =
-        crate::runtime::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
+    let config = crate::runtime::config::load_config(project_dir()).map_err(to_py_err)?;
     let results =
         crate::interface::export::dry_run_for_config(&config, select).map_err(to_py_err)?;
     serde_json::to_string(&results).map_err(to_py_err)
@@ -259,8 +263,7 @@ fn export_dry_run(select: Option<&str>) -> PyResult<String> {
 #[pyo3(signature = (select=None, resources_dir="resources"))]
 fn export_logs(select: Option<&str>, resources_dir: &str) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
-    let config =
-        crate::runtime::config::load_config(std::path::Path::new(".")).map_err(to_py_err)?;
+    let config = crate::runtime::config::load_config(project_dir()).map_err(to_py_err)?;
     let results = rt
         .block_on(crate::interface::export::export_for_config(
             &config,
@@ -338,7 +341,7 @@ fn serve(
 #[pyfunction]
 #[pyo3(signature = (selectors))]
 fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
-    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
+    let nagi_dir = crate::runtime::config::resolve_nagi_dir(project_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::runtime::serve::resume(&selector_refs, &nagi_dir).map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
@@ -347,7 +350,7 @@ fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (target_dir, reason=None))]
 fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
-    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
+    let nagi_dir = crate::runtime::config::resolve_nagi_dir(project_dir());
     let r = reason.unwrap_or("manual halt");
     let result = crate::runtime::serve::halt(std::path::Path::new(target_dir), r, &nagi_dir)
         .map_err(to_py_err)?;

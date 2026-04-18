@@ -100,6 +100,34 @@ pub trait SyncLock: Send + Sync {
     fn release(&self, sync_ref: &str) -> Result<(), StorageError>;
 }
 
+/// Creates a [`SyncLock`] implementation matching the configured backend type.
+pub fn build_sync_lock(
+    config: &crate::runtime::config::NagiConfig,
+) -> Result<std::sync::Arc<dyn SyncLock>, StorageError> {
+    match config.backend.r#type.as_str() {
+        "local" => Ok(std::sync::Arc::new(local::LocalSyncLock::new(
+            config.nagi_dir.locks_dir(),
+        ))),
+        "gcs" | "s3" => Ok(std::sync::Arc::new(remote::create_remote_store(
+            &config.backend,
+        )?)),
+        t => Err(StorageError::Io(std::io::Error::other(format!(
+            "unknown backend type: {t}"
+        )))),
+    }
+}
+
+/// Loads project config and builds a [`SyncLock`] with the configured TTL.
+pub fn build_sync_lock_from_project(
+    project_dir: &std::path::Path,
+) -> Result<(std::sync::Arc<dyn SyncLock>, Duration), StorageError> {
+    let config = crate::runtime::config::load_config(project_dir)
+        .map_err(|e| StorageError::Io(std::io::Error::other(e.to_string())))?;
+    let lock = build_sync_lock(&config)?;
+    let ttl = Duration::from_secs(config.lock_ttl_seconds);
+    Ok((lock, ttl))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
