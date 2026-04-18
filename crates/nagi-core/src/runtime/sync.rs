@@ -54,6 +54,12 @@ pub enum SyncError {
 
     #[error("sync step '{stage}' timed out after {seconds}s")]
     Timeout { stage: String, seconds: u64 },
+
+    #[error("failed to acquire sync lock for asset '{asset_name}'")]
+    LockAcquireFailed { asset_name: String },
+
+    #[error("lock storage error: {0}")]
+    LockStorage(String),
 }
 
 /// Which type of sync operation is being executed.

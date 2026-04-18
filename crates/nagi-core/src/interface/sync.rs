@@ -6,8 +6,8 @@ use crate::runtime::compile::CompiledAsset;
 use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::log::LogStore;
 use crate::runtime::sync::{
-    dry_run_sync, evaluate_and_cache, parse_sync_type, resolve_sync_spec, run_sync_workflow,
-    DryRunStage, Stage, SyncError, SyncType, SyncWorkflowParams,
+    dry_run_sync, evaluate_and_cache, generate_uuid, parse_sync_type, resolve_sync_spec,
+    run_sync_workflow, DryRunStage, Stage, SyncError, SyncType, SyncWorkflowParams,
 };
 
 pub(crate) struct ProposeSyncParams<'a> {
@@ -160,6 +160,8 @@ pub(crate) struct SyncFromCompiledParams<'a> {
     pub force: bool,
     pub evaluation_id: Option<&'a str>,
     pub default_timeout: std::time::Duration,
+    /// When set, loads config from this directory to build a sync lock.
+    pub project_dir: Option<&'a Path>,
 }
 
 /// Deserializes compiled YAML, delegates to runtime, and serializes the result.
@@ -182,6 +184,24 @@ pub(crate) async fn sync_from_compiled(
         return serialize(&result);
     }
 
+    // Acquire lock if project_dir is provided.
+    let lock_state = params
+        .project_dir
+        .map(crate::runtime::storage::build_sync_lock_from_project)
+        .transpose()
+        .map_err(|e| SyncError::LockStorage(e.to_string()))?;
+    if let Some((ref lock, ttl)) = lock_state {
+        let execution_id = generate_uuid();
+        let acquired = lock
+            .acquire(&compiled.metadata.name, ttl, &execution_id)
+            .map_err(|e| SyncError::LockStorage(e.to_string()))?;
+        if !acquired {
+            return Err(SyncError::LockAcquireFailed {
+                asset_name: compiled.metadata.name.clone(),
+            });
+        }
+    }
+
     let log_store = open_log_store(params.db_path, params.logs_dir)?;
     let result = run_sync_workflow(SyncWorkflowParams {
         compiled: &compiled,
@@ -194,15 +214,23 @@ pub(crate) async fn sync_from_compiled(
         nagi_dir: params.nagi_dir,
         default_timeout: params.default_timeout,
     })
-    .await?;
+    .await;
 
-    serialize(&result)
+    if let Some((ref lock, _)) = lock_state {
+        if let Err(e) = lock.release(&compiled.metadata.name) {
+            tracing::warn!(asset_name = %compiled.metadata.name, error = %e, "failed to release sync lock");
+        }
+    }
+
+    serialize(&result?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::runtime::evaluate::{AssetEvalResult, ConditionResult, ConditionStatus};
+    use crate::runtime::storage::local::LocalSyncLock;
+    use crate::runtime::storage::SyncLock;
 
     // ── eval_result_to_proposal ──────────────────────────────────────────
 
@@ -299,6 +327,7 @@ spec:
             force: false,
             evaluation_id: None,
             default_timeout: std::time::Duration::from_secs(3600),
+            project_dir: None,
         };
         let json = sync_from_compiled(params).await.unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -320,6 +349,7 @@ spec:
             force: false,
             evaluation_id: None,
             default_timeout: std::time::Duration::from_secs(3600),
+            project_dir: None,
         };
         let result = sync_from_compiled(params).await;
         assert!(matches!(result, Err(SyncError::Parse(_))));
@@ -339,8 +369,114 @@ spec:
             force: false,
             evaluation_id: None,
             default_timeout: std::time::Duration::from_secs(3600),
+            project_dir: None,
         };
         let result = sync_from_compiled(params).await;
         assert!(result.is_err());
+    }
+
+    // ── sync_from_compiled lock ─────────────────────────────────────────
+
+    /// Creates a temp project dir with nagi.yaml pointing nagiDir to a subdirectory.
+    /// Returns (tempdir, nagi_dir_path) so the caller can inspect lock files.
+    fn setup_project_with_lock() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let nagi_dir = tmp.path().join(".nagi");
+        let yaml = format!("nagiDir: {}", nagi_dir.display());
+        std::fs::write(tmp.path().join("nagi.yaml"), yaml).unwrap();
+        (tmp, nagi_dir)
+    }
+
+    #[tokio::test]
+    async fn sync_from_compiled_with_lock_executes_sync() {
+        let (project, nagi_dir) = setup_project_with_lock();
+        let locks_dir = nagi_dir.join("locks");
+        let params = SyncFromCompiledParams {
+            yaml: ASSET_WITH_SYNC_YAML,
+            sync_type: "sync",
+            stages: None,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            nagi_dir: None,
+            dry_run: false,
+            force: false,
+            evaluation_id: None,
+            default_timeout: std::time::Duration::from_secs(3600),
+            project_dir: Some(project.path()),
+        };
+        let result = sync_from_compiled(params).await;
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        // Lock file should be released after sync.
+        assert!(!locks_dir.join("test-asset.lock").exists());
+    }
+
+    #[tokio::test]
+    async fn sync_from_compiled_lock_held_returns_error() {
+        let (project, nagi_dir) = setup_project_with_lock();
+        let locks_dir = nagi_dir.join("locks");
+        // Pre-acquire the lock so sync_from_compiled cannot get it.
+        let lock = LocalSyncLock::new(locks_dir);
+        assert!(lock
+            .acquire(
+                "test-asset",
+                std::time::Duration::from_secs(3600),
+                "other-exec"
+            )
+            .unwrap());
+
+        let params = SyncFromCompiledParams {
+            yaml: ASSET_WITH_SYNC_YAML,
+            sync_type: "sync",
+            stages: None,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            nagi_dir: None,
+            dry_run: false,
+            force: false,
+            evaluation_id: None,
+            default_timeout: std::time::Duration::from_secs(3600),
+            project_dir: Some(project.path()),
+        };
+        let result = sync_from_compiled(params).await;
+        assert!(
+            matches!(result, Err(SyncError::LockAcquireFailed { .. })),
+            "expected LockAcquireFailed, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_from_compiled_dry_run_skips_lock() {
+        let (project, nagi_dir) = setup_project_with_lock();
+        let locks_dir = nagi_dir.join("locks");
+        // Pre-acquire the lock.
+        let lock = LocalSyncLock::new(locks_dir);
+        assert!(lock
+            .acquire(
+                "test-asset",
+                std::time::Duration::from_secs(3600),
+                "other-exec"
+            )
+            .unwrap());
+
+        // dry_run should succeed despite the lock being held.
+        let params = SyncFromCompiledParams {
+            yaml: ASSET_WITH_SYNC_YAML,
+            sync_type: "sync",
+            stages: None,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            nagi_dir: None,
+            dry_run: true,
+            force: false,
+            evaluation_id: None,
+            default_timeout: std::time::Duration::from_secs(3600),
+            project_dir: Some(project.path()),
+        };
+        let result = sync_from_compiled(params).await;
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
     }
 }
