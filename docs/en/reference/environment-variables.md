@@ -79,3 +79,12 @@ env:
 | Sync | `spec.pre.env`<br>`spec.run.env`<br>`spec.post.env` | Sync stage command |
 | Conditions (`type: Command`) | `spec[].env` | `type: Command` subprocess |
 | Origin (`type: DBT`) | `spec.env` | `dbt compile` |
+
+## Nagi-injected Variables
+
+Nagi automatically injects the following variables into Sync subprocesses. These are set after user-declared `env` and cannot be overridden.
+
+| Variable | Description |
+| --- | --- |
+| `NAGI_EXECUTION_ID` | UUID that uniquely identifies the current Sync execution. Use this to correlate Sync runs with jobs in your data warehouse (e.g. as a job label or query tag). See [dbt Core integration](../integrations/dbt/core.md#propagating-execution_id-to-bigquery-jobs) for an example. |
+| `TRACEPARENT` | [W3C Trace Context](https://www.w3.org/TR/trace-context/) header derived from the execution ID. OpenTelemetry-instrumented tools automatically pick this up as the parent trace. |

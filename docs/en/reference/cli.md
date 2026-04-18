@@ -22,6 +22,7 @@ Command output defaults to JSON. Use `--output text` for human-readable table ou
 | `serve resume` | Resume suspended Assets |
 | `serve halt` | Halt all Assets at once |
 | `export` | Export execution logs to a data warehouse |
+| `inspect` | Show the state change before and after Sync executions |
 | `mcp` | Start the MCP server on stdio |
 
 ## Global options
@@ -175,6 +176,28 @@ nagi export [OPTIONS]
 | --- | --- | --- |
 | `--select` | — | Specify the table names to export (`evaluate_logs`, `sync_logs`, `sync_evaluations`) |
 | `--dry-run` | — | Show the number of unexported rows (does not transfer) |
+
+## inspect
+
+Shows the state change before and after Sync executions for an Asset.
+
+- Condition evaluation results (Ready / Drifted)
+- Row count and object type (table, view, etc.)
+
+```bash
+nagi inspect <ASSET_NAME> [OPTIONS]
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--limit` | `5` | Maximum number of Sync executions to show |
+| `--changed-only` | — | Show only executions where state changed |
+| `--target-dir` | `target` | Compiled directory |
+| `--output` | `text` | Output format (`json`, `text`) |
+| `--no-pager` | — | Disable pager for terminal output |
+| `--nagi-dir` | — | Override Nagi state directory path |
+
+Inspection data is cached under `<nagiDir>/inspections/<asset-name>/`.
 
 ## mcp
 

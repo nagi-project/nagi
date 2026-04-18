@@ -185,6 +185,7 @@ fn execute_sync_proposal(
                 db_path: None,
                 logs_dir: None,
                 cache_dir: cache_dir.map(std::path::Path::new),
+                nagi_dir: None,
                 dry_run: false,
                 force,
                 evaluation_id,
@@ -408,6 +409,52 @@ fn format_ls_text(json_str: &str) -> PyResult<String> {
     crate::interface::format::ls_to_text(json_str).map_err(to_py_err)
 }
 
+/// Formats inspection JSON as human-readable text.
+#[pyfunction]
+fn format_inspect_text(json_str: &str) -> PyResult<String> {
+    crate::interface::format::inspect_to_text(json_str).map_err(to_py_err)
+}
+
+/// Lists recent inspections for an asset as JSON.
+/// If `target_dir` is provided, attempts to backfill empty jobs
+/// from BigQuery INFORMATION_SCHEMA.JOBS.
+/// If `changed_only` is true, returns only inspections where any
+/// comparison item has different before and after values.
+/// If `nagi_dir` is provided, uses it instead of resolving from config.
+#[pyfunction]
+#[pyo3(signature = (asset_name, limit=5, target_dir=None, changed_only=false, nagi_dir=None))]
+fn list_inspections(
+    asset_name: &str,
+    limit: usize,
+    target_dir: Option<&str>,
+    changed_only: bool,
+    nagi_dir: Option<&str>,
+) -> PyResult<String> {
+    let resolved_nagi_dir = match nagi_dir {
+        Some(d) => crate::runtime::config::NagiDir::new(std::path::PathBuf::from(d)),
+        None => crate::runtime::config::resolve_nagi_dir(std::path::Path::new(".")),
+    };
+    let store = crate::runtime::inspect::InspectionStore::new(resolved_nagi_dir.root());
+    let mut inspections = if changed_only {
+        store.list_changed(asset_name, limit).map_err(to_py_err)?
+    } else {
+        store.list(asset_name, limit).map_err(to_py_err)?
+    };
+
+    if let Some(td) = target_dir {
+        let default_timeout = crate::runtime::config::resolve_default_timeout();
+        TOKIO_RT.block_on(crate::interface::inspect::backfill_jobs(
+            &store,
+            &mut inspections,
+            std::path::Path::new(td),
+            asset_name,
+            default_timeout,
+        ));
+    }
+
+    serde_json::to_string(&inspections).map_err(to_py_err)
+}
+
 /// Registers all PyO3 functions into the module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
@@ -432,5 +479,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_evaluate_text, m)?)?;
     m.add_function(wrap_pyfunction!(format_status_text, m)?)?;
     m.add_function(wrap_pyfunction!(format_ls_text, m)?)?;
+    m.add_function(wrap_pyfunction!(format_inspect_text, m)?)?;
+    m.add_function(wrap_pyfunction!(list_inspections, m)?)?;
     Ok(())
 }

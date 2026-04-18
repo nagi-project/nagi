@@ -60,6 +60,37 @@ Evaluate は Nagi が直接実行します。
 
 dbt CLI をサブプロセスとして実行します（例: `dbt run --select daily_sales`）。
 
+### Propagating execution_id to BigQuery jobs
+
+Sync 中に実行された BigQuery ジョブを [`nagi inspect`](../../reference/cli.md#inspect) で表示するには、[`NAGI_EXECUTION_ID`](../../reference/environment-variables.md#nagi-injected-variables) 環境変数を BigQuery のジョブラベルに伝播させます。
+
+`dbt_project.yml` に以下を追加します。
+
+```yaml
+query-comment:
+  comment: "{{ query_comment(node) }}"
+  job-label: true
+```
+
+`macros/query_comment.sql` を作成します。
+
+```sql
+{% macro query_comment(node) %}
+  {%- set comment_dict = {} -%}
+  {%- do comment_dict.update(
+      app='dbt',
+      dbt_version=dbt_version,
+      nagi_execution_id=env_var('NAGI_EXECUTION_ID', ''),
+  ) -%}
+  {%- if node is not none -%}
+    {%- do comment_dict.update(node_id=node.unique_id) -%}
+  {%- endif -%}
+  {% do return(tojson(comment_dict)) %}
+{% endmacro %}
+```
+
+`job-label: true` を指定すると、dbt-bigquery は JSON コメントをパースしてキーを BigQuery のジョブラベルとして付与します。`nagi inspect` は `nagi_execution_id` ラベルでジョブを照合します。
+
 ## Customization
 
 Origin が自動生成した Asset と同じ名前で Asset を `resources/` に定義すると、`onDrift` がリスト結合されます。マージのルールと具体例は [Resource Generation - Merge with User-defined Resources](./resource-generation.md#merge-with-user-defined-resources) を参照してください。

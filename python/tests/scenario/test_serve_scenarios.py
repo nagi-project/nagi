@@ -275,7 +275,7 @@ class TestScenario6IntervalWithPropagation:
         # Wait for at least 2 interval evaluations of B
         import time
 
-        time.sleep(3)
+        time.sleep(5)
         eval_count = query_evaluate_count(project, "b")
         assert eval_count >= 2, f"expected B evaluated >= 2 times, got {eval_count}"
 

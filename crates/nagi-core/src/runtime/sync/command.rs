@@ -13,9 +13,14 @@ use crate::runtime::subprocess;
 /// The first element of `args` is the program, the rest are arguments passed
 /// to it. stdout and stderr are captured in full. The step is aborted after
 /// `timeout` elapses; a timed-out step is killed and returns `SyncError::Timeout`.
+///
+/// `execution_id` is injected as `NAGI_EXECUTION_ID` and used to derive
+/// `TRACEPARENT` (W3C Trace Context). These env vars are set after the
+/// user-declared env, so they cannot be overridden by Sync definitions.
 pub async fn execute_step(
     stage: Stage,
     step: &SyncStep,
+    execution_id: &str,
     timeout: Duration,
 ) -> Result<StageResult, SyncError> {
     let args = &step.args;
@@ -24,6 +29,10 @@ pub async fn execute_step(
 
     let started_at = Utc::now().to_rfc3339();
 
+    let mut env = subprocess::build_subprocess_env(None, &step.env)?;
+    env.insert("NAGI_EXECUTION_ID".to_string(), execution_id.to_string());
+    env.insert("TRACEPARENT".to_string(), build_traceparent(execution_id));
+
     let mut cmd = Command::new(program);
     cmd.args(cmd_args)
         .stdin(Stdio::null())
@@ -31,13 +40,11 @@ pub async fn execute_step(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     cmd.env_clear();
-    cmd.envs(subprocess::build_subprocess_env(None, &step.env)?);
+    cmd.envs(env);
     let child = cmd
         .spawn()
         .map_err(|e| SyncError::SpawnFailed(format!("{program}: {e}")))?;
 
-    // The child owned by `wait_with_output` is dropped on timeout, which
-    // triggers kill_on_drop and terminates the subprocess.
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(res) => res?,
         Err(_) => {
@@ -69,6 +76,39 @@ fn stage_label(stage: Stage) -> &'static str {
     }
 }
 
+/// Builds a W3C Trace Context `traceparent` header value from an execution_id.
+///
+/// Format: `00-<trace_id>-<span_id>-01`
+/// - trace_id: execution_id with hyphens removed (32 hex chars)
+/// - span_id: pseudo-random 16 hex chars (8 bytes), guaranteed non-zero
+fn build_traceparent(execution_id: &str) -> String {
+    let trace_id = execution_id.replace('-', "");
+    debug_assert_eq!(trace_id.len(), 32, "execution_id must yield 32 hex chars");
+    let span_id = generate_span_id();
+    format!("00-{trace_id}-{span_id}-01")
+}
+
+fn generate_span_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tid = format!("{:?}", std::thread::current().id());
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in tid.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    let random = hash ^ (now as u64) ^ seq;
+    let random = if random == 0 { 1 } else { random };
+    format!("{random:016x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,6 +124,8 @@ mod tests {
         step
     }
 
+    const TEST_EXECUTION_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+
     fn test_timeout() -> Duration {
         Duration::from_secs(30)
     }
@@ -94,7 +136,7 @@ mod tests {
             vec!["sh", "-c", &format!("printf %s \"${{{var_name}}}\"")],
             step_env,
         );
-        execute_step(Stage::Run, &step, test_timeout())
+        execute_step(Stage::Run, &step, TEST_EXECUTION_ID, test_timeout())
             .await
             .unwrap()
     }
@@ -109,7 +151,7 @@ mod tests {
             ],
             step_env,
         );
-        execute_step(Stage::Run, &step, test_timeout())
+        execute_step(Stage::Run, &step, TEST_EXECUTION_ID, test_timeout())
             .await
             .unwrap()
     }
@@ -123,7 +165,6 @@ mod tests {
 
     #[tokio::test]
     async fn non_allowlisted_parent_env_does_not_leak() {
-        // CARGO is set by `cargo test` and is not in the allow-list.
         assert!(
             std::env::var("CARGO").is_ok(),
             "test harness invariant: CARGO should be set under `cargo test`"
@@ -159,7 +200,7 @@ mod tests {
             vec!["powershell", "-Command", "exit 0"],
             &[("X", "${NAGI_DEFINITELY_UNSET_12345}")],
         );
-        let err = execute_step(Stage::Run, &step, test_timeout())
+        let err = execute_step(Stage::Run, &step, TEST_EXECUTION_ID, test_timeout())
             .await
             .unwrap_err();
         match err {
@@ -180,7 +221,7 @@ mod tests {
         let args = vec!["powershell".into(), "-Command".into(), "exit 0".into()];
         let mut step = SyncStep::command(args);
         step.env = env;
-        let err = execute_step(Stage::Run, &step, test_timeout())
+        let err = execute_step(Stage::Run, &step, TEST_EXECUTION_ID, test_timeout())
             .await
             .unwrap_err();
         assert!(matches!(
@@ -193,9 +234,116 @@ mod tests {
     #[tokio::test]
     async fn times_out_when_step_exceeds_deadline() {
         let step = SyncStep::command(vec!["sleep".into(), "5".into()]);
-        let err = execute_step(Stage::Run, &step, Duration::from_millis(100))
-            .await
-            .unwrap_err();
+        let err = execute_step(
+            Stage::Run,
+            &step,
+            TEST_EXECUTION_ID,
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, SyncError::Timeout { .. }));
+    }
+
+    // ── NAGI_EXECUTION_ID / TRACEPARENT injection ───────────────────
+
+    #[tokio::test]
+    async fn nagi_execution_id_reaches_subprocess() {
+        let result = run_echo_var("NAGI_EXECUTION_ID", &[]).await;
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, TEST_EXECUTION_ID);
+    }
+
+    #[tokio::test]
+    async fn traceparent_has_valid_w3c_format() {
+        let result = run_echo_var("TRACEPARENT", &[]).await;
+        assert_eq!(result.exit_code, 0);
+        let tp = &result.stdout;
+        let parts: Vec<&str> = tp.split('-').collect();
+        assert_eq!(
+            parts.len(),
+            4,
+            "TRACEPARENT should have 4 dash-separated parts: {tp}"
+        );
+        assert_eq!(parts[0], "00", "version should be 00");
+        assert_eq!(parts[1].len(), 32, "trace-id should be 32 hex chars");
+        assert_eq!(parts[2].len(), 16, "span-id should be 16 hex chars");
+        assert_eq!(parts[3], "01", "flags should be 01");
+        assert!(
+            parts[1].chars().all(|c| c.is_ascii_hexdigit()),
+            "trace-id should be hex"
+        );
+        assert!(
+            parts[2].chars().all(|c| c.is_ascii_hexdigit()),
+            "span-id should be hex"
+        );
+    }
+
+    #[tokio::test]
+    async fn traceparent_trace_id_derived_from_execution_id() {
+        let result = run_echo_var("TRACEPARENT", &[]).await;
+        let tp = &result.stdout;
+        let parts: Vec<&str> = tp.split('-').collect();
+        let trace_id = parts[1];
+        let expected_trace_id = TEST_EXECUTION_ID.replace('-', "");
+        assert_eq!(trace_id, expected_trace_id);
+    }
+
+    #[tokio::test]
+    async fn traceparent_span_id_is_not_all_zeros() {
+        let result = run_echo_var("TRACEPARENT", &[]).await;
+        let tp = &result.stdout;
+        let parts: Vec<&str> = tp.split('-').collect();
+        let span_id = parts[2];
+        assert_ne!(span_id, "0000000000000000", "span-id must not be all zeros");
+    }
+
+    #[test]
+    fn build_traceparent_format() {
+        let tp = build_traceparent(TEST_EXECUTION_ID);
+        assert!(tp.starts_with("00-"));
+        assert!(tp.ends_with("-01"));
+        let parts: Vec<&str> = tp.split('-').collect();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[1].len(), 32);
+        assert_eq!(parts[2].len(), 16);
+    }
+
+    #[test]
+    fn build_traceparent_trace_id_matches_execution_id() {
+        let tp = build_traceparent(TEST_EXECUTION_ID);
+        let parts: Vec<&str> = tp.split('-').collect();
+        assert_eq!(parts[1], TEST_EXECUTION_ID.replace('-', ""));
+    }
+
+    #[test]
+    fn span_id_is_16_hex_chars() {
+        let id = generate_span_id();
+        assert_eq!(id.len(), 16);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn span_id_is_not_all_zeros() {
+        let id = generate_span_id();
+        assert_ne!(id, "0000000000000000");
+    }
+
+    #[test]
+    fn span_id_successive_calls_differ() {
+        let a = generate_span_id();
+        let b = generate_span_id();
+        assert_ne!(a, b);
+    }
+
+    #[tokio::test]
+    async fn declared_env_cannot_override_nagi_execution_id() {
+        let result =
+            run_echo_var("NAGI_EXECUTION_ID", &[("NAGI_EXECUTION_ID", "user-value")]).await;
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout, TEST_EXECUTION_ID,
+            "Nagi-injected value must take precedence"
+        );
     }
 }

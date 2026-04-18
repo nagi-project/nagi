@@ -229,7 +229,7 @@ pub async fn execute_sync_core(
     for stage in stages_to_run {
         let step = step_for_stage(sync_spec, stage);
         let timeout = resolve_step_timeout(step, sync_spec, default_timeout);
-        let result = command::execute_step(stage, step, timeout).await?;
+        let result = command::execute_step(stage, step, &execution_id, timeout).await?;
         let succeeded = result.success();
         results.push(result);
         if !succeeded {
@@ -419,6 +419,7 @@ pub(crate) struct SyncWorkflowParams<'a> {
     pub evaluation_id: Option<&'a str>,
     pub log_store: Option<&'a LogStore>,
     pub cache_dir: Option<&'a Path>,
+    pub nagi_dir: Option<&'a Path>,
     pub default_timeout: std::time::Duration,
 }
 
@@ -469,13 +470,35 @@ async fn re_evaluate_and_link(
 }
 
 /// Runs the full sync workflow: preflight check, execute, link evaluations,
-/// and post-sync re-evaluation.
+/// post-sync re-evaluation, and inspection file creation.
 pub(crate) async fn run_sync_workflow(
     params: SyncWorkflowParams<'_>,
 ) -> Result<SyncExecutionResult, SyncError> {
     let sync_spec = resolve_sync_spec(params.compiled)?;
 
     preflight_check_dbt_cloud(params.compiled, params.force).await?;
+
+    // --- Observation: connect once, capture pre and post ---
+    let inspect_conn = connect_for_inspection(params.compiled, params.default_timeout);
+    let model_name_for_inspect = params
+        .compiled
+        .spec
+        .model_name
+        .as_deref()
+        .unwrap_or(&params.compiled.metadata.name);
+
+    let (row_count_before, object_type) = match &inspect_conn {
+        Some(ic) => {
+            fetch_row_count_before(
+                ic.conn.as_ref(),
+                &ic.project,
+                &ic.dataset,
+                model_name_for_inspect,
+            )
+            .await
+        }
+        None => (None, None),
+    };
 
     let result = execute_sync(
         &params.compiled.metadata.name,
@@ -500,7 +523,167 @@ pub(crate) async fn run_sync_workflow(
         .await;
     }
 
+    let row_count_after = match &inspect_conn {
+        Some(ic) => {
+            fetch_row_count_after(
+                ic.conn.as_ref(),
+                &ic.project,
+                &ic.dataset,
+                model_name_for_inspect,
+            )
+            .await
+        }
+        None => None,
+    };
+
+    let finished_at = chrono::Utc::now().to_rfc3339();
+    write_inspection(
+        params.nagi_dir,
+        &params.compiled.metadata.name,
+        &result.execution_id,
+        &finished_at,
+        object_type.as_deref(),
+        model_name_for_inspect,
+        row_count_before,
+        row_count_after,
+    );
+
     Ok(result)
+}
+
+/// Resolved BigQuery connection info for inspection.
+struct BqInspectConn {
+    conn: Box<dyn crate::runtime::kind::connection::Connection>,
+    project: String,
+    dataset: String,
+    #[allow(dead_code)] // used by destination jobs lazy fetch (not yet integrated)
+    location: Option<String>,
+}
+
+/// Creates a connection and extracts BigQuery project/dataset/location for inspection.
+/// Returns `None` for non-BigQuery connections or on connection failure.
+fn connect_for_inspection(
+    compiled: &CompiledAsset,
+    default_timeout: std::time::Duration,
+) -> Option<BqInspectConn> {
+    use crate::runtime::kind::connection::ResolvedConnection;
+    let resolved = compiled.connection.as_ref()?;
+    let (project, dataset, location) = match resolved {
+        #[cfg(feature = "bigquery")]
+        ResolvedConnection::BigQuery {
+            project,
+            dataset,
+            location,
+            ..
+        } => (project.clone(), dataset.clone(), location.clone()),
+        _ => return None,
+    };
+    let conn = match resolved.connect(default_timeout) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "inspection: failed to connect");
+            return None;
+        }
+    };
+    Some(BqInspectConn {
+        conn,
+        project,
+        dataset,
+        location,
+    })
+}
+
+/// Fetches row count before sync. Returns (row_count, normalized_object_type).
+async fn fetch_row_count_before(
+    conn: &dyn crate::runtime::kind::connection::Connection,
+    project: &str,
+    dataset: &str,
+    model_name: &str,
+) -> (Option<serde_json::Value>, Option<String>) {
+    match crate::runtime::inspect::bigquery::fetch_row_count_value(
+        conn, project, dataset, model_name,
+    )
+    .await
+    {
+        Ok(Some(count)) => {
+            let obj_type = crate::runtime::inspect::bigquery::resolve_normalized_type(
+                conn, project, dataset, model_name,
+            )
+            .await
+            .ok()
+            .flatten();
+            (Some(count), obj_type)
+        }
+        Ok(None) => (None, None),
+        Err(e) => {
+            tracing::warn!(error = %e, "inspection: failed to fetch row count");
+            (None, None)
+        }
+    }
+}
+
+/// Fetches row count after sync.
+async fn fetch_row_count_after(
+    conn: &dyn crate::runtime::kind::connection::Connection,
+    project: &str,
+    dataset: &str,
+    model_name: &str,
+) -> Option<serde_json::Value> {
+    match crate::runtime::inspect::bigquery::fetch_row_count_value(
+        conn, project, dataset, model_name,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "inspection: failed to fetch row count");
+            None
+        }
+    }
+}
+
+/// Writes an inspection file. Failures are logged as warnings
+/// and do not block the sync workflow.
+#[allow(clippy::too_many_arguments)]
+fn write_inspection(
+    nagi_dir: Option<&Path>,
+    asset_name: &str,
+    execution_id: &str,
+    finished_at: &str,
+    object_type: Option<&str>,
+    model_name: &str,
+    row_count_before: Option<serde_json::Value>,
+    row_count_after: Option<serde_json::Value>,
+) {
+    let Some(nagi_dir) = nagi_dir else {
+        return;
+    };
+
+    let mut inspection = crate::runtime::inspect::SyncInspection::new(
+        execution_id.to_string(),
+        asset_name.to_string(),
+        finished_at.to_string(),
+    );
+
+    if let (Some(before), Some(after)) = (row_count_before, row_count_after) {
+        let item_type = match object_type {
+            Some(t) => format!("{t} row count"),
+            None => "row count".to_string(),
+        };
+        inspection
+            .comparisons
+            .push(crate::runtime::inspect::ComparisonItem {
+                item_type,
+                name: model_name.to_string(),
+                before,
+                after,
+            });
+    }
+
+    let store = crate::runtime::inspect::InspectionStore::new(nagi_dir);
+    if let Err(e) = store.write(&inspection) {
+        tracing::warn!(error = %e, "inspection: failed to write inspection file");
+    }
 }
 
 #[cfg(test)]
@@ -962,5 +1145,72 @@ mod tests {
         .await;
 
         assert!(cache_dir.join("test-asset.json").exists());
+    }
+
+    #[tokio::test]
+    async fn re_evaluate_and_link_without_cache_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LogStore::open_in_memory(dir.path()).unwrap();
+        let compiled = test_compiled_asset();
+
+        re_evaluate_and_link(&compiled, Some(&store), None, "exec-1", test_timeout()).await;
+    }
+
+    // ── connect_for_inspection ──────────────────────────────────────
+
+    #[test]
+    fn connect_for_inspection_returns_none_without_connection() {
+        let compiled = test_compiled_asset();
+        assert!(connect_for_inspection(&compiled, test_timeout()).is_none());
+    }
+
+    // ── write_inspection ────────────────────────────────────────────
+
+    const TEST_FINISHED_AT: &str = "2026-04-16T09:30:00.000Z";
+
+    #[test]
+    fn write_inspection_skips_when_nagi_dir_is_none() {
+        write_inspection(
+            None,
+            "test-asset",
+            "exec-001",
+            TEST_FINISHED_AT,
+            None,
+            "test-asset",
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn write_inspection_creates_file_with_row_count() {
+        let dir = tempfile::tempdir().unwrap();
+        write_inspection(
+            Some(dir.path()),
+            "my-asset",
+            "exec-001",
+            TEST_FINISHED_AT,
+            Some("table"),
+            "daily_sales",
+            Some(serde_json::json!(100)),
+            Some(serde_json::json!(200)),
+        );
+
+        let asset_dir = dir.path().join("inspections/my-asset");
+        let files: Vec<_> = std::fs::read_dir(&asset_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(files.len(), 1);
+
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(files[0].path()).unwrap()).unwrap();
+        assert_eq!(content["asset_name"], "my-asset");
+        assert_eq!(content["execution_id"], "exec-001");
+        assert_eq!(content["comparisons"].as_array().unwrap().len(), 1);
+        assert_eq!(content["comparisons"][0]["type"], "table row count");
+        assert_eq!(content["comparisons"][0]["name"], "daily_sales");
+        assert_eq!(content["comparisons"][0]["before"], 100);
+        assert_eq!(content["comparisons"][0]["after"], 200);
     }
 }
