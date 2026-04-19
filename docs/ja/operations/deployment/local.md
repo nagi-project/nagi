@@ -12,7 +12,7 @@ nagi serve
 
 ## Storage Backend
 
-デフォルトの `local` バックエンドを使用します。状態データは `nagiDir`（デフォルト: `~/.nagi`）に保存されます。
+デフォルトの `local` バックエンドを使用します。状態データは `stateDir`（デフォルト: `~/.nagi`）に保存されます。
 
 ```yaml
 # nagi.yaml

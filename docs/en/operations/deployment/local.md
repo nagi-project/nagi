@@ -12,7 +12,7 @@ nagi serve
 
 ## Storage Backend
 
-Uses the default `local` backend. State data is stored in `nagiDir` (default: `~/.nagi`).
+Uses the default `local` backend. State data is stored in `stateDir` (default: `~/.nagi`).
 
 ```yaml
 # nagi.yaml
