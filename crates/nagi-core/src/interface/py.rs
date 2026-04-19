@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
+use crate::runtime::config::InitConfigResult;
 use crate::runtime::kind::connection::dbt::DbtProfilesFile;
 
 static TOKIO_RT: LazyLock<tokio::runtime::Runtime> =
@@ -80,10 +81,10 @@ fn compile_assets(
     let resources_path = std::path::Path::new(resources_dir);
     let target_path = std::path::Path::new(target_dir);
     let config = project_dir
-        .map(|d| crate::runtime::config::load_config(std::path::Path::new(d)))
+        .map(|d| crate::runtime::config::load_config_from_dir(std::path::Path::new(d)))
         .transpose()
         .map_err(to_py_err)?;
-    let export_config = config.as_ref().and_then(|c| c.export.as_ref());
+    let export_config = config.as_ref().and_then(|c| c.project.export.as_ref());
     let output = crate::runtime::compile::compile(resources_path, target_path, export_config)
         .map_err(to_py_err)?;
     let summary = serde_json::json!({
@@ -215,13 +216,13 @@ fn asset_status(
     logs_dir: Option<&str>,
     suspended_dir: Option<&str>,
 ) -> PyResult<String> {
-    let config = crate::runtime::config::load_config(project_dir()).map_err(to_py_err)?;
+    let config = crate::runtime::config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
     let db = db_path
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| config.nagi_dir.db_path());
+        .unwrap_or_else(|| config.project.nagi_dir.log_store_path());
     let logs = logs_dir
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| config.nagi_dir.logs_dir());
+        .unwrap_or_else(|| config.project.nagi_dir.logs_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     let result = crate::runtime::status::asset_status(
@@ -231,7 +232,7 @@ fn asset_status(
         Some(
             cache_dir
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| config.nagi_dir.evaluate_cache_dir())
+                .unwrap_or_else(|| config.project.nagi_dir.evaluate_cache_dir())
                 .as_path(),
         ),
         &db,
@@ -239,7 +240,7 @@ fn asset_status(
         Some(
             suspended_dir
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| config.nagi_dir.suspended_dir())
+                .unwrap_or_else(|| config.project.nagi_dir.suspended_dir())
                 .as_path(),
         ),
     )
@@ -253,7 +254,7 @@ fn asset_status(
 #[pyfunction]
 #[pyo3(signature = (select=None))]
 fn export_dry_run(select: Option<&str>) -> PyResult<String> {
-    let config = crate::runtime::config::load_config(project_dir()).map_err(to_py_err)?;
+    let config = crate::runtime::config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
     let results =
         crate::interface::export::dry_run_for_config(&config, select).map_err(to_py_err)?;
     serde_json::to_string(&results).map_err(to_py_err)
@@ -264,7 +265,7 @@ fn export_dry_run(select: Option<&str>) -> PyResult<String> {
 #[pyo3(signature = (select=None, resources_dir="resources"))]
 fn export_logs(select: Option<&str>, resources_dir: &str) -> PyResult<String> {
     let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
-    let config = crate::runtime::config::load_config(project_dir()).map_err(to_py_err)?;
+    let config = crate::runtime::config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
     let results = rt
         .block_on(crate::interface::export::export_for_config(
             &config,
@@ -292,13 +293,53 @@ fn try_export(resources_dir: &str, project_dir: &str) {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
+#[pyclass(eq, eq_int, skip_from_py_object, name = "OriginType")]
+#[derive(Clone, PartialEq)]
+enum PyOriginType {
+    Dbt = 0,
+}
+
+#[pymethods]
+impl PyOriginType {
+    #[getter]
+    fn label(&self) -> &str {
+        match self {
+            Self::Dbt => "dbt project",
+        }
+    }
+}
+
+#[pyclass(eq, eq_int, skip_from_py_object, name = "InitConfigResult")]
+#[derive(Clone, PartialEq)]
+enum PyInitConfigResult {
+    Local = 0,
+    Uploaded = 1,
+    Skipped = 2,
+}
+
+impl From<InitConfigResult> for PyInitConfigResult {
+    fn from(r: InitConfigResult) -> Self {
+        match r {
+            InitConfigResult::Local => Self::Local,
+            InitConfigResult::Uploaded => Self::Uploaded,
+            InitConfigResult::Skipped => Self::Skipped,
+        }
+    }
+}
+
 #[pyfunction]
-#[pyo3(signature = (base_dir=".", nagi_dir=None))]
-fn init_workspace(base_dir: &str, nagi_dir: Option<&str>) -> PyResult<()> {
+#[pyo3(signature = (base_dir=".", nagi_dir=None, force=false))]
+fn init_workspace(
+    base_dir: &str,
+    nagi_dir: Option<&str>,
+    force: bool,
+) -> PyResult<PyInitConfigResult> {
     let nd = nagi_dir
         .map(|d| crate::runtime::config::NagiDir::new(std::path::PathBuf::from(d)))
         .unwrap_or_else(crate::runtime::config::default_nagi_dir);
-    crate::interface::init::init_workspace(std::path::Path::new(base_dir), &nd).map_err(to_py_err)
+    let result = crate::interface::init::init_workspace(std::path::Path::new(base_dir), &nd, force)
+        .map_err(to_py_err)?;
+    Ok(result.into())
 }
 
 #[pyfunction]
@@ -472,6 +513,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(export_dry_run, m)?)?;
     m.add_function(wrap_pyfunction!(export_logs, m)?)?;
     m.add_function(wrap_pyfunction!(try_export, m)?)?;
+    m.add_class::<PyOriginType>()?;
+    m.add_class::<PyInitConfigResult>()?;
     m.add_function(wrap_pyfunction!(init_workspace, m)?)?;
     m.add_function(wrap_pyfunction!(run_dbt_debug, m)?)?;
     m.add_function(wrap_pyfunction!(write_init_dbt_files, m)?)?;

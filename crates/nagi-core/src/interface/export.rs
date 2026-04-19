@@ -17,9 +17,9 @@ pub(crate) fn dry_run_for_config(
         None => vec![],
     };
     dry_run_all(
-        &config.nagi_dir.db_path(),
-        &config.nagi_dir.logs_dir(),
-        &config.nagi_dir.watermarks_dir(),
+        &config.project.nagi_dir.log_store_path(),
+        &config.project.nagi_dir.logs_dir(),
+        &config.project.nagi_dir.watermarks_dir(),
         &tables,
     )
 }
@@ -30,7 +30,7 @@ pub(crate) async fn export_for_config(
     resources_dir: &Path,
     select: Option<&str>,
 ) -> Result<Vec<ExportResult>, ExportError> {
-    let export_config = config.export.as_ref().ok_or_else(|| {
+    let export_config = config.project.export.as_ref().ok_or_else(|| {
         ExportError::Io(std::io::Error::other("export not configured in nagi.yaml"))
     })?;
 
@@ -39,10 +39,10 @@ pub(crate) async fn export_for_config(
         None => vec![],
     };
 
-    let log_store = LogStore::open(&config.nagi_dir.db_path(), &config.nagi_dir.logs_dir())?;
+    let log_store = LogStore::from_nagi_dir(&config.project.nagi_dir)?;
     let conn = resolve_export_connection(resources_dir, &export_config.connection)?;
     let remote_store = crate::runtime::storage::remote::create_remote_store(&config.backend).ok();
-    let wm_dir = config.nagi_dir.watermarks_dir();
+    let wm_dir = config.project.nagi_dir.watermarks_dir();
 
     Ok(export_all(
         &log_store,
@@ -58,24 +58,21 @@ pub(crate) async fn export_for_config(
 /// Runs export if configured and enough time has elapsed since the last export.
 /// Failures are logged as warnings and do not propagate.
 pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
-    let config = match crate::runtime::config::load_config(project_dir) {
+    let config = match crate::runtime::config::load_config_from_dir(project_dir) {
         Ok(c) => c,
         Err(_) => return,
     };
-    let export_config = match config.export {
+    let export_config = match config.project.export {
         Some(ref c) => c,
         None => return,
     };
 
-    let wm_dir = config.nagi_dir.watermarks_dir();
+    let wm_dir = config.project.nagi_dir.watermarks_dir();
     if !should_export(&wm_dir, &export_config.interval) {
         return;
     }
 
-    let db_path = config.nagi_dir.db_path();
-    let logs_dir = config.nagi_dir.logs_dir();
-
-    let log_store = match LogStore::open(&db_path, &logs_dir) {
+    let log_store = match LogStore::from_nagi_dir(&config.project.nagi_dir) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(%e, "export: failed to open log store");
@@ -116,11 +113,14 @@ pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::config::{NagiConfig, NagiDir};
+    use crate::runtime::config::{NagiConfig, NagiDir, ProjectConfig};
 
     fn config_with_tmpdir(dir: &std::path::Path) -> NagiConfig {
         NagiConfig {
-            nagi_dir: NagiDir::new(dir.to_path_buf()),
+            project: ProjectConfig {
+                nagi_dir: NagiDir::new(dir.to_path_buf()),
+                ..ProjectConfig::default()
+            },
             ..NagiConfig::default()
         }
     }
@@ -161,7 +161,7 @@ mod tests {
     async fn export_for_config_without_export_config_returns_error() {
         let tmp = tempfile::tempdir().unwrap();
         let config = config_with_tmpdir(tmp.path());
-        // config.export is None by default.
+        // config.project.export is None by default.
 
         let result = export_for_config(&config, tmp.path(), None).await;
         assert!(result.is_err());

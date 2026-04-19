@@ -481,9 +481,11 @@ pub fn resolve_export_connection(
     )
     .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
-    let default_timeout = crate::runtime::config::load_config(resources_dir)
+    let default_timeout = crate::runtime::config::load_config_from_dir(resources_dir)
         .unwrap_or_default()
-        .default_timeout;
+        .project
+        .default_timeout
+        .clone();
     resolved
         .connect(default_timeout.as_std())
         .map_err(ExportError::Connection)

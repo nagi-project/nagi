@@ -20,7 +20,7 @@ chrono = "0.4"
 ureq = { version = "3", features = ["json"] }
 jsonwebtoken = { version = "10", features = ["rust_crypto"], optional = true }
 rsa = { version = "0.9", optional = true }
-sha2 = { version = "0.11", optional = true }
+sha2 = "0.11"
 base64 = { version = "0.22", optional = true }
 rusqlite = { version = "0.39", features = ["bundled"] }
 schemars = "1.2"
@@ -37,7 +37,7 @@ windows = { version = "0.62", features = ["Win32_System_Environment", "Win32_Sys
 default = ["bigquery", "snowflake"]
 python = ["pyo3"]
 bigquery = ["dep:jsonwebtoken"]
-snowflake = ["dep:jsonwebtoken", "dep:rsa", "dep:sha2", "dep:base64"]
+snowflake = ["dep:jsonwebtoken", "dep:rsa", "dep:base64"]
 
 [dev-dependencies]
 tempfile = "3"

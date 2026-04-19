@@ -354,7 +354,7 @@ fn write_lock_log(
     timestamp: &str,
 ) {
     let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
-    let log_store = match LogStore::open(&nagi_dir.db_path(), &nagi_dir.logs_dir()) {
+    let log_store = match LogStore::from_nagi_dir(&nagi_dir) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(error = %e, "failed to open log store for lock skip log");

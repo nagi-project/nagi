@@ -12,6 +12,9 @@ pub enum InitError {
     #[error("log error: {0}")]
     Log(#[from] LogError),
 
+    #[error("config error: {0}")]
+    Config(#[from] crate::runtime::config::ConfigError),
+
     #[error("dbt_project.yml not found in {0}")]
     DbtProjectNotFound(String),
 
@@ -79,19 +82,29 @@ fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
     Ok(())
 }
 
-/// Initialises the workspace: creates `resources/`, config, log store, and watermarks directory.
+/// Initialises the workspace: creates `resources/`, config, log store, watermarks directory,
+/// and uploads project config to remote backend (if configured).
+///
+/// When `force` is true, overwrites existing remote config.
 pub(crate) fn init_workspace(
     base_dir: &Path,
     nagi_dir: &crate::runtime::config::NagiDir,
-) -> Result<(), InitError> {
+    force: bool,
+) -> Result<crate::runtime::config::InitConfigResult, InitError> {
     ensure_resources_dir(base_dir)?;
     ensure_config(nagi_dir.root())?;
-    let db_path = nagi_dir.db_path();
+    let db_path = nagi_dir.log_store_path();
     let logs_dir = nagi_dir.logs_dir();
     let watermarks_dir = nagi_dir.watermarks_dir();
     ensure_log_store_with_watermarks(&db_path, &logs_dir, &watermarks_dir)?;
     ensure_watermarks_dir(&watermarks_dir)?;
-    Ok(())
+    let local_config = crate::runtime::config::load_local_config(base_dir)?;
+    let store = crate::runtime::config::build_project_config_store(&local_config.backend)?;
+    let store_ref = store
+        .as_ref()
+        .map(|s| s as &dyn crate::runtime::storage::ProjectConfigStore);
+    let result = crate::runtime::config::init_config(base_dir, store_ref, force)?;
+    Ok(result)
 }
 
 /// Builds a Connection YAML string from profile and target.
@@ -369,9 +382,9 @@ mod tests {
     fn init_workspace_creates_all() {
         let dir = tempfile::tempdir().unwrap();
         let nagi_dir = crate::runtime::config::NagiDir::new(dir.path().join(".nagi"));
-        init_workspace(dir.path(), &nagi_dir).unwrap();
+        init_workspace(dir.path(), &nagi_dir, false).unwrap();
         assert!(dir.path().join("resources").exists());
-        assert!(nagi_dir.db_path().exists());
+        assert!(nagi_dir.log_store_path().exists());
         assert!(nagi_dir.watermarks_dir().exists());
     }
 

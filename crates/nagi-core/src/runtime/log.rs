@@ -107,6 +107,13 @@ impl LogStore {
         })
     }
 
+    /// Opens (or creates) the log store using paths derived from a `NagiDir`.
+    pub(crate) fn from_nagi_dir(
+        nagi_dir: &crate::runtime::config::NagiDir,
+    ) -> Result<Self, LogError> {
+        Self::open(&nagi_dir.log_store_path(), &nagi_dir.logs_dir())
+    }
+
     /// Executes a SQL query that returns a single scalar i64 value.
     pub fn query_row(&self, sql: &str, params: impl rusqlite::Params) -> Result<i64, LogError> {
         Ok(self.conn.query_row(sql, params, |row| row.get(0))?)

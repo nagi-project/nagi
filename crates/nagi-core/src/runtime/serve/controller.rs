@@ -34,8 +34,8 @@ pub(super) struct BackendStores {
 /// Returns `None` if no project dir, no config, or no Slack config.
 pub(super) fn build_notifier(project_dir: Option<&Path>) -> Option<Arc<dyn Notifier>> {
     let dir = project_dir?;
-    let config = crate::runtime::config::load_config(dir).ok()?;
-    let slack = config.notify.slack?;
+    let config = crate::runtime::config::load_config_from_dir(dir).ok()?;
+    let slack = config.project.notify.slack.clone()?;
     Some(Arc::new(crate::runtime::notify::slack::SlackNotifier::new(
         slack.channel,
     )) as Arc<dyn Notifier>)

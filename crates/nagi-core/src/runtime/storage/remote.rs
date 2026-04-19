@@ -5,11 +5,13 @@ use std::time::Duration;
 use object_store::path::Path as OsPath;
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions};
 
-use crate::runtime::config::BackendConfig;
+use crate::runtime::config::{BackendConfig, BackendType};
 use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::serve::SuspendedInfo;
 use crate::runtime::storage::lock::LockInfo;
-use crate::runtime::storage::{Cache, ReadinessStore, StorageError, SuspendedStore, SyncLock};
+use crate::runtime::storage::{
+    Cache, ProjectConfigStore, ReadinessStore, StorageError, SuspendedStore, SyncLock,
+};
 
 /// Remote storage backend backed by an `ObjectStore` (GCS or S3).
 ///
@@ -192,6 +194,34 @@ impl ReadinessStore for RemoteObjectStore {
     }
 }
 
+impl ProjectConfigStore for RemoteObjectStore {
+    fn write_project_config(
+        &self,
+        config: &crate::runtime::config::ProjectConfig,
+    ) -> Result<(), StorageError> {
+        let path = self.resolve("nagi.yaml");
+        let yaml = serde_yaml::to_string(config).map_err(|e| StorageError::Yaml(e.to_string()))?;
+        block(self.store.put(&path, yaml.into_bytes().into())).map_err(remote_err)?;
+        Ok(())
+    }
+
+    fn read_project_config(
+        &self,
+    ) -> Result<Option<crate::runtime::config::ProjectConfig>, StorageError> {
+        let path = self.resolve("nagi.yaml");
+        match block(self.store.get(&path)) {
+            Ok(result) => {
+                let bytes = block(result.bytes()).map_err(remote_err)?;
+                let config: crate::runtime::config::ProjectConfig = serde_yaml::from_slice(&bytes)
+                    .map_err(|e| StorageError::Yaml(e.to_string()))?;
+                Ok(Some(config))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(remote_err(e)),
+        }
+    }
+}
+
 impl SyncLock for RemoteObjectStore {
     /// Attempts to acquire the lock using a conditional put (`PutMode::Create`).
     ///
@@ -344,9 +374,8 @@ pub fn create_remote_store(config: &BackendConfig) -> Result<RemoteObjectStore, 
         ))
     })?;
 
-    let store: Arc<dyn ObjectStore> = match config.r#type.as_str() {
-        "gcs" => {
-            // Credentials are resolved from the environment (ADC) at build time.
+    let store: Arc<dyn ObjectStore> = match config.backend_type {
+        BackendType::Gcs => {
             let store = object_store::gcp::GoogleCloudStorageBuilder::new()
                 .with_bucket_name(bucket)
                 .build()
@@ -355,13 +384,12 @@ pub fn create_remote_store(config: &BackendConfig) -> Result<RemoteObjectStore, 
                 })?;
             Arc::new(store)
         }
-        "s3" => {
+        BackendType::S3 => {
             let region = config.region.as_deref().ok_or_else(|| {
                 StorageError::Io(std::io::Error::other(
                     "backend.region is required for s3 backend",
                 ))
             })?;
-            // Credentials are resolved from the environment (env vars / IAM).
             let store = object_store::aws::AmazonS3Builder::from_env()
                 .with_bucket_name(bucket)
                 .with_region(region)
@@ -371,10 +399,10 @@ pub fn create_remote_store(config: &BackendConfig) -> Result<RemoteObjectStore, 
                 })?;
             Arc::new(store)
         }
-        t => {
-            return Err(StorageError::Io(std::io::Error::other(format!(
-                "unknown backend type: {t}"
-            ))))
+        BackendType::Local => {
+            return Err(StorageError::Io(std::io::Error::other(
+                "create_remote_store called with local backend",
+            )))
         }
     };
 
@@ -441,8 +469,11 @@ mod tests {
             }
         }
     }
+    use std::path::PathBuf;
+
+    use crate::runtime::config::{ExportConfig, NagiDir, NotifyConfig, ProjectConfig, SlackConfig};
     use crate::runtime::evaluate::{ConditionResult, ConditionStatus};
-    use crate::runtime::storage::{Cache, SuspendedStore, SyncLock};
+    use crate::runtime::storage::{Cache, ProjectConfigStore, SuspendedStore, SyncLock};
 
     fn in_memory_store(prefix: Option<&str>) -> RemoteObjectStore {
         RemoteObjectStore::new(
@@ -743,6 +774,66 @@ mod tests {
             new_bytes
         )
         .unwrap());
+    }
+
+    // ── ProjectConfigStore ───────────────────────────────────────────────────
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_store_write_and_read() {
+        let store = in_memory_store(None);
+        let config = crate::runtime::config::ProjectConfig {
+            lock_ttl_seconds: 999,
+            ..Default::default()
+        };
+        store.write_project_config(&config).unwrap();
+        let loaded = store.read_project_config().unwrap().unwrap();
+        assert_eq!(loaded.lock_ttl_seconds, 999);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_store_read_missing_returns_none() {
+        let store = in_memory_store(None);
+        assert!(store.read_project_config().unwrap().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_store_respects_prefix() {
+        let store = in_memory_store(Some("proj/nagi"));
+        let config = crate::runtime::config::ProjectConfig::default();
+        store.write_project_config(&config).unwrap();
+        let loaded = store.read_project_config().unwrap().unwrap();
+        assert_eq!(loaded, config);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_store_roundtrip_with_all_fields() {
+        let store = in_memory_store(None);
+        let config = ProjectConfig {
+            notify: NotifyConfig {
+                slack: Some(SlackConfig {
+                    channel: "#alerts".to_string(),
+                }),
+            },
+            termination_grace_period_seconds: Some(300),
+            max_controllers: Some(4),
+            lock_ttl_seconds: 120,
+            lock_retry_interval_seconds: 60,
+            lock_retry_max_attempts: 5,
+            max_evaluate_concurrency: Some(10),
+            max_sync_concurrency: Some(3),
+            nagi_dir: NagiDir::new(PathBuf::from("/tmp/nagi")),
+            export: Some(ExportConfig {
+                connection: "my-bq".to_string(),
+                dataset: "logs".to_string(),
+                format: crate::runtime::config::ExportFormat::Jsonl,
+                interval: crate::runtime::duration::Duration::from_secs(1800),
+                timeout: None,
+            }),
+            default_timeout: crate::runtime::duration::Duration::from_secs(1800),
+        };
+        store.write_project_config(&config).unwrap();
+        let loaded = store.read_project_config().unwrap().unwrap();
+        assert_eq!(loaded, config);
     }
 
     #[tokio::test(flavor = "multi_thread")]
