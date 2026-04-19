@@ -1,5 +1,4 @@
 import json
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,31 +34,13 @@ def _compile_resources(tmp_path: Path) -> Path:
 
 class TestStatusSuccess:
     @pytest.mark.parametrize(
-        "extra_args, expected_selectors, expected_cache_dir",
+        "extra_args, expected_selectors",
         [
-            pytest.param([], [], None, id="no-options"),
+            pytest.param([], [], id="no-options"),
             pytest.param(
                 ["--select", ASSET_NAME],
                 [ASSET_NAME],
-                None,
                 id="with-select",
-            ),
-            pytest.param(
-                ["--cache-dir", str(Path(tempfile.gettempdir()) / "custom-cache")],
-                [],
-                str(Path(tempfile.gettempdir()) / "custom-cache"),
-                id="with-cache-dir",
-            ),
-            pytest.param(
-                [
-                    "--select",
-                    ASSET_NAME,
-                    "--cache-dir",
-                    str(Path(tempfile.gettempdir()) / "c"),
-                ],
-                [ASSET_NAME],
-                str(Path(tempfile.gettempdir()) / "c"),
-                id="select-and-cache-dir",
             ),
         ],
     )
@@ -68,7 +49,6 @@ class TestStatusSuccess:
         tmp_path: Path,
         extra_args: list[str],
         expected_selectors: list[str],
-        expected_cache_dir: str | None,
     ) -> None:
         target_dir = _compile_resources(tmp_path)
 
@@ -86,7 +66,6 @@ class TestStatusSuccess:
         kwargs = mock.call_args.kwargs
         assert list(kwargs["selectors"]) == expected_selectors
         assert list(kwargs["excludes"]) == []
-        assert kwargs["cache_dir"] == expected_cache_dir
 
     def test_outputs_result_json(self, tmp_path: Path) -> None:
         target_dir = _compile_resources(tmp_path)

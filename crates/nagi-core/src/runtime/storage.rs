@@ -115,7 +115,7 @@ pub fn build_sync_lock(
 ) -> Result<std::sync::Arc<dyn SyncLock>, StorageError> {
     match config.backend.backend_type {
         BackendType::Local => Ok(std::sync::Arc::new(local::LocalSyncLock::new(
-            config.project.nagi_dir.locks_dir(),
+            config.project.state_dir.locks_dir(),
         ))),
         BackendType::Gcs | BackendType::S3 => Ok(std::sync::Arc::new(remote::create_remote_store(
             &config.backend,

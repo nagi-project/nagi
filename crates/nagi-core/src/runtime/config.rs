@@ -55,15 +55,15 @@ fn default_lock_retry_max_attempts() -> u32 {
     3
 }
 
-/// Newtype wrapper around the Nagi state directory path.
+/// State directory path. Contains logs, cache, locks, and other runtime data.
 /// Provides accessors for all well-known subdirectories.
 ///
 /// Deserializes from a plain string path (e.g. `"~/.nagi"` in YAML).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct NagiDir(PathBuf);
+pub struct StateDir(PathBuf);
 
-impl NagiDir {
+impl StateDir {
     pub fn new(path: PathBuf) -> Self {
         Self(path)
     }
@@ -101,24 +101,24 @@ impl NagiDir {
     }
 }
 
-impl Default for NagiDir {
+impl Default for StateDir {
     fn default() -> Self {
         Self(dirs::home_dir().unwrap_or_default().join(".nagi"))
     }
 }
 
-impl AsRef<Path> for NagiDir {
+impl AsRef<Path> for StateDir {
     fn as_ref(&self) -> &Path {
         &self.0
     }
 }
 
-pub fn default_nagi_dir() -> NagiDir {
-    NagiDir::default()
+pub fn default_state_dir() -> StateDir {
+    StateDir::default()
 }
 
-fn schema_default_nagi_dir() -> NagiDir {
-    NagiDir::new(PathBuf::from("~/.nagi"))
+fn schema_default_state_dir() -> StateDir {
+    StateDir::new(PathBuf::from("~/.nagi"))
 }
 
 /// Returns the default timeout from `nagi.yaml` in the current directory.
@@ -131,11 +131,11 @@ pub fn resolve_default_timeout() -> std::time::Duration {
         .as_std()
 }
 
-/// Loads config from `project_dir` and returns the resolved `NagiDir`.
+/// Loads config from `project_dir` and returns the resolved `StateDir`.
 /// Falls back to the default if the config file is missing or unreadable.
-pub fn resolve_nagi_dir(project_dir: &Path) -> NagiDir {
+pub fn resolve_state_dir(project_dir: &Path) -> StateDir {
     load_local_config(project_dir)
-        .map(|c| c.project.nagi_dir.clone())
+        .map(|c| c.project.state_dir.clone())
         .unwrap_or_default()
 }
 
@@ -231,8 +231,8 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub max_sync_concurrency: Option<usize>,
     #[serde(default)]
-    #[schemars(default = "schema_default_nagi_dir")]
-    pub nagi_dir: NagiDir,
+    #[schemars(default = "schema_default_state_dir")]
+    pub state_dir: StateDir,
     #[serde(default)]
     pub export: Option<ExportConfig>,
     #[serde(default = "default_timeout")]
@@ -250,7 +250,7 @@ impl Default for ProjectConfig {
             lock_retry_max_attempts: default_lock_retry_max_attempts(),
             max_evaluate_concurrency: None,
             max_sync_concurrency: None,
-            nagi_dir: NagiDir::default(),
+            state_dir: StateDir::default(),
             export: None,
             default_timeout: default_timeout(),
         }
@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(config.project.lock_retry_max_attempts, 3);
         assert!(config.project.max_evaluate_concurrency.is_none());
         assert!(config.project.max_sync_concurrency.is_none());
-        assert!(config.project.nagi_dir.root().ends_with(".nagi"));
+        assert!(config.project.state_dir.root().ends_with(".nagi"));
         assert!(config.project.export.is_none());
         assert_eq!(
             config.project.default_timeout.as_std(),
@@ -559,14 +559,14 @@ notify:
     }
 
     #[test]
-    fn load_custom_nagi_dir() {
+    fn load_custom_state_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "nagiDir: /tmp/my-nagi";
+        let yaml = "stateDir: /tmp/my-nagi";
         std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
         let config = load_local_config(dir.path()).unwrap();
         assert_eq!(
-            config.project.nagi_dir,
-            NagiDir::new(PathBuf::from("/tmp/my-nagi"))
+            config.project.state_dir,
+            StateDir::new(PathBuf::from("/tmp/my-nagi"))
         );
     }
 
@@ -650,45 +650,45 @@ export:
         assert_eq!(config.project.max_sync_concurrency, Some(2));
     }
 
-    // ── NagiDir ──────────────────────────────────────────────────────────
+    // ── StateDir ──────────────────────────────────────────────────────────
 
-    macro_rules! nagi_dir_path_test {
+    macro_rules! state_dir_path_test {
         ($($name:ident: $method:ident => $expected:expr;)*) => {
             $(
                 #[test]
                 fn $name() {
-                    let nd = NagiDir::new(PathBuf::from("/state"));
+                    let nd = StateDir::new(PathBuf::from("/state"));
                     assert_eq!(nd.$method(), PathBuf::from($expected));
                 }
             )*
         };
     }
 
-    nagi_dir_path_test! {
-        nagi_dir_log_store_path: log_store_path => "/state/logs.db";
-        nagi_dir_logs_dir:       logs_dir       => "/state/logs";
-        nagi_dir_locks_dir:      locks_dir      => "/state/locks";
-        nagi_dir_suspended_dir:  suspended_dir  => "/state/suspended";
-        nagi_dir_watermarks:     watermarks_dir => "/state/watermarks";
+    state_dir_path_test! {
+        state_dir_log_store_path: log_store_path => "/state/logs.db";
+        state_dir_logs_dir:       logs_dir       => "/state/logs";
+        state_dir_locks_dir:      locks_dir      => "/state/locks";
+        state_dir_suspended_dir:  suspended_dir  => "/state/suspended";
+        state_dir_watermarks:     watermarks_dir => "/state/watermarks";
     }
 
     #[test]
-    fn nagi_dir_default_ends_with_dot_nagi() {
-        let nd = NagiDir::default();
+    fn state_dir_default_ends_with_dot_nagi() {
+        let nd = StateDir::default();
         assert!(nd.root().ends_with(".nagi"));
     }
 
     #[test]
-    fn nagi_dir_as_ref_returns_root() {
-        let nd = NagiDir::new(PathBuf::from("/state"));
+    fn state_dir_as_ref_returns_root() {
+        let nd = StateDir::new(PathBuf::from("/state"));
         let p: &Path = nd.as_ref();
         assert_eq!(p, Path::new("/state"));
     }
 
     #[test]
-    fn nagi_dir_deserializes_from_string() {
-        let nd: NagiDir = serde_yaml::from_str("/custom/path").unwrap();
-        assert_eq!(nd, NagiDir::new(PathBuf::from("/custom/path")));
+    fn state_dir_deserializes_from_string() {
+        let nd: StateDir = serde_yaml::from_str("/custom/path").unwrap();
+        assert_eq!(nd, StateDir::new(PathBuf::from("/custom/path")));
     }
 
     // ── ProjectConfig ────────────────────────────────────────────────────
@@ -707,7 +707,7 @@ lockRetryIntervalSeconds: 60
 lockRetryMaxAttempts: 5
 maxEvaluateConcurrency: 5
 maxSyncConcurrency: 2
-nagiDir: /tmp/my-nagi
+stateDir: /tmp/my-nagi
 defaultTimeout: 30m
 export:
   connection: my-bq
@@ -781,7 +781,7 @@ export:
     }
 
     #[test]
-    fn save_hash_creates_dot_nagi_dir() {
+    fn save_hash_creates_dot_state_dir() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("nagi.yaml"), "").unwrap();
         save_config_hash(dir.path()).unwrap();

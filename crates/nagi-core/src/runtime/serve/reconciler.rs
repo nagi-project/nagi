@@ -39,14 +39,14 @@ pub async fn evaluate_and_cache(
         })
         .transpose()?;
 
-    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
+    let state_dir = crate::runtime::config::resolve_state_dir(std::path::Path::new("."));
     let cache_path = cache_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| nagi_dir.evaluate_cache_dir());
+        .unwrap_or_else(|| state_dir.evaluate_cache_dir());
     let evaluate_cache = LocalCache::new(cache_path);
 
     // Condition-level TTL cache: collect still-valid cached results.
-    let condition_cache = LocalConditionCache::new(nagi_dir.evaluate_cache_dir());
+    let condition_cache = LocalConditionCache::new(state_dir.evaluate_cache_dir());
     let cached_conditions = if skip_cache {
         HashMap::new()
     } else {
@@ -353,8 +353,8 @@ fn write_lock_log(
     status: &str,
     timestamp: &str,
 ) {
-    let nagi_dir = crate::runtime::config::resolve_nagi_dir(std::path::Path::new("."));
-    let log_store = match LogStore::from_nagi_dir(&nagi_dir) {
+    let state_dir = crate::runtime::config::resolve_state_dir(std::path::Path::new("."));
+    let log_store = match LogStore::from_state_dir(&state_dir) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(error = %e, "failed to open log store for lock skip log");

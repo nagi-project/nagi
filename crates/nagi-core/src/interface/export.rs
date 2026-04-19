@@ -17,9 +17,9 @@ pub(crate) fn dry_run_for_config(
         None => vec![],
     };
     dry_run_all(
-        &config.project.nagi_dir.log_store_path(),
-        &config.project.nagi_dir.logs_dir(),
-        &config.project.nagi_dir.watermarks_dir(),
+        &config.project.state_dir.log_store_path(),
+        &config.project.state_dir.logs_dir(),
+        &config.project.state_dir.watermarks_dir(),
         &tables,
     )
 }
@@ -39,10 +39,10 @@ pub(crate) async fn export_for_config(
         None => vec![],
     };
 
-    let log_store = LogStore::from_nagi_dir(&config.project.nagi_dir)?;
+    let log_store = LogStore::from_state_dir(&config.project.state_dir)?;
     let conn = resolve_export_connection(resources_dir, &export_config.connection)?;
     let remote_store = crate::runtime::storage::remote::create_remote_store(&config.backend).ok();
-    let wm_dir = config.project.nagi_dir.watermarks_dir();
+    let wm_dir = config.project.state_dir.watermarks_dir();
 
     Ok(export_all(
         &log_store,
@@ -67,12 +67,12 @@ pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
         None => return,
     };
 
-    let wm_dir = config.project.nagi_dir.watermarks_dir();
+    let wm_dir = config.project.state_dir.watermarks_dir();
     if !should_export(&wm_dir, &export_config.interval) {
         return;
     }
 
-    let log_store = match LogStore::from_nagi_dir(&config.project.nagi_dir) {
+    let log_store = match LogStore::from_state_dir(&config.project.state_dir) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(%e, "export: failed to open log store");
@@ -113,12 +113,12 @@ pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::config::{NagiConfig, NagiDir, ProjectConfig};
+    use crate::runtime::config::{NagiConfig, ProjectConfig, StateDir};
 
     fn config_with_tmpdir(dir: &std::path::Path) -> NagiConfig {
         NagiConfig {
             project: ProjectConfig {
-                nagi_dir: NagiDir::new(dir.to_path_buf()),
+                state_dir: StateDir::new(dir.to_path_buf()),
                 ..ProjectConfig::default()
             },
             ..NagiConfig::default()

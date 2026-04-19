@@ -26,7 +26,7 @@ mod state;
 mod suspended;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -46,7 +46,7 @@ use controller::{
 use suspended::{list_suspended, remove_suspended, suspended_path};
 
 use crate::runtime::config::{
-    load_config_from_dir, BackendConfig, BackendType, NagiConfig, NagiDir,
+    load_config_from_dir, BackendConfig, BackendType, NagiConfig, StateDir,
 };
 use crate::runtime::export::{export_all, resolve_export_connection};
 use crate::runtime::storage::local::{LocalReadinessStore, LocalSuspendedStore, LocalSyncLock};
@@ -83,7 +83,6 @@ pub async fn serve(
     target_dir: &Path,
     selectors: &[&str],
     excludes: &[&str],
-    cache_dir: Option<&Path>,
     project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
     let config = load_config_from_dir(project_dir.unwrap_or(Path::new(".")))
@@ -97,7 +96,7 @@ pub async fn serve(
         "compiled"
     );
 
-    let inputs = load_controller_inputs(target_dir, selectors, excludes, &config, cache_dir)?;
+    let inputs = load_controller_inputs(target_dir, selectors, excludes, &config)?;
     let (shutdown_tx, handles) = spawn_controllers(inputs, &config, project_dir)?;
 
     tracing::info!(
@@ -127,7 +126,6 @@ fn load_controller_inputs(
     selectors: &[&str],
     excludes: &[&str],
     config: &NagiConfig,
-    cache_dir: Option<&Path>,
 ) -> Result<Vec<controller::ControllerInput>, ServeError> {
     let assets = load_compiled_assets(target_dir, selectors, excludes)?;
 
@@ -138,13 +136,9 @@ fn load_controller_inputs(
 
     validate_controller_count(inputs.len(), config.project.max_controllers)?;
 
-    let resolved_cache = Some(
-        cache_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(|| config.project.nagi_dir.evaluate_cache_dir()),
-    );
+    let cache_dir = config.project.state_dir.evaluate_cache_dir();
     for input in &mut inputs {
-        input.cache_dir = resolved_cache.clone();
+        input.cache_dir = Some(cache_dir.clone());
     }
 
     Ok(inputs)
@@ -179,7 +173,7 @@ fn spawn_controllers(
     for input in inputs {
         let rx = shutdown_tx.subscribe();
         let n = notifier.clone();
-        let store = LogStore::from_nagi_dir(&config.project.nagi_dir)
+        let store = LogStore::from_state_dir(&config.project.state_dir)
             .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
         let backend = base_backend.clone();
         let ctrl_config = controller::ControllerConfig {
@@ -209,9 +203,9 @@ async fn export_on_shutdown(config: &NagiConfig, resources_dir: &Path) {
     };
 
     tracing::info!("exporting logs before shutdown...");
-    let wm_dir = config.project.nagi_dir.watermarks_dir();
+    let wm_dir = config.project.state_dir.watermarks_dir();
 
-    let log_store = match LogStore::from_nagi_dir(&config.project.nagi_dir) {
+    let log_store = match LogStore::from_state_dir(&config.project.state_dir) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(%e, "failed to open log store for export");
@@ -246,17 +240,17 @@ async fn export_on_shutdown(config: &NagiConfig, resources_dir: &Path) {
 /// Creates [`BackendStores`] from the backend config.
 fn build_backend_stores(config: &NagiConfig) -> Result<BackendStores, ServeError> {
     match config.backend.backend_type {
-        BackendType::Local => build_local_backend_stores(&config.project.nagi_dir),
+        BackendType::Local => build_local_backend_stores(&config.project.state_dir),
         BackendType::Gcs | BackendType::S3 => build_remote_backend_stores(&config.backend),
     }
 }
 
-fn build_local_backend_stores(nagi_dir: &NagiDir) -> Result<BackendStores, ServeError> {
-    let sync_lock: Arc<dyn SyncLock> = Arc::new(LocalSyncLock::new(nagi_dir.locks_dir()));
+fn build_local_backend_stores(state_dir: &StateDir) -> Result<BackendStores, ServeError> {
+    let sync_lock: Arc<dyn SyncLock> = Arc::new(LocalSyncLock::new(state_dir.locks_dir()));
     let suspended_store: Arc<dyn SuspendedStore> =
-        Arc::new(LocalSuspendedStore::new(nagi_dir.suspended_dir()));
+        Arc::new(LocalSuspendedStore::new(state_dir.suspended_dir()));
     let readiness_store: Arc<dyn ReadinessStore> =
-        Arc::new(LocalReadinessStore::new(nagi_dir.readiness_dir()));
+        Arc::new(LocalReadinessStore::new(state_dir.readiness_dir()));
     Ok(BackendStores {
         sync_lock,
         suspended_store,
@@ -277,8 +271,8 @@ fn build_remote_backend_stores(backend: &BackendConfig) -> Result<BackendStores,
 ///
 /// If `selectors` is empty, lists suspended assets without removing.
 /// If `selectors` is non-empty, removes the suspended flag for each matching asset.
-pub fn resume(selectors: &[&str], nagi_dir: &NagiDir) -> Result<Vec<String>, std::io::Error> {
-    let dir = nagi_dir.suspended_dir();
+pub fn resume(selectors: &[&str], state_dir: &StateDir) -> Result<Vec<String>, std::io::Error> {
+    let dir = state_dir.suspended_dir();
     if selectors.is_empty() {
         let items = list_suspended(&dir)?;
         return Ok(items.into_iter().map(|i| i.asset_name).collect());
@@ -300,10 +294,10 @@ pub fn resume(selectors: &[&str], nagi_dir: &NagiDir) -> Result<Vec<String>, std
 pub fn halt(
     target_dir: &Path,
     reason: &str,
-    nagi_dir: &NagiDir,
+    state_dir: &StateDir,
 ) -> Result<Vec<String>, ServeError> {
     let asset_names = resolve_compiled_asset_names(target_dir, &[], &[])?;
-    let store = LocalSuspendedStore::new(nagi_dir.suspended_dir());
+    let store = LocalSuspendedStore::new(state_dir.suspended_dir());
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut halted = Vec::new();
@@ -386,7 +380,7 @@ mod tests {
         setup_target(&target, &["a", "b"], &[]);
 
         let config = crate::runtime::config::NagiConfig::default();
-        let inputs = load_controller_inputs(&target, &[], &[], &config, None).unwrap();
+        let inputs = load_controller_inputs(&target, &[], &[], &config).unwrap();
         // Two independent assets → two components
         assert_eq!(inputs.len(), 2);
         assert!(inputs[0].cache_dir.is_some());
@@ -405,21 +399,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let err = load_controller_inputs(&target, &[], &[], &config, None).unwrap_err();
+        let err = load_controller_inputs(&target, &[], &[], &config).unwrap_err();
         assert!(err.to_string().contains("3 connected components"));
-    }
-
-    #[test]
-    fn load_controller_inputs_respects_cache_dir_override() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target");
-        setup_target(&target, &["a"], &[]);
-
-        let config = crate::runtime::config::NagiConfig::default();
-        let custom = dir.path().join("custom-cache");
-        let inputs =
-            load_controller_inputs(&target, &[], &[], &config, Some(custom.as_path())).unwrap();
-        assert_eq!(inputs[0].cache_dir, Some(custom));
     }
 
     #[test]

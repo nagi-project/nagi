@@ -41,7 +41,8 @@ class TestEvaluateDbtOrigin:
         expected_asset: str,
     ) -> None:
         output = evaluate_project(
-            compiled_project, select=selector, cache_dir=tmp_path / "cache"
+            compiled_project,
+            select=selector,
         )
         asset_names = [r["assetName"] for r in output]
         assert expected_asset in asset_names
@@ -117,7 +118,6 @@ class TestEvaluateDbtOrigin:
         output = evaluate_project(
             compiled_project,
             select="analytics.stg_customers",
-            cache_dir=tmp_path / "cache",
         )
         assert len(output) == 1
         assert output[0]["ready"] is True

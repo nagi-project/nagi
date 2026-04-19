@@ -107,11 +107,11 @@ impl LogStore {
         })
     }
 
-    /// Opens (or creates) the log store using paths derived from a `NagiDir`.
-    pub(crate) fn from_nagi_dir(
-        nagi_dir: &crate::runtime::config::NagiDir,
+    /// Opens (or creates) the log store using paths derived from a `StateDir`.
+    pub(crate) fn from_state_dir(
+        state_dir: &crate::runtime::config::StateDir,
     ) -> Result<Self, LogError> {
-        Self::open(&nagi_dir.log_store_path(), &nagi_dir.logs_dir())
+        Self::open(&state_dir.log_store_path(), &state_dir.logs_dir())
     }
 
     /// Executes a SQL query that returns a single scalar i64 value.

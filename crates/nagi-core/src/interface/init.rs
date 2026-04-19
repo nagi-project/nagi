@@ -28,10 +28,10 @@ fn ensure_resources_dir(base_dir: &Path) -> Result<(), InitError> {
     Ok(())
 }
 
-/// Creates `{nagi_dir}/config.yaml` with default content if it does not exist.
-fn ensure_config(nagi_dir: &Path) -> Result<(), InitError> {
-    std::fs::create_dir_all(nagi_dir)?;
-    let config_path = nagi_dir.join("config.yaml");
+/// Creates `{state_dir}/config.yaml` with default content if it does not exist.
+fn ensure_config(state_dir: &Path) -> Result<(), InitError> {
+    std::fs::create_dir_all(state_dir)?;
+    let config_path = state_dir.join("config.yaml");
     if !config_path.exists() {
         std::fs::write(&config_path, "backend:\n  type: local\n")?;
     }
@@ -88,14 +88,14 @@ fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
 /// When `force` is true, overwrites existing remote config.
 pub(crate) fn init_workspace(
     base_dir: &Path,
-    nagi_dir: &crate::runtime::config::NagiDir,
+    state_dir: &crate::runtime::config::StateDir,
     force: bool,
 ) -> Result<crate::runtime::config::InitConfigResult, InitError> {
     ensure_resources_dir(base_dir)?;
-    ensure_config(nagi_dir.root())?;
-    let db_path = nagi_dir.log_store_path();
-    let logs_dir = nagi_dir.logs_dir();
-    let watermarks_dir = nagi_dir.watermarks_dir();
+    ensure_config(state_dir.root())?;
+    let db_path = state_dir.log_store_path();
+    let logs_dir = state_dir.logs_dir();
+    let watermarks_dir = state_dir.watermarks_dir();
     ensure_log_store_with_watermarks(&db_path, &logs_dir, &watermarks_dir)?;
     ensure_watermarks_dir(&watermarks_dir)?;
     let local_config = crate::runtime::config::load_local_config(base_dir)?;
@@ -381,11 +381,11 @@ mod tests {
     #[test]
     fn init_workspace_creates_all() {
         let dir = tempfile::tempdir().unwrap();
-        let nagi_dir = crate::runtime::config::NagiDir::new(dir.path().join(".nagi"));
-        init_workspace(dir.path(), &nagi_dir, false).unwrap();
+        let state_dir = crate::runtime::config::StateDir::new(dir.path().join(".nagi"));
+        init_workspace(dir.path(), &state_dir, false).unwrap();
         assert!(dir.path().join("resources").exists());
-        assert!(nagi_dir.log_store_path().exists());
-        assert!(nagi_dir.watermarks_dir().exists());
+        assert!(state_dir.log_store_path().exists());
+        assert!(state_dir.watermarks_dir().exists());
     }
 
     #[test]

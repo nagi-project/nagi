@@ -7,7 +7,7 @@ import pytest
 
 from tests.scenario.helper import (
     ServeProcess,
-    init_nagi_dir,
+    init_state_dir,
     start_serve,
     write_project,
 )
@@ -29,7 +29,7 @@ def run_serve(serve_project: Path) -> Generator[StartServe]:
     def _start(resources: dict[str, str]) -> Path:
         nonlocal serve
         write_project(serve_project, resources)
-        init_nagi_dir(serve_project)
+        init_state_dir(serve_project)
         serve = start_serve(serve_project)
         return serve_project
 

@@ -18,7 +18,7 @@ from typing import IO, Any
 from tests.helper import ARGS_SLEEP_2, CMD_TRUE
 
 
-def init_nagi_dir(project: Path) -> None:
+def init_state_dir(project: Path) -> None:
     from nagi_cli._nagi_core import init_workspace
 
     init_workspace(str(project), str(project / ".nagi"))
@@ -33,9 +33,9 @@ def write_project(
     resources_dir = project_dir / "resources"
     resources_dir.mkdir(exist_ok=True)
 
-    nagi_dir = project_dir / ".nagi"
+    state_dir = project_dir / ".nagi"
     (project_dir / "nagi.yaml").write_text(
-        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
+        f"resourcesDir: resources\nstateDir: {state_dir}\n"
     )
 
     for filename, content in resources.items():
@@ -78,15 +78,13 @@ def start_serve(project: Path) -> ServeProcess:
         "uv",
         "run",
         "nagi",
+        "--project-dir",
+        str(project),
         "serve",
         "--resources-dir",
         str(project / "resources"),
         "--target-dir",
         str(project / "target"),
-        "--cache-dir",
-        str(project / "cache"),
-        "--project-dir",
-        str(project),
     ]
     stderr_path = project / "serve_stderr.log"
     stderr_file = open(stderr_path, "w")  # noqa: SIM115

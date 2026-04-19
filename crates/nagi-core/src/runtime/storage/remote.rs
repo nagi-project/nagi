@@ -471,7 +471,9 @@ mod tests {
     }
     use std::path::PathBuf;
 
-    use crate::runtime::config::{ExportConfig, NagiDir, NotifyConfig, ProjectConfig, SlackConfig};
+    use crate::runtime::config::{
+        ExportConfig, NotifyConfig, ProjectConfig, SlackConfig, StateDir,
+    };
     use crate::runtime::evaluate::{ConditionResult, ConditionStatus};
     use crate::runtime::storage::{Cache, ProjectConfigStore, SuspendedStore, SyncLock};
 
@@ -821,7 +823,7 @@ mod tests {
             lock_retry_max_attempts: 5,
             max_evaluate_concurrency: Some(10),
             max_sync_concurrency: Some(3),
-            nagi_dir: NagiDir::new(PathBuf::from("/tmp/nagi")),
+            state_dir: StateDir::new(PathBuf::from("/tmp/nagi")),
             export: Some(ExportConfig {
                 connection: "my-bq".to_string(),
                 dataset: "logs".to_string(),

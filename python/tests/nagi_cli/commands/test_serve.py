@@ -19,13 +19,17 @@ class TestServeMain:
     def test_serve_calls_rust_core(
         self, mock_serve: MagicMock, runner: CliRunner
     ) -> None:
-        runner.invoke(serve, ["--resources-dir", "a", "--target-dir", "t"])
+        result = runner.invoke(
+            serve,
+            ["--resources-dir", "a", "--target-dir", "t"],
+            obj={"project_dir": "."},
+        )
+        assert result.exit_code == 0, result.output
         mock_serve.assert_called_once_with(
             resources_dir="a",
             target_dir="t",
             selectors=[],
             excludes=[],
-            cache_dir=None,
             project_dir=".",
         )
 
@@ -33,7 +37,7 @@ class TestServeMain:
     def test_serve_error_returns_exit_code_1(
         self, mock_serve: MagicMock, runner: CliRunner
     ) -> None:
-        result = runner.invoke(serve, [])
+        result = runner.invoke(serve, [], obj={"project_dir": "."})
         assert result.exit_code == 1
         output = json.loads(result.output)
         assert "error" in output

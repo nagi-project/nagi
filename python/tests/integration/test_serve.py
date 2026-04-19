@@ -35,7 +35,7 @@ PASS_CHECK_CONDITIONS = (
 )
 
 
-def _init_nagi_dir(project: Path) -> None:
+def _init_state(project: Path) -> None:
     from nagi_cli._nagi_core import init_workspace
 
     init_workspace(str(project), str(project / ".nagi"))
@@ -139,7 +139,7 @@ class TestServe:
         """Halt suspends all assets."""
         project = tmp_path / "project"
         write_duckdb_project(project, duckdb_path, {"asset.yaml": SIMPLE_ASSET})
-        _init_nagi_dir(project)
+        _init_state(project)
         compile_project(project)
 
         result = run_nagi(
@@ -185,7 +185,7 @@ class TestServe:
                 "asset.yaml": asset,
             },
         )
-        _init_nagi_dir(project)
+        _init_state(project)
         cache_dir = project / "cache"
         proc = _start_serve(project)
         try:
@@ -237,7 +237,7 @@ class TestServe:
                 "sync.yaml": NOOP_SYNC,
             },
         )
-        _init_nagi_dir(project)
+        _init_state(project)
         cache_dir = project / "cache"
         proc = _start_serve(project)
         try:
@@ -251,7 +251,7 @@ class TestServe:
         """Halt then resume restores sync capability."""
         project = tmp_path / "project"
         write_duckdb_project(project, duckdb_path, {"asset.yaml": SIMPLE_ASSET})
-        _init_nagi_dir(project)
+        _init_state(project)
         compile_project(project)
 
         # Halt
@@ -316,7 +316,7 @@ class TestServe:
                 "sync.yaml": NOOP_SYNC,
             },
         )
-        _init_nagi_dir(project)
+        _init_state(project)
         cache_dir = project / "cache"
         proc = _start_serve(project)
         try:
