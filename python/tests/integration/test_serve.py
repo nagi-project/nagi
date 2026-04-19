@@ -50,15 +50,13 @@ def _start_serve(
         "uv",
         "run",
         "nagi",
+        "--project-dir",
+        str(project),
         "serve",
         "--resources-dir",
         str(project / "resources"),
         "--target-dir",
         str(project / "target"),
-        "--cache-dir",
-        str(project / "cache"),
-        "--project-dir",
-        str(project),
     ]
     if extra_args:
         args.extend(extra_args)
@@ -186,7 +184,7 @@ class TestServe:
             },
         )
         _init_state(project)
-        cache_dir = project / "cache"
+        cache_dir = project / ".nagi" / "cache" / "evaluate"
         proc = _start_serve(project)
         try:
             _wait_for_cache(proc, cache_dir, asset_name="test-asset")
@@ -238,7 +236,7 @@ class TestServe:
             },
         )
         _init_state(project)
-        cache_dir = project / "cache"
+        cache_dir = project / ".nagi" / "cache" / "evaluate"
         proc = _start_serve(project)
         try:
             _wait_for_cache(proc, cache_dir, asset_name="downstream", timeout=30)
@@ -317,7 +315,7 @@ class TestServe:
             },
         )
         _init_state(project)
-        cache_dir = project / "cache"
+        cache_dir = project / ".nagi" / "cache" / "evaluate"
         proc = _start_serve(project)
         try:
             _wait_for_cache(proc, cache_dir, asset_name="group-a", timeout=30)

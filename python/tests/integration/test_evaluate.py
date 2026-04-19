@@ -311,8 +311,6 @@ class TestEvaluateConnectionFailure:
                 "evaluate",
                 "--target-dir",
                 str(project / "target"),
-                "--cache-dir",
-                str(project / "cache"),
             ],
             cwd=project,
         )

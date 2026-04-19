@@ -113,7 +113,7 @@ def _dump_debug_info(project: Path, asset_name: str) -> str:
 
     lines = [f"=== Debug info for {asset_name} timeout ==="]
 
-    cache_dir = project / "cache"
+    cache_dir = project / ".nagi" / "cache" / "evaluate"
     if cache_dir.exists():
         for p in sorted(cache_dir.glob("*.json")):
             try:
@@ -165,7 +165,7 @@ def wait_for_asset_ready(
     """Wait until the asset's cache file shows ready: true."""
     import json
 
-    cache_dir = project / "cache"
+    cache_dir = project / ".nagi" / "cache" / "evaluate"
     deadline = time.time() + timeout
     while time.time() < deadline:
         path = cache_dir / f"{asset_name}.json"
@@ -251,7 +251,7 @@ def query_sync_assets_in_order(project: Path) -> list[str]:
 def read_cache(project: Path, asset_name: str) -> dict[str, Any]:
     import json
 
-    path = project / "cache" / f"{asset_name}.json"
+    path = project / ".nagi" / "cache" / "evaluate" / f"{asset_name}.json"
     return json.loads(path.read_text())
 
 

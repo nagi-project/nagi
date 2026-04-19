@@ -58,8 +58,8 @@ run = "cargo audit"
 [tasks."test:dbt-setup"]
 description = "Seed and compile dbt projects for integration tests"
 run = """
-cd python/tests/dbt_projects/ecommerce && uv run dbt seed --profiles-dir profiles && uv run dbt compile --profiles-dir profiles
-cd python/tests/dbt_projects/analytics && uv run dbt seed --profiles-dir profiles && uv run dbt compile --profiles-dir profiles
+(cd python/tests/dbt_projects/ecommerce && uv run dbt seed --profiles-dir profiles && uv run dbt compile --profiles-dir profiles)
+(cd python/tests/dbt_projects/analytics && uv run dbt seed --profiles-dir profiles && uv run dbt compile --profiles-dir profiles)
 """
 
 [tasks."test:integration"]
