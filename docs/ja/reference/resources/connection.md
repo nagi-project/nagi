@@ -38,9 +38,9 @@ BigQuery REST API connection.
 | `executionProject` | string | — | - | GCP project ID used for query execution billing. Defaults to `project` if omitted. |
 | `identity` | string | — | - | Reference to a `kind: Identity` resource for authentication scope. |
 | `keyfile` | string | — | - | Path to the service account JSON key file. Required when `method` is `service-account`. |
+| `location` | string | — | - | - |
 | `method` | string | — | - | Authentication method. `oauth` (Application Default Credentials) or `service-account`. Defaults to `oauth`. |
 | `timeout` | Duration | — | - | Query timeout (e.g. "30s", "1h"). Falls back to `NagiConfig::default_timeout` when omitted. |
-| `location` | string | — | - | BigQuery region (e.g. `us`, `asia-northeast1`). Used for `INFORMATION_SCHEMA` queries by `nagi inspect`. |
 
 ### type: DuckDB
 

@@ -3,6 +3,8 @@ import json
 import click
 
 from nagi_cli._nagi_core import (
+    InitConfigResult,
+    OriginType,
     init_workspace,
     load_dbt_profiles,
     run_dbt_debug,
@@ -11,65 +13,90 @@ from nagi_cli._nagi_core import (
 
 DOCS_URL = "https://nagi-project.dev"
 
-ORIGIN_TYPES = [
-    {"key": "dbt", "label": "dbt project"},
-]
+ORIGIN_TYPES = [OriginType.Dbt]
 
 
 @click.command()
-def init() -> None:
+@click.option(
+    "--overwrite-remote",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing remote project config.",
+)
+def init(overwrite_remote: bool) -> None:
     """Prepare the environment so that `nagi compile` can run."""
+    _init_workspace(overwrite_remote)
+    entries = _collect_origin_entries()
+    if entries:
+        _write_origin_files(entries)
+
+
+def _init_workspace(overwrite_remote: bool) -> None:
     try:
-        init_workspace()
+        result = init_workspace(force=overwrite_remote)
+        if result == InitConfigResult.Skipped:
+            click.echo(
+                "Remote project config already exists."
+                " Use --overwrite-remote to overwrite."
+            )
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
+
+def _collect_origin_entries() -> list[dict]:
     if not click.confirm("Set up an Origin?", default=True):
         click.echo(f"See {DOCS_URL} for manual configuration.")
-        return
+        return []
 
-    dbt_entries: list[dict] = []
-    dbt_tested: set[tuple[str, str | None]] = set()
-    dbt_profiles: list[dict] | None = None
+    entries: list[dict] = []
+    tested: set[tuple[str, str | None]] = set()
+    profiles: list[dict] | None = None
 
     while True:
         origin_type = _select_origin_type()
 
-        if origin_type == "dbt":
-            if dbt_profiles is None:
-                try:
-                    dbt_profiles = json.loads(load_dbt_profiles())["profiles"]
-                except RuntimeError as e:
-                    click.echo(json.dumps({"error": str(e)}))
-                    raise SystemExit(1)
-            _collect_one_dbt_entry(dbt_entries, dbt_tested, dbt_profiles)
+        if origin_type == OriginType.Dbt:
+            if profiles is None:
+                profiles = _load_dbt_profiles()
+            _collect_one_dbt_entry(entries, tested, profiles)
 
         if not click.confirm("Add another Origin?", default=False):
             break
 
-    if dbt_entries:
-        try:
-            result = json.loads(write_init_dbt_files(".", json.dumps(dbt_entries)))
-        except RuntimeError as e:
-            click.echo(json.dumps({"error": str(e)}))
-            raise SystemExit(1)
-
-        if result.get("connectionPath"):
-            click.echo(json.dumps({"connection": result["connectionPath"]}))
-        if result.get("originPath"):
-            click.echo(json.dumps({"origin": result["originPath"]}))
+    return entries
 
 
-def _select_origin_type() -> str:
+def _write_origin_files(entries: list[dict]) -> None:
+    try:
+        result = json.loads(write_init_dbt_files(".", json.dumps(entries)))
+    except RuntimeError as e:
+        click.echo(json.dumps({"error": str(e)}))
+        raise SystemExit(1)
+
+    if result.get("connectionPath"):
+        click.echo(json.dumps({"connection": result["connectionPath"]}))
+    if result.get("originPath"):
+        click.echo(json.dumps({"origin": result["originPath"]}))
+
+
+def _load_dbt_profiles() -> list[dict]:
+    try:
+        return json.loads(load_dbt_profiles())["profiles"]
+    except RuntimeError as e:
+        click.echo(json.dumps({"error": str(e)}))
+        raise SystemExit(1)
+
+
+def _select_origin_type() -> OriginType:
     click.echo("Origin types:")
-    for i, entry in enumerate(ORIGIN_TYPES):
-        click.echo(f"  {i + 1}) {entry['label']}")
+    for i, ot in enumerate(ORIGIN_TYPES):
+        click.echo(f"  {i + 1}) {ot.label}")
     choice = click.prompt("Select Origin type", type=int) - 1
     if choice < 0 or choice >= len(ORIGIN_TYPES):
         click.echo(json.dumps({"error": "invalid selection"}))
         raise SystemExit(1)
-    return ORIGIN_TYPES[choice]["key"]
+    return ORIGIN_TYPES[choice]
 
 
 def _collect_one_dbt_entry(

@@ -39,11 +39,6 @@ def _make_sync_command(sync_type: str) -> click.Command:
         help="Comma-separated stages to execute (e.g. pre,run).",
     )
     @click.option(
-        "--cache-dir",
-        default=None,
-        help="Cache directory (defaults to &lt;nagiDir&gt;/cache/)",
-    )
-    @click.option(
         "--dry-run",
         is_flag=True,
         default=False,
@@ -66,7 +61,6 @@ def _make_sync_command(sync_type: str) -> click.Command:
         excludes: tuple[str, ...],
         target_dir: str,
         stages: str | None,
-        cache_dir: str | None,
         dry_run: bool,
         force: bool,
         auto_approve: bool,
@@ -79,7 +73,6 @@ def _make_sync_command(sync_type: str) -> click.Command:
                     sync_type=sync_type,
                     excludes=list(excludes),
                     stages=stages,
-                    cache_dir=cache_dir,
                 )
             )
         except (RuntimeError, json.JSONDecodeError) as e:
@@ -106,7 +99,7 @@ def _make_sync_command(sync_type: str) -> click.Command:
 
             try:
                 result_json = execute_sync_proposal(
-                    json.dumps(proposal), sync_type, stages, cache_dir, force
+                    json.dumps(proposal), sync_type, stages, force
                 )
             except RuntimeError as e:
                 click.echo(json.dumps({"error": str(e), "asset": proposal["asset"]}))

@@ -155,7 +155,7 @@ pub(crate) struct SyncFromCompiledParams<'a> {
     pub db_path: Option<&'a Path>,
     pub logs_dir: Option<&'a Path>,
     pub cache_dir: Option<&'a Path>,
-    pub nagi_dir: Option<&'a Path>,
+    pub state_dir: Option<&'a Path>,
     pub dry_run: bool,
     pub force: bool,
     pub evaluation_id: Option<&'a str>,
@@ -211,7 +211,7 @@ pub(crate) async fn sync_from_compiled(
         evaluation_id: params.evaluation_id,
         log_store: log_store.as_ref(),
         cache_dir: params.cache_dir,
-        nagi_dir: params.nagi_dir,
+        state_dir: params.state_dir,
         default_timeout: params.default_timeout,
     })
     .await;
@@ -322,7 +322,7 @@ spec:
             db_path: None,
             logs_dir: None,
             cache_dir: None,
-            nagi_dir: None,
+            state_dir: None,
             dry_run: true,
             force: false,
             evaluation_id: None,
@@ -344,7 +344,7 @@ spec:
             db_path: None,
             logs_dir: None,
             cache_dir: None,
-            nagi_dir: None,
+            state_dir: None,
             dry_run: true,
             force: false,
             evaluation_id: None,
@@ -364,7 +364,7 @@ spec:
             db_path: None,
             logs_dir: None,
             cache_dir: None,
-            nagi_dir: None,
+            state_dir: None,
             dry_run: true,
             force: false,
             evaluation_id: None,
@@ -377,20 +377,20 @@ spec:
 
     // ── sync_from_compiled lock ─────────────────────────────────────────
 
-    /// Creates a temp project dir with nagi.yaml pointing nagiDir to a subdirectory.
-    /// Returns (tempdir, nagi_dir_path) so the caller can inspect lock files.
+    /// Creates a temp project dir with nagi.yaml pointing stateDir to a subdirectory.
+    /// Returns (tempdir, state_dir_path) so the caller can inspect lock files.
     fn setup_project_with_lock() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        let nagi_dir = tmp.path().join(".nagi");
-        let yaml = format!("nagiDir: {}", nagi_dir.display());
+        let state_dir = tmp.path().join(".nagi");
+        let yaml = format!("stateDir: {}", state_dir.display());
         std::fs::write(tmp.path().join("nagi.yaml"), yaml).unwrap();
-        (tmp, nagi_dir)
+        (tmp, state_dir)
     }
 
     #[tokio::test]
     async fn sync_from_compiled_with_lock_executes_sync() {
-        let (project, nagi_dir) = setup_project_with_lock();
-        let locks_dir = nagi_dir.join("locks");
+        let (project, state_dir) = setup_project_with_lock();
+        let locks_dir = state_dir.join("locks");
         let params = SyncFromCompiledParams {
             yaml: ASSET_WITH_SYNC_YAML,
             sync_type: "sync",
@@ -398,7 +398,7 @@ spec:
             db_path: None,
             logs_dir: None,
             cache_dir: None,
-            nagi_dir: None,
+            state_dir: None,
             dry_run: false,
             force: false,
             evaluation_id: None,
@@ -413,8 +413,8 @@ spec:
 
     #[tokio::test]
     async fn sync_from_compiled_lock_held_returns_error() {
-        let (project, nagi_dir) = setup_project_with_lock();
-        let locks_dir = nagi_dir.join("locks");
+        let (project, state_dir) = setup_project_with_lock();
+        let locks_dir = state_dir.join("locks");
         // Pre-acquire the lock so sync_from_compiled cannot get it.
         let lock = LocalSyncLock::new(locks_dir);
         assert!(lock
@@ -432,7 +432,7 @@ spec:
             db_path: None,
             logs_dir: None,
             cache_dir: None,
-            nagi_dir: None,
+            state_dir: None,
             dry_run: false,
             force: false,
             evaluation_id: None,
@@ -449,8 +449,8 @@ spec:
 
     #[tokio::test]
     async fn sync_from_compiled_dry_run_skips_lock() {
-        let (project, nagi_dir) = setup_project_with_lock();
-        let locks_dir = nagi_dir.join("locks");
+        let (project, state_dir) = setup_project_with_lock();
+        let locks_dir = state_dir.join("locks");
         // Pre-acquire the lock.
         let lock = LocalSyncLock::new(locks_dir);
         assert!(lock
@@ -469,7 +469,7 @@ spec:
             db_path: None,
             logs_dir: None,
             cache_dir: None,
-            nagi_dir: None,
+            state_dir: None,
             dry_run: true,
             force: false,
             evaluation_id: None,

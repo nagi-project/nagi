@@ -38,8 +38,6 @@ class TestStatus:
                 "status",
                 "--target-dir",
                 str(project / "target"),
-                "--cache-dir",
-                str(project / "cache"),
             ],
             cwd=project,
         )
@@ -69,8 +67,6 @@ class TestStatus:
                 "status",
                 "--target-dir",
                 str(project / "target"),
-                "--cache-dir",
-                str(project / "cache"),
             ],
             cwd=project,
         )

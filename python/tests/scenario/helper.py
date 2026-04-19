@@ -18,7 +18,7 @@ from typing import IO, Any
 from tests.helper import ARGS_SLEEP_2, CMD_TRUE
 
 
-def init_nagi_dir(project: Path) -> None:
+def init_state_dir(project: Path) -> None:
     from nagi_cli._nagi_core import init_workspace
 
     init_workspace(str(project), str(project / ".nagi"))
@@ -33,9 +33,9 @@ def write_project(
     resources_dir = project_dir / "resources"
     resources_dir.mkdir(exist_ok=True)
 
-    nagi_dir = project_dir / ".nagi"
+    state_dir = project_dir / ".nagi"
     (project_dir / "nagi.yaml").write_text(
-        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
+        f"resourcesDir: resources\nstateDir: {state_dir}\n"
     )
 
     for filename, content in resources.items():
@@ -78,15 +78,13 @@ def start_serve(project: Path) -> ServeProcess:
         "uv",
         "run",
         "nagi",
+        "--project-dir",
+        str(project),
         "serve",
         "--resources-dir",
         str(project / "resources"),
         "--target-dir",
         str(project / "target"),
-        "--cache-dir",
-        str(project / "cache"),
-        "--project-dir",
-        str(project),
     ]
     stderr_path = project / "serve_stderr.log"
     stderr_file = open(stderr_path, "w")  # noqa: SIM115
@@ -115,7 +113,7 @@ def _dump_debug_info(project: Path, asset_name: str) -> str:
 
     lines = [f"=== Debug info for {asset_name} timeout ==="]
 
-    cache_dir = project / "cache"
+    cache_dir = project / ".nagi" / "cache" / "evaluate"
     if cache_dir.exists():
         for p in sorted(cache_dir.glob("*.json")):
             try:
@@ -167,7 +165,7 @@ def wait_for_asset_ready(
     """Wait until the asset's cache file shows ready: true."""
     import json
 
-    cache_dir = project / "cache"
+    cache_dir = project / ".nagi" / "cache" / "evaluate"
     deadline = time.time() + timeout
     while time.time() < deadline:
         path = cache_dir / f"{asset_name}.json"
@@ -253,7 +251,7 @@ def query_sync_assets_in_order(project: Path) -> list[str]:
 def read_cache(project: Path, asset_name: str) -> dict[str, Any]:
     import json
 
-    path = project / "cache" / f"{asset_name}.json"
+    path = project / ".nagi" / "cache" / "evaluate" / f"{asset_name}.json"
     return json.loads(path.read_text())
 
 

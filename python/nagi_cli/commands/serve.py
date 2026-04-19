@@ -32,17 +32,6 @@ from nagi_cli._nagi_core import serve_resume as _serve_resume
     show_default=True,
     help="Directory for compiled output.",
 )
-@click.option(
-    "--cache-dir",
-    default=None,
-    help="Cache directory (defaults to &lt;nagiDir&gt;/cache/)",
-)
-@click.option(
-    "--project-dir",
-    default=".",
-    show_default=True,
-    help="Project root directory containing nagi.yaml.",
-)
 @click.pass_context
 def serve(
     ctx: click.Context,
@@ -50,19 +39,17 @@ def serve(
     excludes: tuple[str, ...],
     resources_dir: str,
     target_dir: str,
-    cache_dir: str | None,
-    project_dir: str,
 ) -> None:
     """Compile resources and start the reconciliation loop."""
     if ctx.invoked_subcommand is not None:
         return
+    project_dir = ctx.obj["project_dir"]
     try:
         _serve(
             resources_dir=resources_dir,
             target_dir=target_dir,
             selectors=list(selectors),
             excludes=list(excludes),
-            cache_dir=cache_dir,
             project_dir=project_dir,
         )
     except (RuntimeError, json.JSONDecodeError) as e:

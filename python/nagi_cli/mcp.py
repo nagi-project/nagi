@@ -34,7 +34,6 @@ def create_server(*, allow_sync: bool = False) -> FastMCP:
     def nagi_status(
         target_dir: str = "target",
         selectors: list[str] | None = None,
-        cache_dir: str | None = None,
     ) -> str:
         """Show current convergence status of assets.
 
@@ -43,15 +42,13 @@ def create_server(*, allow_sync: bool = False) -> FastMCP:
         Args:
             target_dir: Directory containing compiled output.
             selectors: Asset selector expressions (dbt-compatible).
-            cache_dir: Cache directory (defaults to &lt;nagiDir&gt;/cache/).
         """
-        return asset_status(target_dir, selectors or [], cache_dir)
+        return asset_status(target_dir, selectors or [])
 
     @mcp.tool(annotations=READ_ONLY)
     def nagi_evaluate(
         target_dir: str = "target",
         selectors: list[str] | None = None,
-        cache_dir: str | None = None,
         dry_run: bool = False,
     ) -> str:
         """Evaluate desired conditions for assets.
@@ -61,10 +58,9 @@ def create_server(*, allow_sync: bool = False) -> FastMCP:
         Args:
             target_dir: Directory containing compiled output.
             selectors: Asset selector expressions (dbt-compatible).
-            cache_dir: Cache directory (defaults to &lt;nagiDir&gt;/cache/).
             dry_run: When true, list assets without executing queries.
         """
-        return evaluate_all(target_dir, selectors or [], cache_dir, dry_run)
+        return evaluate_all(target_dir, selectors or [], dry_run=dry_run)
 
     if allow_sync:
         _register_sync_tools(mcp)
@@ -78,7 +74,6 @@ def _register_sync_tools(mcp: FastMCP) -> None:
         target_dir: str = "target",
         selectors: list[str] | None = None,
         stages: str | None = None,
-        cache_dir: str | None = None,
         force: bool = False,
     ) -> str:
         """Execute sync convergence operation for assets.
@@ -89,10 +84,9 @@ def _register_sync_tools(mcp: FastMCP) -> None:
             target_dir: Directory containing compiled output.
             selectors: Asset selector expressions (dbt-compatible).
             stages: Comma-separated stages to execute (e.g. pre,run).
-            cache_dir: Cache directory (defaults to &lt;nagiDir&gt;/cache/).
             force: Skip pre-flight checks.
         """
-        return _run_sync("sync", target_dir, selectors, stages, cache_dir, force)
+        return _run_sync("sync", target_dir, selectors, stages, force)
 
 
 def _run_sync(
@@ -100,17 +94,16 @@ def _run_sync(
     target_dir: str,
     selectors: list[str] | None,
     stages: str | None,
-    cache_dir: str | None,
     force: bool,
 ) -> str:
     try:
         proposals = json.loads(
-            propose_sync(target_dir, selectors or [], sync_type, stages, cache_dir)
+            propose_sync(target_dir, selectors or [], sync_type, stages=stages)
         )
         results = []
         for proposal in proposals:
             result_json = execute_sync_proposal(
-                json.dumps(proposal), sync_type, stages, cache_dir, force
+                json.dumps(proposal), sync_type, stages, force
             )
             results.append(json.loads(result_json))
         return json.dumps(results)

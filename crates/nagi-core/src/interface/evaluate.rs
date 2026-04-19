@@ -45,7 +45,7 @@ async fn evaluate_from_compiled(
     .await?;
 
     let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
-        crate::runtime::config::resolve_nagi_dir(std::path::Path::new(".")).evaluate_cache_dir()
+        crate::runtime::config::resolve_state_dir(std::path::Path::new(".")).evaluate_cache_dir()
     });
     let cache = LocalCache::new(cache_path);
     cache

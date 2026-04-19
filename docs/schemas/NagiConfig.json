@@ -24,12 +24,19 @@
           ]
         },
         "type": {
-          "default": "local",
-          "description": "Backend type identifier. One of `local`, `gcs`, `s3`. Defaults to `local`.",
-          "type": "string"
+          "$ref": "#/$defs/BackendType",
+          "description": "Backend type. Defaults to `local`."
         }
       },
       "type": "object"
+    },
+    "BackendType": {
+      "enum": [
+        "local",
+        "gcs",
+        "s3"
+      ],
+      "type": "string"
     },
     "Duration": {
       "description": "A human-readable duration string (e.g. \"24h\", \"30m\", \"1h30m\").",
@@ -49,6 +56,7 @@
         },
         "format": {
           "$ref": "#/$defs/ExportFormat",
+          "default": "jsonl",
           "description": "Intermediate file format for export."
         },
         "interval": {
@@ -82,10 +90,6 @@
       ],
       "type": "string"
     },
-    "NagiDir": {
-      "description": "Newtype wrapper around the Nagi state directory path.\nProvides accessors for all well-known subdirectories.\n\nDeserializes from a plain string path (e.g. `\"~/.nagi\"` in YAML).",
-      "type": "string"
-    },
     "NotifyConfig": {
       "properties": {
         "slack": {
@@ -113,9 +117,14 @@
         "channel"
       ],
       "type": "object"
+    },
+    "StateDir": {
+      "description": "State directory path. Contains logs, cache, locks, and other runtime data.\nProvides accessors for all well-known subdirectories.\n\nDeserializes from a plain string path (e.g. `\"~/.nagi\"` in YAML).",
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Project configuration that is stored in the remote backend.\nContains all settings except `backend` (which is local-only).",
   "properties": {
     "backend": {
       "$ref": "#/$defs/BackendConfig",
@@ -123,8 +132,7 @@
     },
     "defaultTimeout": {
       "$ref": "#/$defs/Duration",
-      "default": "1h",
-      "description": "Default timeout applied to evaluate, sync, and query operations when\nthe individual resource does not specify its own `timeout`. Defaults to 1h."
+      "default": "1h"
     },
     "export": {
       "anyOf": [
@@ -135,31 +143,28 @@
           "type": "null"
         }
       ],
-      "description": "Log export configuration. When set, compile generates export Assets\nand logs are transferred to the remote data warehouse."
+      "default": null
     },
     "lockRetryIntervalSeconds": {
       "default": 900,
-      "description": "Interval in seconds between lock acquisition retry attempts. Defaults to 900 (15 minutes).",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
     },
     "lockRetryMaxAttempts": {
       "default": 3,
-      "description": "Maximum number of lock acquisition retry attempts before skipping. Defaults to 3.",
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
     },
     "lockTtlSeconds": {
       "default": 3600,
-      "description": "Time-to-live in seconds for sync lock files. Locks expire after this duration,\npreventing deadlocks from abnormal process termination. Defaults to 3600 (1 hour).",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
     },
     "maxControllers": {
-      "description": "Maximum number of Controllers to run in parallel during `nagi serve`.\nWhen the number of connected components exceeds this limit, serve exits with an error.\nWhen omitted, one Controller is created per connected component.",
+      "default": null,
       "format": "uint",
       "minimum": 0,
       "type": [
@@ -168,7 +173,7 @@
       ]
     },
     "maxEvaluateConcurrency": {
-      "description": "Maximum number of concurrent evaluate tasks per Controller.\nWhen omitted, no limit is applied.",
+      "default": null,
       "format": "uint",
       "minimum": 0,
       "type": [
@@ -177,7 +182,7 @@
       ]
     },
     "maxSyncConcurrency": {
-      "description": "Maximum number of concurrent sync tasks per Controller.\nWhen omitted, no limit is applied.",
+      "default": null,
       "format": "uint",
       "minimum": 0,
       "type": [
@@ -185,16 +190,18 @@
         "null"
       ]
     },
-    "nagiDir": {
-      "$ref": "#/$defs/NagiDir",
-      "description": "Base directory for Nagi state (logs, cache, locks, etc.). Defaults to `~/.nagi`."
-    },
     "notify": {
       "$ref": "#/$defs/NotifyConfig",
-      "description": "Notification channel configuration."
+      "default": {
+        "slack": null
+      }
+    },
+    "stateDir": {
+      "$ref": "#/$defs/StateDir",
+      "default": "~/.nagi"
     },
     "terminationGracePeriodSeconds": {
-      "description": "Maximum time in seconds to wait for in-flight sync tasks to finish during shutdown.\nWhen omitted, waits indefinitely.",
+      "default": null,
       "format": "uint64",
       "minimum": 0,
       "type": [

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::runtime::config::{BackendType, ProjectConfig};
 use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::serve::SuspendedInfo;
 
@@ -14,8 +15,10 @@ use crate::runtime::serve::SuspendedInfo;
 pub enum StorageError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("failed to serialize/deserialize: {0}")]
+    #[error("failed to serialize/deserialize JSON: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("failed to serialize/deserialize YAML: {0}")]
+    Yaml(String),
     #[error("invalid filename: {0}")]
     InvalidFilename(String),
 }
@@ -85,6 +88,12 @@ pub trait ReadinessStore: Send + Sync + std::fmt::Debug {
     fn read_all(&self) -> Result<HashMap<String, bool>, StorageError>;
 }
 
+/// Reads and writes project configuration (everything except backend) to remote storage.
+pub(crate) trait ProjectConfigStore: Send + Sync {
+    fn write_project_config(&self, config: &ProjectConfig) -> Result<(), StorageError>;
+    fn read_project_config(&self) -> Result<Option<ProjectConfig>, StorageError>;
+}
+
 /// Distributed lock for serializing sync execution per asset.
 pub trait SyncLock: Send + Sync {
     /// Attempts to acquire the lock. Returns `true` if acquired.
@@ -104,16 +113,13 @@ pub trait SyncLock: Send + Sync {
 pub fn build_sync_lock(
     config: &crate::runtime::config::NagiConfig,
 ) -> Result<std::sync::Arc<dyn SyncLock>, StorageError> {
-    match config.backend.r#type.as_str() {
-        "local" => Ok(std::sync::Arc::new(local::LocalSyncLock::new(
-            config.nagi_dir.locks_dir(),
+    match config.backend.backend_type {
+        BackendType::Local => Ok(std::sync::Arc::new(local::LocalSyncLock::new(
+            config.project.state_dir.locks_dir(),
         ))),
-        "gcs" | "s3" => Ok(std::sync::Arc::new(remote::create_remote_store(
+        BackendType::Gcs | BackendType::S3 => Ok(std::sync::Arc::new(remote::create_remote_store(
             &config.backend,
         )?)),
-        t => Err(StorageError::Io(std::io::Error::other(format!(
-            "unknown backend type: {t}"
-        )))),
     }
 }
 
@@ -121,10 +127,10 @@ pub fn build_sync_lock(
 pub fn build_sync_lock_from_project(
     project_dir: &std::path::Path,
 ) -> Result<(std::sync::Arc<dyn SyncLock>, Duration), StorageError> {
-    let config = crate::runtime::config::load_config(project_dir)
+    let config = crate::runtime::config::load_config_from_dir(project_dir)
         .map_err(|e| StorageError::Io(std::io::Error::other(e.to_string())))?;
     let lock = build_sync_lock(&config)?;
-    let ttl = Duration::from_secs(config.lock_ttl_seconds);
+    let ttl = Duration::from_secs(config.project.lock_ttl_seconds);
     Ok((lock, ttl))
 }
 

@@ -35,7 +35,7 @@ PASS_CHECK_CONDITIONS = (
 )
 
 
-def _init_nagi_dir(project: Path) -> None:
+def _init_state(project: Path) -> None:
     from nagi_cli._nagi_core import init_workspace
 
     init_workspace(str(project), str(project / ".nagi"))
@@ -50,15 +50,13 @@ def _start_serve(
         "uv",
         "run",
         "nagi",
+        "--project-dir",
+        str(project),
         "serve",
         "--resources-dir",
         str(project / "resources"),
         "--target-dir",
         str(project / "target"),
-        "--cache-dir",
-        str(project / "cache"),
-        "--project-dir",
-        str(project),
     ]
     if extra_args:
         args.extend(extra_args)
@@ -139,7 +137,7 @@ class TestServe:
         """Halt suspends all assets."""
         project = tmp_path / "project"
         write_duckdb_project(project, duckdb_path, {"asset.yaml": SIMPLE_ASSET})
-        _init_nagi_dir(project)
+        _init_state(project)
         compile_project(project)
 
         result = run_nagi(
@@ -185,8 +183,8 @@ class TestServe:
                 "asset.yaml": asset,
             },
         )
-        _init_nagi_dir(project)
-        cache_dir = project / "cache"
+        _init_state(project)
+        cache_dir = project / ".nagi" / "cache" / "evaluate"
         proc = _start_serve(project)
         try:
             _wait_for_cache(proc, cache_dir, asset_name="test-asset")
@@ -237,8 +235,8 @@ class TestServe:
                 "sync.yaml": NOOP_SYNC,
             },
         )
-        _init_nagi_dir(project)
-        cache_dir = project / "cache"
+        _init_state(project)
+        cache_dir = project / ".nagi" / "cache" / "evaluate"
         proc = _start_serve(project)
         try:
             _wait_for_cache(proc, cache_dir, asset_name="downstream", timeout=30)
@@ -251,7 +249,7 @@ class TestServe:
         """Halt then resume restores sync capability."""
         project = tmp_path / "project"
         write_duckdb_project(project, duckdb_path, {"asset.yaml": SIMPLE_ASSET})
-        _init_nagi_dir(project)
+        _init_state(project)
         compile_project(project)
 
         # Halt
@@ -316,8 +314,8 @@ class TestServe:
                 "sync.yaml": NOOP_SYNC,
             },
         )
-        _init_nagi_dir(project)
-        cache_dir = project / "cache"
+        _init_state(project)
+        cache_dir = project / ".nagi" / "cache" / "evaluate"
         proc = _start_serve(project)
         try:
             _wait_for_cache(proc, cache_dir, asset_name="group-a", timeout=30)

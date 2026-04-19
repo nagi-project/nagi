@@ -118,7 +118,7 @@ fn is_changed_filename(name: &str) -> bool {
     name.contains("_changed.")
 }
 
-/// Cache for inspection data under `<nagi_dir>/inspections/`.
+/// Cache for inspection data under `<state_dir>/inspections/`.
 ///
 /// This is a cache, not a persistent store. The source of truth is:
 /// - `evaluate_logs` in logs.db (for condition evaluation results)
@@ -132,9 +132,9 @@ pub struct InspectionStore {
 }
 
 impl InspectionStore {
-    pub fn new(nagi_dir: &Path) -> Self {
+    pub fn new(state_dir: &Path) -> Self {
         Self {
-            base_dir: nagi_dir.join("inspections"),
+            base_dir: state_dir.join("inspections"),
         }
     }
 

@@ -102,9 +102,9 @@ def write_nagi_project(
     resources_dir = project_dir / "resources"
     resources_dir.mkdir(exist_ok=True)
 
-    nagi_dir = project_dir / ".nagi"
+    state_dir = project_dir / ".nagi"
     (project_dir / "nagi.yaml").write_text(
-        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
+        f"resourcesDir: resources\nstateDir: {state_dir}\n"
     )
 
     for origin_name, profile_name, dbt_project_path, profiles_dir in origins:
@@ -188,9 +188,9 @@ def write_duckdb_project(
     resources_dir = project_dir / "resources"
     resources_dir.mkdir(exist_ok=True)
 
-    nagi_dir = project_dir / ".nagi"
+    state_dir = project_dir / ".nagi"
     (project_dir / "nagi.yaml").write_text(
-        f"resourcesDir: resources\nnagiDir: {nagi_dir}\n"
+        f"resourcesDir: resources\nstateDir: {state_dir}\n"
     )
 
     connection_yaml = (
@@ -228,16 +228,12 @@ def compile_project(project_dir: Path) -> dict[str, Any]:
 def evaluate_project(
     project_dir: Path,
     select: str | None = None,
-    cache_dir: Path | None = None,
 ) -> list[Any]:
     """Evaluate a compiled project and return the result list."""
-    resolved_cache = cache_dir or project_dir / "cache"
     args = [
         "evaluate",
         "--target-dir",
         str(project_dir / "target"),
-        "--cache-dir",
-        str(resolved_cache),
     ]
     if select:
         args.extend(["--select", select])

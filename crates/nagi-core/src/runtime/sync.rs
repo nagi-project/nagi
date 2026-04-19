@@ -425,7 +425,7 @@ pub(crate) struct SyncWorkflowParams<'a> {
     pub evaluation_id: Option<&'a str>,
     pub log_store: Option<&'a LogStore>,
     pub cache_dir: Option<&'a Path>,
-    pub nagi_dir: Option<&'a Path>,
+    pub state_dir: Option<&'a Path>,
     pub default_timeout: std::time::Duration,
 }
 
@@ -544,7 +544,7 @@ pub(crate) async fn run_sync_workflow(
 
     let finished_at = chrono::Utc::now().to_rfc3339();
     write_inspection(
-        params.nagi_dir,
+        params.state_dir,
         &params.compiled.metadata.name,
         &result.execution_id,
         &finished_at,
@@ -652,7 +652,7 @@ async fn fetch_row_count_after(
 /// and do not block the sync workflow.
 #[allow(clippy::too_many_arguments)]
 fn write_inspection(
-    nagi_dir: Option<&Path>,
+    state_dir: Option<&Path>,
     asset_name: &str,
     execution_id: &str,
     finished_at: &str,
@@ -661,7 +661,7 @@ fn write_inspection(
     row_count_before: Option<serde_json::Value>,
     row_count_after: Option<serde_json::Value>,
 ) {
-    let Some(nagi_dir) = nagi_dir else {
+    let Some(state_dir) = state_dir else {
         return;
     };
 
@@ -686,7 +686,7 @@ fn write_inspection(
             });
     }
 
-    let store = crate::runtime::inspect::InspectionStore::new(nagi_dir);
+    let store = crate::runtime::inspect::InspectionStore::new(state_dir);
     if let Err(e) = store.write(&inspection) {
         tracing::warn!(error = %e, "inspection: failed to write inspection file");
     }
@@ -1175,7 +1175,7 @@ mod tests {
     const TEST_FINISHED_AT: &str = "2026-04-16T09:30:00.000Z";
 
     #[test]
-    fn write_inspection_skips_when_nagi_dir_is_none() {
+    fn write_inspection_skips_when_state_dir_is_none() {
         write_inspection(
             None,
             "test-asset",

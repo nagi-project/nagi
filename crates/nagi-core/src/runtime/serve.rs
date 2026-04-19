@@ -26,12 +26,15 @@ mod state;
 mod suspended;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use tokio::sync::watch;
 
-use crate::runtime::compile::DependencyGraph;
+use crate::runtime::compile::{
+    compile, load_compiled_assets, load_graph, resolve_compiled_asset_names, DependencyGraph,
+};
 use crate::runtime::log::LogStore;
 
 pub use suspended::SuspendedInfo;
@@ -42,8 +45,13 @@ use controller::{
 };
 use suspended::{list_suspended, remove_suspended, suspended_path};
 
+use crate::runtime::config::{
+    load_config_from_dir, BackendConfig, BackendType, NagiConfig, StateDir,
+};
+use crate::runtime::export::{export_all, resolve_export_connection};
 use crate::runtime::storage::local::{LocalReadinessStore, LocalSuspendedStore, LocalSyncLock};
-use crate::runtime::storage::{ReadinessStore, SuspendedStore};
+use crate::runtime::storage::remote::create_remote_store;
+use crate::runtime::storage::{ReadinessStore, SuspendedStore, SyncLock};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -75,22 +83,20 @@ pub async fn serve(
     target_dir: &Path,
     selectors: &[&str],
     excludes: &[&str],
-    cache_dir: Option<&Path>,
     project_dir: Option<&Path>,
 ) -> Result<(), ServeError> {
-    let config = crate::runtime::config::load_config(project_dir.unwrap_or(Path::new(".")))
+    let config = load_config_from_dir(project_dir.unwrap_or(Path::new(".")))
         .map_err(|e| ServeError::Parse(format!("failed to load config: {e}")))?;
 
     tracing::info!("compiling resources...");
-    let output =
-        crate::runtime::compile::compile(resources_dir, target_dir, config.export.as_ref())?;
+    let output = compile(resources_dir, target_dir, config.project.export.as_ref())?;
     tracing::info!(
         nodes = output.graph.nodes.len(),
         edges = output.graph.edges.len(),
         "compiled"
     );
 
-    let inputs = load_controller_inputs(target_dir, selectors, excludes, &config, cache_dir)?;
+    let inputs = load_controller_inputs(target_dir, selectors, excludes, &config)?;
     let (shutdown_tx, handles) = spawn_controllers(inputs, &config, project_dir)?;
 
     tracing::info!(
@@ -103,12 +109,13 @@ pub async fn serve(
     shutdown_tx.send(true).ok();
 
     let grace_period = config
+        .project
         .termination_grace_period_seconds
         .map(StdDuration::from_secs);
 
     await_controller_shutdown(handles, grace_period).await;
 
-    run_final_export(&config, resources_dir).await;
+    export_on_shutdown(&config, resources_dir).await;
 
     Ok(())
 }
@@ -118,25 +125,20 @@ fn load_controller_inputs(
     target_dir: &Path,
     selectors: &[&str],
     excludes: &[&str],
-    config: &crate::runtime::config::NagiConfig,
-    cache_dir: Option<&Path>,
+    config: &NagiConfig,
 ) -> Result<Vec<controller::ControllerInput>, ServeError> {
-    let assets = crate::runtime::compile::load_compiled_assets(target_dir, selectors, excludes)?;
+    let assets = load_compiled_assets(target_dir, selectors, excludes)?;
 
-    let graph: DependencyGraph = crate::runtime::compile::load_graph(target_dir)?;
+    let graph: DependencyGraph = load_graph(target_dir)?;
 
     let asset_map: HashMap<String, String> = assets.into_iter().collect();
     let mut inputs = build_controller_inputs(&graph, &asset_map)?;
 
-    validate_controller_count(inputs.len(), config.max_controllers)?;
+    validate_controller_count(inputs.len(), config.project.max_controllers)?;
 
-    let resolved_cache = Some(
-        cache_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(|| config.nagi_dir.evaluate_cache_dir()),
-    );
+    let cache_dir = config.project.state_dir.evaluate_cache_dir();
     for input in &mut inputs {
-        input.cache_dir = resolved_cache.clone();
+        input.cache_dir = Some(cache_dir.clone());
     }
 
     Ok(inputs)
@@ -147,26 +149,23 @@ type ControllerHandle = tokio::task::JoinHandle<Result<(), ServeError>>;
 /// Spawns one controller task per input, returning the shutdown channel and task handles.
 fn spawn_controllers(
     inputs: Vec<controller::ControllerInput>,
-    config: &crate::runtime::config::NagiConfig,
+    config: &NagiConfig,
     project_dir: Option<&Path>,
 ) -> Result<(watch::Sender<bool>, Vec<ControllerHandle>), ServeError> {
     let notifier = build_notifier(project_dir);
     let base_backend = build_backend_stores(config)?;
-    let db_path = config.nagi_dir.db_path();
-    let logs_dir = config.nagi_dir.logs_dir();
-
     let lc = reconciler::LockConfig {
-        ttl_seconds: config.lock_ttl_seconds,
-        retry_interval_seconds: config.lock_retry_interval_seconds,
-        retry_max_attempts: config.lock_retry_max_attempts,
+        ttl_seconds: config.project.lock_ttl_seconds,
+        retry_interval_seconds: config.project.lock_retry_interval_seconds,
+        retry_max_attempts: config.project.lock_retry_max_attempts,
     };
 
     let concurrency = ConcurrencyLimits {
-        max_evaluate: config.max_evaluate_concurrency,
-        max_sync: config.max_sync_concurrency,
+        max_evaluate: config.project.max_evaluate_concurrency,
+        max_sync: config.project.max_sync_concurrency,
     };
 
-    let default_timeout = config.default_timeout.as_std();
+    let default_timeout = config.project.default_timeout.as_std();
 
     let (shutdown_tx, _) = watch::channel(false);
 
@@ -174,7 +173,7 @@ fn spawn_controllers(
     for input in inputs {
         let rx = shutdown_tx.subscribe();
         let n = notifier.clone();
-        let store = LogStore::open(&db_path, &logs_dir)
+        let store = LogStore::from_state_dir(&config.project.state_dir)
             .map_err(|e| ServeError::Parse(format!("failed to open log store: {e}")))?;
         let backend = base_backend.clone();
         let ctrl_config = controller::ControllerConfig {
@@ -195,20 +194,18 @@ fn spawn_controllers(
     Ok((shutdown_tx, handles))
 }
 
-/// Runs a final export of all log tables during graceful shutdown.
+/// Exports all log tables during graceful shutdown.
 /// Failures are logged as warnings and do not propagate.
-async fn run_final_export(config: &crate::runtime::config::NagiConfig, resources_dir: &Path) {
-    let export_config = match config.export {
+async fn export_on_shutdown(config: &NagiConfig, resources_dir: &Path) {
+    let export_config = match config.project.export {
         Some(ref c) => c,
         None => return,
     };
 
-    tracing::info!("running final export...");
-    let db_path = config.nagi_dir.db_path();
-    let logs_dir = config.nagi_dir.logs_dir();
-    let wm_dir = config.nagi_dir.watermarks_dir();
+    tracing::info!("exporting logs before shutdown...");
+    let wm_dir = config.project.state_dir.watermarks_dir();
 
-    let log_store = match crate::runtime::log::LogStore::open(&db_path, &logs_dir) {
+    let log_store = match LogStore::from_state_dir(&config.project.state_dir) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(%e, "failed to open log store for export");
@@ -216,10 +213,7 @@ async fn run_final_export(config: &crate::runtime::config::NagiConfig, resources
         }
     };
 
-    let conn = match crate::runtime::export::resolve_export_connection(
-        resources_dir,
-        &export_config.connection,
-    ) {
+    let conn = match resolve_export_connection(resources_dir, &export_config.connection) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(%e, "export connection resolution failed");
@@ -227,8 +221,8 @@ async fn run_final_export(config: &crate::runtime::config::NagiConfig, resources
         }
     };
 
-    let remote_store = crate::runtime::storage::remote::create_remote_store(&config.backend).ok();
-    let results = crate::runtime::export::export_all(
+    let remote_store = create_remote_store(&config.backend).ok();
+    let results = export_all(
         &log_store,
         conn.as_ref(),
         remote_store.as_ref(),
@@ -244,48 +238,41 @@ async fn run_final_export(config: &crate::runtime::config::NagiConfig, resources
 }
 
 /// Creates [`BackendStores`] from the backend config.
-fn build_backend_stores(
-    config: &crate::runtime::config::NagiConfig,
-) -> Result<BackendStores, ServeError> {
-    use crate::runtime::storage::remote::create_remote_store;
-    use std::sync::Arc;
-
-    match config.backend.r#type.as_str() {
-        "local" => {
-            let sync_lock: Arc<dyn crate::runtime::storage::SyncLock> =
-                Arc::new(LocalSyncLock::new(config.nagi_dir.locks_dir()));
-            let suspended_store: Arc<dyn SuspendedStore> =
-                Arc::new(LocalSuspendedStore::new(config.nagi_dir.suspended_dir()));
-            let readiness_store: Arc<dyn ReadinessStore> =
-                Arc::new(LocalReadinessStore::new(config.nagi_dir.readiness_dir()));
-            Ok(BackendStores {
-                sync_lock,
-                suspended_store,
-                readiness_store,
-            })
-        }
-        "gcs" | "s3" => {
-            let remote =
-                Arc::new(create_remote_store(&config.backend).map_err(ServeError::Storage)?);
-            Ok(BackendStores {
-                sync_lock: remote.clone(),
-                suspended_store: remote.clone(),
-                readiness_store: remote,
-            })
-        }
-        t => Err(ServeError::Parse(format!("unknown backend type: {t}"))),
+fn build_backend_stores(config: &NagiConfig) -> Result<BackendStores, ServeError> {
+    match config.backend.backend_type {
+        BackendType::Local => build_local_backend_stores(&config.project.state_dir),
+        BackendType::Gcs | BackendType::S3 => build_remote_backend_stores(&config.backend),
     }
+}
+
+fn build_local_backend_stores(state_dir: &StateDir) -> Result<BackendStores, ServeError> {
+    let sync_lock: Arc<dyn SyncLock> = Arc::new(LocalSyncLock::new(state_dir.locks_dir()));
+    let suspended_store: Arc<dyn SuspendedStore> =
+        Arc::new(LocalSuspendedStore::new(state_dir.suspended_dir()));
+    let readiness_store: Arc<dyn ReadinessStore> =
+        Arc::new(LocalReadinessStore::new(state_dir.readiness_dir()));
+    Ok(BackendStores {
+        sync_lock,
+        suspended_store,
+        readiness_store,
+    })
+}
+
+fn build_remote_backend_stores(backend: &BackendConfig) -> Result<BackendStores, ServeError> {
+    let remote = Arc::new(create_remote_store(backend).map_err(ServeError::Storage)?);
+    Ok(BackendStores {
+        sync_lock: remote.clone(),
+        suspended_store: remote.clone(),
+        readiness_store: remote,
+    })
 }
 
 /// Resumes suspended assets by removing their flag files.
 ///
 /// If `selectors` is empty, lists suspended assets without removing.
 /// If `selectors` is non-empty, removes the suspended flag for each matching asset.
-pub fn resume(
-    selectors: &[&str],
-    nagi_dir: &crate::runtime::config::NagiDir,
-) -> Result<Vec<String>, std::io::Error> {
-    let dir = nagi_dir.suspended_dir();
+pub fn resume(selectors: &[&str], state_dir: &StateDir) -> Result<Vec<String>, std::io::Error> {
+    let dir = state_dir.suspended_dir();
     if selectors.is_empty() {
         let items = list_suspended(&dir)?;
         return Ok(items.into_iter().map(|i| i.asset_name).collect());
@@ -307,13 +294,10 @@ pub fn resume(
 pub fn halt(
     target_dir: &Path,
     reason: &str,
-    nagi_dir: &crate::runtime::config::NagiDir,
+    state_dir: &StateDir,
 ) -> Result<Vec<String>, ServeError> {
-    use crate::runtime::storage::local::LocalSuspendedStore;
-    use crate::runtime::storage::SuspendedStore;
-
-    let asset_names = crate::runtime::compile::resolve_compiled_asset_names(target_dir, &[], &[])?;
-    let store = LocalSuspendedStore::new(nagi_dir.suspended_dir());
+    let asset_names = resolve_compiled_asset_names(target_dir, &[], &[])?;
+    let store = LocalSuspendedStore::new(state_dir.suspended_dir());
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut halted = Vec::new();
@@ -390,25 +374,13 @@ mod tests {
     }
 
     #[test]
-    fn build_backend_stores_rejects_unknown_type() {
-        let config = crate::runtime::config::NagiConfig {
-            backend: crate::runtime::config::BackendConfig {
-                r#type: "redis".to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(build_backend_stores(&config).is_err());
-    }
-
-    #[test]
     fn load_controller_inputs_returns_components() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("target");
         setup_target(&target, &["a", "b"], &[]);
 
         let config = crate::runtime::config::NagiConfig::default();
-        let inputs = load_controller_inputs(&target, &[], &[], &config, None).unwrap();
+        let inputs = load_controller_inputs(&target, &[], &[], &config).unwrap();
         // Two independent assets → two components
         assert_eq!(inputs.len(), 2);
         assert!(inputs[0].cache_dir.is_some());
@@ -421,24 +393,14 @@ mod tests {
         setup_target(&target, &["a", "b", "c"], &[]);
 
         let config = crate::runtime::config::NagiConfig {
-            max_controllers: Some(2),
+            project: crate::runtime::config::ProjectConfig {
+                max_controllers: Some(2),
+                ..Default::default()
+            },
             ..Default::default()
         };
-        let err = load_controller_inputs(&target, &[], &[], &config, None).unwrap_err();
+        let err = load_controller_inputs(&target, &[], &[], &config).unwrap_err();
         assert!(err.to_string().contains("3 connected components"));
-    }
-
-    #[test]
-    fn load_controller_inputs_respects_cache_dir_override() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target");
-        setup_target(&target, &["a"], &[]);
-
-        let config = crate::runtime::config::NagiConfig::default();
-        let custom = dir.path().join("custom-cache");
-        let inputs =
-            load_controller_inputs(&target, &[], &[], &config, Some(custom.as_path())).unwrap();
-        assert_eq!(inputs[0].cache_dir, Some(custom));
     }
 
     #[test]

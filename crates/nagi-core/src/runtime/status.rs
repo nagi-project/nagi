@@ -84,7 +84,7 @@ pub fn asset_status(
         crate::runtime::compile::resolve_compiled_asset_names(target_dir, selectors, excludes)?;
 
     let cache = LocalCache::new(cache_dir.map(PathBuf::from).unwrap_or_else(|| {
-        crate::runtime::config::resolve_nagi_dir(Path::new(".")).evaluate_cache_dir()
+        crate::runtime::config::resolve_state_dir(Path::new(".")).evaluate_cache_dir()
     }));
     let store = if db_path.exists() {
         Some(LogStore::open(db_path, logs_dir)?)

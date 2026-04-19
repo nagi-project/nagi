@@ -37,7 +37,6 @@ class TestCreateServer:
     def test_readonly_excludes_sync_tools(self, readonly_server: FastMCP) -> None:
         names = self._tool_names(readonly_server)
         assert "nagi_sync" not in names
-        assert "nagi_sync" not in names
 
     def test_allow_sync_registers_all_tools(self, full_server: FastMCP) -> None:
         names = self._tool_names(full_server)
@@ -56,8 +55,8 @@ class TestMcpToolExecution:
         server = create_server()
         tools = {t.name: t for t in server._tool_manager.list_tools()}
         fn = tools["nagi_status"].fn
-        result = fn(target_dir="t", selectors=["s1"], cache_dir="/c")
-        mock_status.assert_called_once_with("t", ["s1"], "/c")
+        result = fn(target_dir="t", selectors=["s1"])
+        mock_status.assert_called_once_with("t", ["s1"])
         assert result == '{"assets":[]}'
 
     def test_nagi_status_defaults_none_selectors(self, mocker: MockerFixture) -> None:
@@ -67,8 +66,8 @@ class TestMcpToolExecution:
         server = create_server()
         tools = {t.name: t for t in server._tool_manager.list_tools()}
         fn = tools["nagi_status"].fn
-        fn(target_dir="t", selectors=None, cache_dir=None)
-        mock_status.assert_called_once_with("t", [], None)
+        fn(target_dir="t", selectors=None)
+        mock_status.assert_called_once_with("t", [])
 
     def test_nagi_evaluate_calls_core(self, mocker: MockerFixture) -> None:
         mock_eval = mocker.patch(
@@ -77,8 +76,8 @@ class TestMcpToolExecution:
         server = create_server()
         tools = {t.name: t for t in server._tool_manager.list_tools()}
         fn = tools["nagi_evaluate"].fn
-        result = fn(target_dir="t", selectors=["a"], cache_dir="/c", dry_run=True)
-        mock_eval.assert_called_once_with("t", ["a"], "/c", True)
+        result = fn(target_dir="t", selectors=["a"], dry_run=True)
+        mock_eval.assert_called_once_with("t", ["a"], dry_run=True)
         assert result == '{"results":[]}'
 
     def test_nagi_sync_proposes_and_executes(self, mocker: MockerFixture) -> None:
@@ -96,7 +95,6 @@ class TestMcpToolExecution:
                 target_dir="t",
                 selectors=None,
                 stages=None,
-                cache_dir=None,
                 force=False,
             )
         )
@@ -112,7 +110,6 @@ class TestMcpToolExecution:
                 target_dir="t",
                 selectors=None,
                 stages=None,
-                cache_dir=None,
                 force=False,
             )
         )

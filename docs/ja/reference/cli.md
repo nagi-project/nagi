@@ -30,14 +30,19 @@
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--log-level` | `warn` | ログレベルを設定（`error`, `warn`, `info`, `debug`, `trace`）。`NAGI_LOG_LEVEL` 環境変数を上書き |
+| `--project-dir` | `.` | プロジェクトディレクトリ |
 
 ## init
 
 環境を準備し、`compile` が実行できる状態にします。
 
 ```bash
-nagi init
+nagi init [OPTIONS]
 ```
+
+| オプション | 説明 |
+| --- | --- |
+| `--overwrite-remote` | 既存のリモート設定を上書きする |
 
 対話形式で Origin の設定、Connection の生成、接続確認を行います。Origin type を選択し、type に応じた設定を進めます。冪等で、再実行可能です。
 
@@ -82,7 +87,6 @@ nagi evaluate [OPTIONS]
 | `--select` | — | 評価対象の Asset を指定 |
 | `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
-| `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 評価対象の期待状態を表示（クエリやコマンドは実行しない） |
 | `--output` | `json` | 出力形式（`json`, `text`） |
 | `--no-pager` | — | ターミナル出力のページャーを無効化 |
@@ -101,7 +105,6 @@ nagi sync [OPTIONS]
 | `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--stage` | — | 実行するステージ（カンマ区切り: `pre`, `run`, `post`）。指定時は完了後の evaluate を行わない |
-| `--cache-dir` | — | キャッシュディレクトリ |
 | `--dry-run` | — | 実行されるコマンドを表示（副作用なし） |
 | `--force` | — | dbt Cloud の実行中ジョブチェックをスキップする |
 | `--auto-approve` | — | 対話的な確認をスキップし、すべての提案を実行する |
@@ -119,7 +122,6 @@ nagi status [OPTIONS]
 | `--select` | — | 対象の Asset を指定 |
 | `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
-| `--cache-dir` | — | キャッシュディレクトリ |
 | `--output` | `json` | 出力形式（`json`, `text`） |
 | `--no-pager` | — | ターミナル出力のページャーを無効化 |
 
@@ -137,8 +139,6 @@ nagi serve [OPTIONS]
 | `--exclude` | — | 指定セレクターに一致する Asset を除外 |
 | `--resources-dir` | `resources` | リソースディレクトリ |
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
-| `--cache-dir` | — | キャッシュディレクトリ |
-| `--project-dir` | `.` | プロジェクトディレクトリ |
 
 ### serve resume
 
@@ -195,9 +195,8 @@ nagi inspect <ASSET_NAME> [OPTIONS]
 | `--target-dir` | `target` | コンパイル済みディレクトリ |
 | `--output` | `text` | 出力形式（`json`, `text`） |
 | `--no-pager` | — | ページャーを無効にする |
-| `--nagi-dir` | — | Nagi 状態ディレクトリパスの上書き |
 
-観測データは `<nagiDir>/inspections/<asset-name>/` にキャッシュされます。
+観測データは `<stateDir>/inspections/<asset-name>/` にキャッシュされます。
 
 ## mcp
 

@@ -30,14 +30,19 @@ Command output defaults to JSON. Use `--output text` for human-readable table ou
 | Option | Default | Description |
 | --- | --- | --- |
 | `--log-level` | `warn` | Set log level (`error`, `warn`, `info`, `debug`, `trace`). Overrides `NAGI_LOG_LEVEL` env var |
+| `--project-dir` | `.` | Project directory |
 
 ## init
 
 Prepares the environment so that `compile` can run.
 
 ```bash
-nagi init
+nagi init [OPTIONS]
 ```
+
+| Option | Description |
+| --- | --- |
+| `--overwrite-remote` | Overwrite existing remote configuration |
 
 Interactively configures the Origin, generates a Connection, and verifies the connection. You select an Origin type and proceed with type-specific settings. Idempotent and safe to re-run.
 
@@ -82,7 +87,6 @@ nagi evaluate [OPTIONS]
 | `--select` | — | Specify the Assets to evaluate |
 | `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
-| `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the desired state to be evaluated (does not execute queries or commands) |
 | `--output` | `json` | Output format (`json`, `text`) |
 | `--no-pager` | — | Disable pager for terminal output |
@@ -101,7 +105,6 @@ nagi sync [OPTIONS]
 | `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
 | `--stage` | — | Stages to execute (comma-separated: `pre`, `run`, `post`). When specified, skips evaluation after Sync completion |
-| `--cache-dir` | — | Cache directory |
 | `--dry-run` | — | Show the commands to be executed (no side effects) |
 | `--force` | — | Skip the dbt Cloud running-job check |
 | `--auto-approve` | — | Skip interactive confirmation and execute all proposals |
@@ -119,7 +122,6 @@ nagi status [OPTIONS]
 | `--select` | — | Specify the target Assets |
 | `--exclude` | — | Exclude assets matching this selector |
 | `--target-dir` | `target` | Compiled directory |
-| `--cache-dir` | — | Cache directory |
 | `--output` | `json` | Output format (`json`, `text`) |
 | `--no-pager` | — | Disable pager for terminal output |
 
@@ -137,8 +139,6 @@ nagi serve [OPTIONS]
 | `--exclude` | — | Exclude assets matching this selector |
 | `--resources-dir` | `resources` | Resources directory |
 | `--target-dir` | `target` | Compiled directory |
-| `--cache-dir` | — | Cache directory |
-| `--project-dir` | `.` | Project directory |
 
 ### serve resume
 
@@ -195,9 +195,8 @@ nagi inspect <ASSET_NAME> [OPTIONS]
 | `--target-dir` | `target` | Compiled directory |
 | `--output` | `text` | Output format (`json`, `text`) |
 | `--no-pager` | — | Disable pager for terminal output |
-| `--nagi-dir` | — | Override Nagi state directory path |
 
-Inspection data is cached under `<nagiDir>/inspections/<asset-name>/`.
+Inspection data is cached under `<stateDir>/inspections/<asset-name>/`.
 
 ## mcp
 

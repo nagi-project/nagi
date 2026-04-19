@@ -22,7 +22,16 @@ LOG_LEVELS = ("error", "warn", "info", "debug", "trace")
     default=None,
     help="Set log level (default: warn, or NAGI_LOG_LEVEL env var).",
 )
-def cli(log_level: str | None) -> None:
+@click.option(
+    "--project-dir",
+    default=".",
+    show_default=True,
+    help="Project root directory containing nagi.yaml.",
+)
+@click.pass_context
+def cli(ctx: click.Context, log_level: str | None, project_dir: str) -> None:
+    ctx.ensure_object(dict)
+    ctx.obj["project_dir"] = project_dir
     if log_level is not None:
         set_log_level(log_level)
     else:

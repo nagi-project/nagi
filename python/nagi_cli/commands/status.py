@@ -26,11 +26,6 @@ from nagi_cli.output import OUTPUT_FORMATS, echo_output
     help="Directory containing compiled output.",
 )
 @click.option(
-    "--cache-dir",
-    default=None,
-    help="Cache directory (defaults to <nagiDir>/cache/)",
-)
-@click.option(
     "--output",
     "output_format",
     type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
@@ -48,7 +43,6 @@ def status(
     selectors: tuple[str, ...],
     excludes: tuple[str, ...],
     target_dir: str,
-    cache_dir: str | None,
     output_format: str,
     no_pager: bool,
 ) -> None:
@@ -58,7 +52,6 @@ def status(
             target_dir=target_dir,
             selectors=list(selectors),
             excludes=list(excludes),
-            cache_dir=cache_dir,
         )
     except (RuntimeError, json.JSONDecodeError) as e:
         click.echo(json.dumps({"error": str(e)}))
