@@ -107,6 +107,7 @@ parse_duration_test! {
 - When using external tools, libraries, or SDKs, always refer to the official documentation to verify correct usage.
 - Commit messages in English, Conventional Commits format (`feat:`, `fix:`, `refactor:`, etc.)
 - Do not add `Co-Authored-By` trailers to commits.
+- Do not add `https://claude.ai/code/...` session URLs or any similar trailer to commit messages.
 - Development must follow TDD (test-driven development): write tests first, then implement behavior and make tests pass.
 - Always run `mise run check` before committing. Do not commit if fmt, clippy, or test fails.
 
