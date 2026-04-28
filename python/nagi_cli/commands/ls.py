@@ -3,7 +3,7 @@ import json
 import click
 
 from nagi_cli._nagi_core import format_ls_text, list_resources
-from nagi_cli.output import OUTPUT_FORMATS, echo_output
+from nagi_cli.output import FORMAT_TEXT, OUTPUT_FORMATS, echo_output
 
 
 @click.command("ls")
@@ -41,10 +41,13 @@ def ls(
 ) -> None:
     """List all compiled resources."""
     try:
-        result_json = list_resources(target_dir, list(kinds))
+        result_json = list_resources(target_dir=target_dir, kinds=list(kinds))
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    output = format_ls_text(result_json) if output_format == "text" else result_json
+    if output_format == FORMAT_TEXT:
+        output = format_ls_text(result_json)
+    else:
+        output = result_json
     echo_output(output, no_pager=no_pager)

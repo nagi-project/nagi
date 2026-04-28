@@ -1,8 +1,12 @@
 mod command;
 mod freshness;
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
 
@@ -10,6 +14,7 @@ use crate::runtime::compile::ResolvedOnDriftEntry;
 use crate::runtime::kind::asset::DesiredCondition;
 use crate::runtime::kind::connection::{Connection, ConnectionError};
 use crate::runtime::log::{LogError, LogStore};
+use crate::runtime::sync::generate_uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -77,20 +82,16 @@ pub enum EvaluateError {
     },
 }
 
-fn evaluate_boolean(value: serde_json::Value) -> Result<ConditionStatus, EvaluateError> {
+fn evaluate_boolean(value: Value) -> Result<ConditionStatus, EvaluateError> {
     match &value {
-        serde_json::Value::Bool(true) => Ok(ConditionStatus::Ready),
-        serde_json::Value::Bool(false) => Ok(ConditionStatus::Drifted {
+        Value::Bool(true) => Ok(ConditionStatus::Ready),
+        Value::Bool(false) => Ok(ConditionStatus::Drifted {
             reason: "condition returned false".to_string(),
         }),
-        serde_json::Value::String(s) if s.eq_ignore_ascii_case("true") => {
-            Ok(ConditionStatus::Ready)
-        }
-        serde_json::Value::String(s) if s.eq_ignore_ascii_case("false") => {
-            Ok(ConditionStatus::Drifted {
-                reason: "condition returned false".to_string(),
-            })
-        }
+        Value::String(s) if s.eq_ignore_ascii_case("true") => Ok(ConditionStatus::Ready),
+        Value::String(s) if s.eq_ignore_ascii_case("false") => Ok(ConditionStatus::Drifted {
+            reason: "condition returned false".to_string(),
+        }),
         other => Err(EvaluateError::UnexpectedResult(format!(
             "SQL condition must return a scalar boolean (true/false), got: {other}"
         ))),
@@ -116,7 +117,7 @@ async fn evaluate_condition(
     asset_name: &str,
     condition: &DesiredCondition,
     conn: Option<&dyn Connection>,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Result<ConditionResult, EvaluateError> {
     let timeout = condition
         .timeout()
@@ -146,27 +147,23 @@ async fn evaluate_condition_inner(
         };
     }
 
-    let (condition_type, status) = match condition {
+    let condition_type = condition.condition_type_name().to_string();
+    let status = match condition {
         DesiredCondition::Freshness {
             max_age, column, ..
         } => {
             let c = require_conn!();
             let sql = c.freshness_sql(asset_name, column.as_deref())?;
             let value = c.query_scalar(&sql).await?;
-            let status = freshness::evaluate_freshness(value, max_age.as_std())?;
-            ("Freshness".to_string(), status)
+            freshness::evaluate_freshness(value, max_age.as_std())?
         }
         DesiredCondition::Sql { query, .. } => {
             let c = require_conn!();
             require_select_only(query, &*c.sql_dialect())?;
             let value = c.query_scalar(query).await?;
-            let status = evaluate_boolean(value)?;
-            ("SQL".to_string(), status)
+            evaluate_boolean(value)?
         }
-        DesiredCondition::Command { run, env, .. } => {
-            let status = command::evaluate_command(run, env).await?;
-            ("Command".to_string(), status)
-        }
+        DesiredCondition::Command { run, env, .. } => command::evaluate_command(run, env).await?,
     };
     Ok(ConditionResult {
         condition_name: name.to_string(),
@@ -180,8 +177,8 @@ async fn evaluate_conditions(
     asset_name: &str,
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
-    cached_conditions: &std::collections::HashMap<String, ConditionResult>,
-    default_timeout: std::time::Duration,
+    cached_conditions: &HashMap<String, ConditionResult>,
+    default_timeout: Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let conditions = on_drift.iter().flat_map(|e| &e.conditions);
     let mut results = Vec::new();
@@ -219,7 +216,7 @@ pub async fn evaluate_asset(
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
     log_store: Option<&LogStore>,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
     let started_at = Utc::now();
     let mut result = evaluate_conditions(
@@ -232,7 +229,7 @@ pub async fn evaluate_asset(
     .await?;
 
     if let Some(store) = log_store {
-        let id = crate::runtime::sync::generate_uuid();
+        let id = generate_uuid();
         let finished_at = Utc::now();
         let started_str = started_at.to_rfc3339();
         let finished_str = finished_at.to_rfc3339();
@@ -249,8 +246,8 @@ pub(crate) async fn evaluate_asset_cached(
     asset_name: &str,
     on_drift: &[ResolvedOnDriftEntry],
     conn: Option<&dyn Connection>,
-    cached_conditions: &std::collections::HashMap<String, ConditionResult>,
-    default_timeout: std::time::Duration,
+    cached_conditions: &HashMap<String, ConditionResult>,
+    default_timeout: Duration,
 ) -> Result<AssetEvalResult, EvaluateError> {
     evaluate_conditions(
         asset_name,

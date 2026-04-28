@@ -3,12 +3,15 @@ pub mod lock;
 pub mod remote;
 
 use std::collections::HashMap;
+use std::fmt;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::runtime::config::{BackendType, ProjectConfig};
-use crate::runtime::evaluate::AssetEvalResult;
+use crate::runtime::config::{load_config_from_dir, BackendType, NagiConfig, ProjectConfig};
+use crate::runtime::evaluate::{AssetEvalResult, ConditionResult};
 use crate::runtime::serve::SuspendedInfo;
 
 #[derive(Debug, Error)]
@@ -45,7 +48,7 @@ pub trait Cache: Send + Sync {
 }
 
 /// Manages per-asset suspension flags.
-pub trait SuspendedStore: Send + Sync + std::fmt::Debug {
+pub trait SuspendedStore: Send + Sync + fmt::Debug {
     fn write(&self, info: &SuspendedInfo) -> Result<(), StorageError>;
     fn read(&self, asset_name: &str) -> Result<Option<SuspendedInfo>, StorageError>;
     fn remove(&self, asset_name: &str) -> Result<(), StorageError>;
@@ -55,12 +58,12 @@ pub trait SuspendedStore: Send + Sync + std::fmt::Debug {
 /// Per-condition evaluate result with a timestamp, used for TTL-based caching.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConditionCacheEntry {
-    pub result: crate::runtime::evaluate::ConditionResult,
+    pub result: ConditionResult,
     pub cached_at: String,
 }
 
 /// Per-asset map of condition name → cached result with timestamp.
-pub type ConditionCacheMap = std::collections::HashMap<String, ConditionCacheEntry>;
+pub type ConditionCacheMap = HashMap<String, ConditionCacheEntry>;
 
 /// Caches per-condition evaluate results with timestamps for TTL-based reuse.
 /// Each condition is stored as a separate file under `{asset_name}/{condition_name}.json`.
@@ -80,7 +83,7 @@ pub trait ConditionCache: Send + Sync {
 /// Each asset is stored as a separate entry. An asset is considered Ready if
 /// its entry exists and contains `ready: true`. Missing entries default to
 /// Not Ready.
-pub trait ReadinessStore: Send + Sync + std::fmt::Debug {
+pub trait ReadinessStore: Send + Sync + fmt::Debug {
     /// Writes the readiness snapshot for all assets managed by one controller.
     /// Replaces previous entries for these assets.
     fn write_all(&self, readiness: &HashMap<String, bool>) -> Result<(), StorageError>;
@@ -110,24 +113,22 @@ pub trait SyncLock: Send + Sync {
 }
 
 /// Creates a [`SyncLock`] implementation matching the configured backend type.
-pub fn build_sync_lock(
-    config: &crate::runtime::config::NagiConfig,
-) -> Result<std::sync::Arc<dyn SyncLock>, StorageError> {
+pub fn build_sync_lock(config: &NagiConfig) -> Result<Arc<dyn SyncLock>, StorageError> {
     match config.backend.backend_type {
-        BackendType::Local => Ok(std::sync::Arc::new(local::LocalSyncLock::new(
+        BackendType::Local => Ok(Arc::new(local::LocalSyncLock::new(
             config.project.state_dir.locks_dir(),
         ))),
-        BackendType::Gcs | BackendType::S3 => Ok(std::sync::Arc::new(remote::create_remote_store(
-            &config.backend,
-        )?)),
+        BackendType::Gcs | BackendType::S3 => {
+            Ok(Arc::new(remote::create_remote_store(&config.backend)?))
+        }
     }
 }
 
 /// Loads project config and builds a [`SyncLock`] with the configured TTL.
 pub fn build_sync_lock_from_project(
-    project_dir: &std::path::Path,
-) -> Result<(std::sync::Arc<dyn SyncLock>, Duration), StorageError> {
-    let config = crate::runtime::config::load_config_from_dir(project_dir)
+    project_dir: &Path,
+) -> Result<(Arc<dyn SyncLock>, Duration), StorageError> {
+    let config = load_config_from_dir(project_dir)
         .map_err(|e| StorageError::Io(std::io::Error::other(e.to_string())))?;
     let lock = build_sync_lock(&config)?;
     let ttl = Duration::from_secs(config.project.lock_ttl_seconds);

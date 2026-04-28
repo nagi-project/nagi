@@ -1,15 +1,19 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::runtime::config::ExportConfig;
-use crate::runtime::kind::connection::Connection;
-use crate::runtime::kind::connection::ConnectionSpec;
+use crate::runtime::compile::load_resources;
+use crate::runtime::config::{load_config_from_dir, ExportConfig};
+use crate::runtime::duration::Duration;
+use crate::runtime::kind::connection::{resolve_connection_by_name, Connection, ConnectionSpec};
 use crate::runtime::kind::{self, NagiKind};
-use crate::runtime::log::LogStore;
+use crate::runtime::log::{LogStore, RowTransform};
+use crate::runtime::storage::remote::RemoteObjectStore;
 
 #[derive(Debug, Error)]
 pub enum ExportError {
@@ -208,7 +212,7 @@ fn build_merge_sql(dataset: &str, table: ExportTable) -> String {
 pub async fn export_table(
     store: &LogStore,
     conn: &dyn Connection,
-    remote_store: Option<&crate::runtime::storage::remote::RemoteObjectStore>,
+    remote_store: Option<&RemoteObjectStore>,
     config: &ExportConfig,
     watermarks_dir: &Path,
     table: ExportTable,
@@ -264,15 +268,15 @@ pub async fn export_table(
 /// For non-sync_logs tables or when no remote store is configured, returns an empty map.
 async fn upload_path_map(
     store: &LogStore,
-    remote_store: Option<&crate::runtime::storage::remote::RemoteObjectStore>,
+    remote_store: Option<&RemoteObjectStore>,
     table: ExportTable,
     last_rowid: i64,
-) -> Result<std::collections::HashMap<String, String>, ExportError> {
+) -> Result<HashMap<String, String>, ExportError> {
     if table != ExportTable::SyncLogs {
-        return Ok(std::collections::HashMap::new());
+        return Ok(HashMap::new());
     }
     let Some(rs) = remote_store else {
-        return Ok(std::collections::HashMap::new());
+        return Ok(HashMap::new());
     };
     upload_sync_log_files(store, rs, last_rowid).await
 }
@@ -285,35 +289,31 @@ fn prepare_jsonl_path(table: ExportTable) -> Result<PathBuf, ExportError> {
 }
 
 /// Builds an optional row transform that rewrites local file paths to remote URIs.
-fn build_path_rewrite_transform(
-    path_map: std::collections::HashMap<String, String>,
-) -> Option<Box<crate::runtime::log::RowTransform>> {
+fn build_path_rewrite_transform(path_map: HashMap<String, String>) -> Option<Box<RowTransform>> {
     if path_map.is_empty() {
         return None;
     }
-    Some(Box::new(
-        move |row: &mut serde_json::Map<String, serde_json::Value>| {
-            for field in &["stdout_path", "stderr_path"] {
-                let remote_uri = row
-                    .get(*field)
-                    .and_then(|v| v.as_str())
-                    .and_then(|local| path_map.get(local));
-                if let Some(uri) = remote_uri {
-                    row.insert(field.to_string(), serde_json::Value::String(uri.clone()));
-                }
+    Some(Box::new(move |row: &mut Map<String, Value>| {
+        for field in &["stdout_path", "stderr_path"] {
+            let remote_uri = row
+                .get(*field)
+                .and_then(|v| v.as_str())
+                .and_then(|local| path_map.get(local));
+            if let Some(uri) = remote_uri {
+                row.insert(field.to_string(), Value::String(uri.clone()));
             }
-        },
-    ))
+        }
+    }))
 }
 
 /// Uploads stdout/stderr files referenced by unexported sync_logs rows.
 /// Returns a map of local_path → remote_uri for path rewriting in JSONL.
 async fn upload_sync_log_files(
     store: &LogStore,
-    remote_store: &crate::runtime::storage::remote::RemoteObjectStore,
+    remote_store: &RemoteObjectStore,
     last_rowid: i64,
-) -> Result<std::collections::HashMap<String, String>, ExportError> {
-    let mut path_map = std::collections::HashMap::new();
+) -> Result<HashMap<String, String>, ExportError> {
+    let mut path_map = HashMap::new();
 
     let sql = "SELECT stdout_path, stderr_path FROM sync_logs \
                WHERE rowid > ?1 \
@@ -360,7 +360,7 @@ pub struct ExportResult {
 pub async fn export_all(
     store: &LogStore,
     conn: &dyn Connection,
-    remote_store: Option<&crate::runtime::storage::remote::RemoteObjectStore>,
+    remote_store: Option<&RemoteObjectStore>,
     config: &ExportConfig,
     watermarks_dir: &Path,
     tables: &[ExportTable],
@@ -402,9 +402,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
                 "nagi export --select {{ sync.table }} --dry-run | jq -e '.[] | .count == 0'"
                     .to_string(),
             ],
-            interval: Some(crate::runtime::duration::Duration::from_secs(
-                config.interval.as_std().as_secs(),
-            )),
+            interval: Some(Duration::from_secs(config.interval.as_std().as_secs())),
             env: Default::default(),
             evaluate_cache_ttl: None,
             identity: None,
@@ -438,10 +436,7 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
                 on_drift: vec![kind::asset::OnDriftEntry {
                     conditions: conditions_name.to_string(),
                     sync: sync_name.to_string(),
-                    with: std::collections::HashMap::from([(
-                        "table".to_string(),
-                        table_name.to_string(),
-                    )]),
+                    with: HashMap::from([("table".to_string(), table_name.to_string())]),
                     merge_position: kind::asset::MergePosition::BeforeOrigin,
                 }],
                 auto_sync: true,
@@ -460,8 +455,8 @@ pub fn generate_export_resources(config: &ExportConfig) -> Vec<NagiKind> {
 pub fn resolve_export_connection(
     resources_dir: &Path,
     connection_name: &str,
-) -> Result<Box<dyn crate::runtime::kind::connection::Connection>, ExportError> {
-    let resources = crate::runtime::compile::load_resources(resources_dir)
+) -> Result<Box<dyn Connection>, ExportError> {
+    let resources = load_resources(resources_dir)
         .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
     let connections: HashMap<String, ConnectionSpec> = resources
@@ -474,14 +469,10 @@ pub fn resolve_export_connection(
         })
         .collect();
 
-    let resolved = crate::runtime::kind::connection::resolve_connection_by_name(
-        connection_name,
-        &connections,
-        &std::collections::HashMap::new(),
-    )
-    .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
+    let resolved = resolve_connection_by_name(connection_name, &connections, &HashMap::new())
+        .map_err(|e| ExportError::Io(std::io::Error::other(e.to_string())))?;
 
-    let default_timeout = crate::runtime::config::load_config_from_dir(resources_dir)
+    let default_timeout = load_config_from_dir(resources_dir)
         .unwrap_or_default()
         .project
         .default_timeout
@@ -493,15 +484,15 @@ pub fn resolve_export_connection(
 
 /// Checks whether enough time has elapsed since the last export.
 /// Returns `true` if the interval has passed (or no marker exists).
-pub fn should_export(watermarks_dir: &Path, interval: &crate::runtime::duration::Duration) -> bool {
+pub fn should_export(watermarks_dir: &Path, interval: &Duration) -> bool {
     let marker = watermarks_dir.join("_last_export_time");
     match std::fs::read_to_string(&marker) {
         Ok(content) => {
             let Ok(last) = content.trim().parse::<f64>() else {
                 return true;
             };
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs_f64();
             now - last >= interval.as_std().as_secs_f64()
@@ -513,8 +504,8 @@ pub fn should_export(watermarks_dir: &Path, interval: &crate::runtime::duration:
 /// Records the current time as the last export timestamp.
 pub fn mark_exported(watermarks_dir: &Path) -> Result<(), ExportError> {
     std::fs::create_dir_all(watermarks_dir)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64();
     std::fs::write(watermarks_dir.join("_last_export_time"), now.to_string())?;

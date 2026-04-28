@@ -4,10 +4,14 @@ mod schema;
 pub mod subscriber;
 mod sync;
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
+use serde_json::{json, Map, Value};
 use thiserror::Error;
+
+use crate::runtime::config::StateDir;
 
 pub use self::evaluate::EvaluateLogEntry;
 pub use self::sync::{SyncLogEntry, SyncLogFilePaths};
@@ -86,7 +90,7 @@ fn sanitize_path_component(name: &str) -> Result<String, LogError> {
 }
 
 /// Callback for transforming a row before writing to JSONL.
-pub type RowTransform = dyn Fn(&mut serde_json::Map<String, serde_json::Value>);
+pub type RowTransform = dyn Fn(&mut Map<String, Value>);
 
 /// Handle for the logging subsystem.
 /// Manages SQLite metadata and file-based stdout/stderr storage.
@@ -108,9 +112,7 @@ impl LogStore {
     }
 
     /// Opens (or creates) the log store using paths derived from a `StateDir`.
-    pub(crate) fn from_state_dir(
-        state_dir: &crate::runtime::config::StateDir,
-    ) -> Result<Self, LogError> {
+    pub(crate) fn from_state_dir(state_dir: &StateDir) -> Result<Self, LogError> {
         Self::open(&state_dir.log_store_path(), &state_dir.logs_dir())
     }
 
@@ -125,7 +127,7 @@ impl LogStore {
     ///
     /// `transform_row` is called for each row to allow rewriting fields
     /// (e.g. replacing local file paths with remote URIs).
-    pub fn extract_rows_jsonl<W: std::io::Write>(
+    pub fn extract_rows_jsonl<W: Write>(
         &self,
         table: &str,
         last_rowid: i64,
@@ -151,16 +153,16 @@ impl LogStore {
             let rowid: i64 = row.get(0)?;
             max_rowid = rowid;
 
-            let mut map = serde_json::Map::new();
+            let mut map = Map::new();
             // Skip column 0 (rowid) - start from 1
             for (i, name) in column_names.iter().enumerate().skip(1) {
                 let value: rusqlite::types::Value = row.get(i)?;
                 let json_val = match value {
-                    rusqlite::types::Value::Null => serde_json::Value::Null,
-                    rusqlite::types::Value::Integer(n) => serde_json::Value::Number(n.into()),
-                    rusqlite::types::Value::Real(f) => serde_json::json!(f),
-                    rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
-                    rusqlite::types::Value::Blob(b) => serde_json::Value::String(base64_encode(&b)),
+                    rusqlite::types::Value::Null => Value::Null,
+                    rusqlite::types::Value::Integer(n) => Value::Number(n.into()),
+                    rusqlite::types::Value::Real(f) => json!(f),
+                    rusqlite::types::Value::Text(s) => Value::String(s),
+                    rusqlite::types::Value::Blob(b) => Value::String(base64_encode(&b)),
                 };
                 map.insert(name.clone(), json_val);
             }
@@ -169,7 +171,7 @@ impl LogStore {
                 transform(&mut map);
             }
 
-            serde_json::to_writer(&mut *writer, &serde_json::Value::Object(map))
+            serde_json::to_writer(&mut *writer, &Value::Object(map))
                 .map_err(|e| LogError::Io(std::io::Error::other(e.to_string())))?;
             writeln!(writer).map_err(LogError::Io)?;
             count += 1;

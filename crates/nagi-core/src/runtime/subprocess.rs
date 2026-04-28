@@ -2,6 +2,16 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
+use crate::runtime::kind::KindError;
+#[cfg(windows)]
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+#[cfg(windows)]
+use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
+#[cfg(windows)]
+use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
+#[cfg(windows)]
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SubprocessEnvError {
     #[error("undefined environment variable '{0}' referenced in ${{...}} template")]
@@ -38,9 +48,9 @@ pub fn validate_env_keys(
     env: &HashMap<String, String>,
     kind: &str,
     context: &str,
-) -> Result<(), crate::runtime::kind::KindError> {
+) -> Result<(), KindError> {
     for key in env.keys() {
-        validate_env_key(key).map_err(|e| crate::runtime::kind::KindError::InvalidSpec {
+        validate_env_key(key).map_err(|e| KindError::InvalidSpec {
             kind: kind.to_string(),
             message: format!("{context}: {e}"),
         })?;
@@ -164,11 +174,6 @@ pub fn build_subprocess_env(
 /// full environment as a `HashMap`.
 #[cfg(windows)]
 fn create_environment_block_map() -> Result<HashMap<String, String>, SubprocessEnvError> {
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
-    use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
-    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-
     struct HandleGuard(HANDLE);
     impl Drop for HandleGuard {
         fn drop(&mut self) {

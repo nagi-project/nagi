@@ -1,11 +1,13 @@
+use std::io;
 use std::path::Path;
 
-use crate::runtime::config::NagiConfig;
+use crate::runtime::config::{self, NagiConfig};
 use crate::runtime::export::{
     dry_run_all, export_all, mark_exported, resolve_export_connection, should_export, DryRunResult,
     ExportError, ExportResult, ExportTable,
 };
 use crate::runtime::log::LogStore;
+use crate::runtime::storage::remote;
 
 /// Runs dry-run export using config-derived paths.
 pub(crate) fn dry_run_for_config(
@@ -30,9 +32,10 @@ pub(crate) async fn export_for_config(
     resources_dir: &Path,
     select: Option<&str>,
 ) -> Result<Vec<ExportResult>, ExportError> {
-    let export_config = config.project.export.as_ref().ok_or_else(|| {
-        ExportError::Io(std::io::Error::other("export not configured in nagi.yaml"))
-    })?;
+    let export_config =
+        config.project.export.as_ref().ok_or_else(|| {
+            ExportError::Io(io::Error::other("export not configured in nagi.yaml"))
+        })?;
 
     let tables = match select {
         Some(name) => vec![ExportTable::from_name(name)?],
@@ -41,7 +44,7 @@ pub(crate) async fn export_for_config(
 
     let log_store = LogStore::from_state_dir(&config.project.state_dir)?;
     let conn = resolve_export_connection(resources_dir, &export_config.connection)?;
-    let remote_store = crate::runtime::storage::remote::create_remote_store(&config.backend).ok();
+    let remote_store = remote::create_remote_store(&config.backend).ok();
     let wm_dir = config.project.state_dir.watermarks_dir();
 
     Ok(export_all(
@@ -58,7 +61,7 @@ pub(crate) async fn export_for_config(
 /// Runs export if configured and enough time has elapsed since the last export.
 /// Failures are logged as warnings and do not propagate.
 pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
-    let config = match crate::runtime::config::load_config_from_dir(project_dir) {
+    let config = match config::load_config_from_dir(project_dir) {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -88,7 +91,7 @@ pub(crate) async fn try_export(resources_dir: &Path, project_dir: &Path) {
         }
     };
 
-    let remote_store = crate::runtime::storage::remote::create_remote_store(&config.backend).ok();
+    let remote_store = remote::create_remote_store(&config.backend).ok();
 
     let results = export_all(
         &log_store,

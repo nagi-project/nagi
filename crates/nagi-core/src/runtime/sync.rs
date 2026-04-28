@@ -1,13 +1,23 @@
 mod command;
 
+use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::runtime::compile::CompiledAsset;
+use crate::runtime::evaluate::{evaluate_asset, AssetEvalResult};
+use crate::runtime::inspect::{ComparisonItem, InspectionStore, SyncInspection};
+use crate::runtime::kind::connection::{Connection, ResolvedConnection};
+use crate::runtime::kind::origin::dbt::cloud;
 use crate::runtime::kind::sync::{SyncSpec, SyncStep};
 use crate::runtime::log::{LogError, LogStore};
+use crate::runtime::storage::local::LocalCache;
 use crate::runtime::storage::Cache;
 use crate::runtime::subprocess::SubprocessEnvError;
 
@@ -69,8 +79,8 @@ pub enum SyncType {
     Sync,
 }
 
-impl std::fmt::Display for SyncType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for SyncType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SyncType::Sync => write!(f, "sync"),
         }
@@ -103,8 +113,8 @@ impl Stage {
     }
 }
 
-impl std::fmt::Display for Stage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Stage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Stage::Pre => write!(f, "pre"),
             Stage::Run => write!(f, "run"),
@@ -204,7 +214,7 @@ pub async fn execute_sync(
     sync_type: SyncType,
     stages: Option<&[Stage]>,
     log_store: Option<&LogStore>,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Result<SyncExecutionResult, SyncError> {
     let result =
         execute_sync_core(asset_name, sync_spec, sync_type, stages, default_timeout).await?;
@@ -224,7 +234,7 @@ pub async fn execute_sync_core(
     sync_spec: &SyncSpec,
     sync_type: SyncType,
     stages: Option<&[Stage]>,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Result<SyncExecutionResult, SyncError> {
     let execution_id = generate_uuid();
     let stages_to_run = resolve_stages(sync_spec, stages);
@@ -255,10 +265,10 @@ pub async fn execute_sync_core(
 
 /// Resolves the effective timeout for a step: step > sync > default.
 fn resolve_step_timeout(
-    step: &crate::runtime::kind::sync::SyncStep,
+    step: &SyncStep,
     sync_spec: &SyncSpec,
-    default_timeout: std::time::Duration,
-) -> std::time::Duration {
+    default_timeout: Duration,
+) -> Duration {
     if let Some(t) = step.timeout.as_ref() {
         return t.as_std();
     }
@@ -292,9 +302,6 @@ pub fn dry_run_sync(
 }
 
 pub(crate) fn generate_uuid() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let now = SystemTime::now()
@@ -331,9 +338,7 @@ pub(crate) fn parse_sync_type(s: &str) -> Result<SyncType, SyncError> {
 }
 
 /// Resolves the sync spec from the first on_drift entry (first-match).
-pub(crate) fn resolve_sync_spec(
-    compiled: &crate::runtime::compile::CompiledAsset,
-) -> Result<SyncSpec, SyncError> {
+pub(crate) fn resolve_sync_spec(compiled: &CompiledAsset) -> Result<SyncSpec, SyncError> {
     compiled
         .spec
         .on_drift
@@ -357,21 +362,15 @@ pub(crate) async fn preflight_check_dbt_cloud(
         Some(ids) => ids,
         None => return Ok(()),
     };
-    let cred_path =
-        crate::runtime::kind::origin::dbt::cloud::extract_credentials_path(&compiled.connection)
-            .ok_or_else(|| {
-                SyncError::DbtCloud(format!(
-                    "asset '{}' has dbt_cloud_job_ids but no dbt Cloud credentials in connection",
-                    compiled.metadata.name
-                ))
-            })?;
-    crate::runtime::kind::origin::dbt::cloud::preflight_check(
-        &compiled.metadata.name,
-        cred_path,
-        job_ids,
-    )
-    .await
-    .map_err(|e| SyncError::DbtCloud(e.to_string()))
+    let cred_path = cloud::extract_credentials_path(&compiled.connection).ok_or_else(|| {
+        SyncError::DbtCloud(format!(
+            "asset '{}' has dbt_cloud_job_ids but no dbt Cloud credentials in connection",
+            compiled.metadata.name
+        ))
+    })?;
+    cloud::preflight_check(&compiled.metadata.name, cred_path, job_ids)
+        .await
+        .map_err(|e| SyncError::DbtCloud(e.to_string()))
 }
 
 /// Links an evaluation to a sync execution via the log store.
@@ -385,9 +384,9 @@ fn link_evaluation(log_store: Option<&LogStore>, execution_id: &str, evaluation_
 }
 
 /// Writes an evaluation result to the local cache.
-fn write_eval_cache(cache_dir: Option<&Path>, result: &crate::runtime::evaluate::AssetEvalResult) {
+fn write_eval_cache(cache_dir: Option<&Path>, result: &AssetEvalResult) {
     if let Some(dir) = cache_dir {
-        let cache = crate::runtime::storage::local::LocalCache::new(dir.to_path_buf());
+        let cache = LocalCache::new(dir.to_path_buf());
         if let Err(e) = cache.write(result) {
             tracing::warn!(error = %e, "failed to write evaluation to cache");
         }
@@ -397,12 +396,12 @@ fn write_eval_cache(cache_dir: Option<&Path>, result: &crate::runtime::evaluate:
 /// Evaluates an asset and writes the result to the local cache.
 pub(crate) async fn evaluate_and_cache(
     compiled: &CompiledAsset,
-    conn: Option<&dyn crate::runtime::kind::connection::Connection>,
+    conn: Option<&dyn Connection>,
     log_store: Option<&LogStore>,
     cache_dir: Option<&Path>,
-    default_timeout: std::time::Duration,
-) -> Result<crate::runtime::evaluate::AssetEvalResult, SyncError> {
-    let result = crate::runtime::evaluate::evaluate_asset(
+    default_timeout: Duration,
+) -> Result<AssetEvalResult, SyncError> {
+    let result = evaluate_asset(
         &compiled.metadata.name,
         &compiled.spec.on_drift,
         conn,
@@ -426,7 +425,7 @@ pub(crate) struct SyncWorkflowParams<'a> {
     pub log_store: Option<&'a LogStore>,
     pub cache_dir: Option<&'a Path>,
     pub state_dir: Option<&'a Path>,
-    pub default_timeout: std::time::Duration,
+    pub default_timeout: Duration,
 }
 
 /// Re-evaluates after sync and links the evaluation to the execution.
@@ -436,7 +435,7 @@ async fn re_evaluate_and_link(
     log_store: Option<&LogStore>,
     cache_dir: Option<&Path>,
     execution_id: &str,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) {
     let conn = match compiled
         .connection
@@ -542,7 +541,7 @@ pub(crate) async fn run_sync_workflow(
         None => None,
     };
 
-    let finished_at = chrono::Utc::now().to_rfc3339();
+    let finished_at = Utc::now().to_rfc3339();
     write_inspection(
         params.state_dir,
         &params.compiled.metadata.name,
@@ -559,7 +558,7 @@ pub(crate) async fn run_sync_workflow(
 
 /// Resolved BigQuery connection info for inspection.
 struct BqInspectConn {
-    conn: Box<dyn crate::runtime::kind::connection::Connection>,
+    conn: Box<dyn Connection>,
     project: String,
     dataset: String,
     #[allow(dead_code)] // used by destination jobs lazy fetch (not yet integrated)
@@ -570,9 +569,8 @@ struct BqInspectConn {
 /// Returns `None` for non-BigQuery connections or on connection failure.
 fn connect_for_inspection(
     compiled: &CompiledAsset,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Option<BqInspectConn> {
-    use crate::runtime::kind::connection::ResolvedConnection;
     let resolved = compiled.connection.as_ref()?;
     let (project, dataset, location) = match resolved {
         #[cfg(feature = "bigquery")]
@@ -601,11 +599,11 @@ fn connect_for_inspection(
 
 /// Fetches row count before sync. Returns (row_count, normalized_object_type).
 async fn fetch_row_count_before(
-    conn: &dyn crate::runtime::kind::connection::Connection,
+    conn: &dyn Connection,
     project: &str,
     dataset: &str,
     model_name: &str,
-) -> (Option<serde_json::Value>, Option<String>) {
+) -> (Option<Value>, Option<String>) {
     match crate::runtime::inspect::bigquery::fetch_row_count_value(
         conn, project, dataset, model_name,
     )
@@ -630,11 +628,11 @@ async fn fetch_row_count_before(
 
 /// Fetches row count after sync.
 async fn fetch_row_count_after(
-    conn: &dyn crate::runtime::kind::connection::Connection,
+    conn: &dyn Connection,
     project: &str,
     dataset: &str,
     model_name: &str,
-) -> Option<serde_json::Value> {
+) -> Option<Value> {
     match crate::runtime::inspect::bigquery::fetch_row_count_value(
         conn, project, dataset, model_name,
     )
@@ -658,14 +656,14 @@ fn write_inspection(
     finished_at: &str,
     object_type: Option<&str>,
     model_name: &str,
-    row_count_before: Option<serde_json::Value>,
-    row_count_after: Option<serde_json::Value>,
+    row_count_before: Option<Value>,
+    row_count_after: Option<Value>,
 ) {
     let Some(state_dir) = state_dir else {
         return;
     };
 
-    let mut inspection = crate::runtime::inspect::SyncInspection::new(
+    let mut inspection = SyncInspection::new(
         execution_id.to_string(),
         asset_name.to_string(),
         finished_at.to_string(),
@@ -676,17 +674,15 @@ fn write_inspection(
             Some(t) => format!("{t} row count"),
             None => "row count".to_string(),
         };
-        inspection
-            .comparisons
-            .push(crate::runtime::inspect::ComparisonItem {
-                item_type,
-                name: model_name.to_string(),
-                before,
-                after,
-            });
+        inspection.comparisons.push(ComparisonItem {
+            item_type,
+            name: model_name.to_string(),
+            before,
+            after,
+        });
     }
 
-    let store = crate::runtime::inspect::InspectionStore::new(state_dir);
+    let store = InspectionStore::new(state_dir);
     if let Err(e) = store.write(&inspection) {
         tracing::warn!(error = %e, "inspection: failed to write inspection file");
     }

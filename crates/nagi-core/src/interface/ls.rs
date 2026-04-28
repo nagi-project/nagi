@@ -1,15 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::runtime::compile::load_compiled_assets;
-use crate::runtime::compile::CompiledAsset;
+use crate::runtime::compile::{load_compiled_assets, CompileError, CompiledAsset};
 
 #[derive(Debug, Error)]
 pub(crate) enum LsError {
     #[error(transparent)]
-    Compile(#[from] crate::runtime::compile::CompileError),
+    Compile(#[from] CompileError),
 
     #[error("failed to parse compiled asset: {0}")]
     Parse(String),
@@ -67,9 +67,7 @@ const VALID_KINDS: &[&str] = &["asset", "connection", "conditions", "sync"];
 fn validate_kinds(kinds: &[&str]) -> Result<(), LsError> {
     for kind in kinds {
         if !VALID_KINDS.contains(&kind.to_lowercase().as_str()) {
-            return Err(
-                crate::runtime::compile::CompileError::InvalidKind(kind.to_string()).into(),
-            );
+            return Err(CompileError::InvalidKind(kind.to_string()).into());
         }
     }
     Ok(())
@@ -80,7 +78,7 @@ fn has_kind(kinds: &[String], kind: &str) -> bool {
 }
 
 /// Reads compiled target/ directory and returns a structured listing of all resources.
-pub(crate) fn ls(target_dir: &std::path::Path, kinds: &[&str]) -> Result<LsOutput, LsError> {
+pub(crate) fn ls(target_dir: &Path, kinds: &[&str]) -> Result<LsOutput, LsError> {
     validate_kinds(kinds)?;
 
     let normalized: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();

@@ -69,7 +69,9 @@ def _collect_origin_entries() -> list[dict]:
 
 def _write_origin_files(entries: list[dict]) -> None:
     try:
-        result = json.loads(write_init_dbt_files(".", json.dumps(entries)))
+        result = json.loads(
+            write_init_dbt_files(base_dir=".", entries_json=json.dumps(entries))
+        )
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
@@ -109,7 +111,7 @@ def _collect_one_dbt_entry(
 
     if (profile_name, target) not in tested:
         try:
-            run_dbt_debug(dbt_dir, profile_name, target)
+            run_dbt_debug(project_dir=dbt_dir, profile=profile_name, target=target)
         except RuntimeError as e:
             click.echo(json.dumps({"error": str(e)}))
             raise SystemExit(1)

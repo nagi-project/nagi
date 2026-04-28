@@ -1,19 +1,23 @@
-use std::path::Path;
+use std::collections::HashSet;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::runtime::config::{self, ConfigError, InitConfigResult, StateDir};
 use crate::runtime::log::{LogError, LogStore};
+use crate::runtime::storage::ProjectConfigStore;
 
 #[derive(Debug, Error)]
 pub enum InitError {
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
 
     #[error("log error: {0}")]
     Log(#[from] LogError),
 
     #[error("config error: {0}")]
-    Config(#[from] crate::runtime::config::ConfigError),
+    Config(#[from] ConfigError),
 
     #[error("dbt_project.yml not found in {0}")]
     DbtProjectNotFound(String),
@@ -88,9 +92,9 @@ fn ensure_watermarks_dir(watermarks_dir: &Path) -> Result<(), InitError> {
 /// When `force` is true, overwrites existing remote config.
 pub(crate) fn init_workspace(
     base_dir: &Path,
-    state_dir: &crate::runtime::config::StateDir,
+    state_dir: &StateDir,
     force: bool,
-) -> Result<crate::runtime::config::InitConfigResult, InitError> {
+) -> Result<InitConfigResult, InitError> {
     ensure_resources_dir(base_dir)?;
     ensure_config(state_dir.root())?;
     let db_path = state_dir.log_store_path();
@@ -98,12 +102,10 @@ pub(crate) fn init_workspace(
     let watermarks_dir = state_dir.watermarks_dir();
     ensure_log_store_with_watermarks(&db_path, &logs_dir, &watermarks_dir)?;
     ensure_watermarks_dir(&watermarks_dir)?;
-    let local_config = crate::runtime::config::load_local_config(base_dir)?;
-    let store = crate::runtime::config::build_project_config_store(&local_config.backend)?;
-    let store_ref = store
-        .as_ref()
-        .map(|s| s as &dyn crate::runtime::storage::ProjectConfigStore);
-    let result = crate::runtime::config::init_config(base_dir, store_ref, force)?;
+    let local_config = config::load_local_config(base_dir)?;
+    let store = config::build_project_config_store(&local_config.backend)?;
+    let store_ref = store.as_ref().map(|s| s as &dyn ProjectConfigStore);
+    let result = config::init_config(base_dir, store_ref, force)?;
     Ok(result)
 }
 
@@ -178,8 +180,8 @@ pub(crate) struct DbtProjectEntry {
 
 /// Result of `write_init_dbt_files`.
 pub(crate) struct InitDbtFilesResult {
-    pub connection_path: Option<std::path::PathBuf>,
-    pub origin_path: Option<std::path::PathBuf>,
+    pub connection_path: Option<PathBuf>,
+    pub origin_path: Option<PathBuf>,
 }
 
 /// Generates and writes connection.yaml and origin.yaml from collected dbt project entries.
@@ -201,7 +203,7 @@ pub(crate) fn write_init_dbt_files(
     }
 
     let mut connections: Vec<(String, String)> = Vec::new();
-    let mut seen_connections: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_connections: HashSet<String> = HashSet::new();
     let mut origins: Vec<String> = Vec::new();
 
     for entry in entries {

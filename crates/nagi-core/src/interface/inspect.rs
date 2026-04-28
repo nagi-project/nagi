@@ -1,8 +1,9 @@
 use std::path::Path;
+use std::time::Duration;
 
 use crate::runtime::compile::{load_compiled_assets, CompiledAsset};
-use crate::runtime::inspect::{InspectionStore, SyncInspection};
-use crate::runtime::kind::connection::ResolvedConnection;
+use crate::runtime::inspect::{bigquery, InspectionStore, SyncInspection};
+use crate::runtime::kind::connection::{Connection, ResolvedConnection};
 
 /// Backfills empty `jobs` in inspections by querying
 /// BigQuery `INFORMATION_SCHEMA.JOBS_BY_PROJECT`.
@@ -17,7 +18,7 @@ pub async fn backfill_jobs(
     inspections: &mut [SyncInspection],
     target_dir: &Path,
     asset_name: &str,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) {
     let needs_backfill = inspections.iter().any(|i| i.jobs.is_empty());
     if !needs_backfill {
@@ -50,7 +51,7 @@ async fn fetch_and_save_jobs(
     inspection: &mut SyncInspection,
     conn_info: &BqConnInfo,
 ) {
-    let jobs = match crate::runtime::inspect::bigquery::fetch_jobs(
+    let jobs = match bigquery::fetch_jobs(
         conn_info.conn.as_ref(),
         &conn_info.project,
         conn_info.location.as_deref(),
@@ -80,7 +81,7 @@ async fn fetch_and_save_jobs(
 }
 
 struct BqConnInfo {
-    conn: Box<dyn crate::runtime::kind::connection::Connection>,
+    conn: Box<dyn Connection>,
     project: String,
     location: Option<String>,
 }
@@ -88,7 +89,7 @@ struct BqConnInfo {
 fn resolve_bq_connection(
     target_dir: &Path,
     asset_name: &str,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Option<BqConnInfo> {
     let assets = load_compiled_assets(target_dir, &[asset_name], &[]).ok()?;
     let (_, yaml) = assets.into_iter().next()?;

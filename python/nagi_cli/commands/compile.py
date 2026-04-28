@@ -36,14 +36,18 @@ def compile(resources_dir: str, target_dir: str, yes: bool, no_pager: bool) -> N
     """Compile resource definitions into resolved target output."""
     try:
         if not yes:
-            dirs = list_dbt_origin_dirs(resources_dir)
+            dirs = list_dbt_origin_dirs(resources_dir=resources_dir)
             if dirs and not click.confirm(
                 f"This will run `dbt compile` for: {dirs}. Continue?",
                 default=True,
             ):
                 return
 
-        output = compile_assets(resources_dir, target_dir, project_dir=".")
+        output = compile_assets(
+            resources_dir=resources_dir,
+            target_dir=target_dir,
+            project_dir=".",
+        )
         echo_output(output, no_pager=no_pager)
     except RuntimeError as e:
         click.echo(json.dumps({"error": str(e)}), err=True)

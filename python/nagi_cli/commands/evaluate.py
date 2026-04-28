@@ -1,7 +1,7 @@
 import click
 
 from nagi_cli._nagi_core import evaluate_all, format_evaluate_text, try_export
-from nagi_cli.output import OUTPUT_FORMATS, echo_output
+from nagi_cli.output import FORMAT_TEXT, OUTPUT_FORMATS, echo_output
 
 
 @click.command()
@@ -65,7 +65,7 @@ def evaluate(
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    if output_format == "text":
+    if output_format == FORMAT_TEXT:
         output = format_evaluate_text(result_json)
     else:
         output = result_json

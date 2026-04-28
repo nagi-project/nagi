@@ -33,7 +33,7 @@ def cli(ctx: click.Context, log_level: str | None, project_dir: str) -> None:
     ctx.ensure_object(dict)
     ctx.obj["project_dir"] = project_dir
     if log_level is not None:
-        set_log_level(log_level)
+        set_log_level(level=log_level)
     else:
         init_log()
 

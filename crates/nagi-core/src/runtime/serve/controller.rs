@@ -11,11 +11,11 @@ use tokio::task::JoinSet;
 use crate::runtime::compile::ResolvedOnDriftEntry;
 use crate::runtime::compile::{CompiledAsset, DependencyGraph, GraphEdge};
 use crate::runtime::evaluate::EvaluateError;
+use crate::runtime::kind::connection::ResolvedConnection;
 use crate::runtime::log::LogStore;
 use crate::runtime::notify::{Notifier, NotifyEvent};
-use crate::runtime::sync::SyncError;
-
 use crate::runtime::storage::SyncLock;
+use crate::runtime::sync::SyncError;
 
 use super::graph::connected_components;
 use super::reconciler;
@@ -436,10 +436,9 @@ type ConnectionSemaphores = HashMap<String, Arc<tokio::sync::Semaphore>>;
 /// Connections with `max_concurrency` limits get a bounded semaphore.
 /// Assets without a connection or with unlimited connections get no entry.
 fn resolve_connection_limit(
-    conn: &crate::runtime::kind::connection::ResolvedConnection,
+    conn: &ResolvedConnection,
     default_timeout: std::time::Duration,
 ) -> Option<usize> {
-    use crate::runtime::kind::connection::ResolvedConnection;
     match conn {
         ResolvedConnection::DuckDb { .. } => Some(1),
         ResolvedConnection::Dbt { .. } => conn

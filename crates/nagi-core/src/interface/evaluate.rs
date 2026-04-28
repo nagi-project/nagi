@@ -1,6 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde_json::Value;
+use tokio::runtime::Handle;
+use tokio::task::spawn_blocking;
 
 use crate::runtime::compile::CompiledAsset;
+use crate::runtime::config;
 use crate::runtime::evaluate::{dry_run_asset, evaluate_asset, EvaluateError};
 use crate::runtime::log::LogStore;
 use crate::runtime::storage::local::LocalCache;
@@ -14,7 +20,7 @@ async fn evaluate_from_compiled(
     cache_dir: Option<&Path>,
     db_path: Option<&Path>,
     logs_dir: Option<&Path>,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Result<String, EvaluateError> {
     let compiled: CompiledAsset =
         serde_yaml::from_str(yaml).map_err(|e| EvaluateError::Parse(e.to_string()))?;
@@ -44,9 +50,9 @@ async fn evaluate_from_compiled(
     )
     .await?;
 
-    let cache_path = cache_dir.map(PathBuf::from).unwrap_or_else(|| {
-        crate::runtime::config::resolve_state_dir(std::path::Path::new(".")).evaluate_cache_dir()
-    });
+    let cache_path = cache_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| config::resolve_state_dir(Path::new(".")).evaluate_cache_dir());
     let cache = LocalCache::new(cache_path);
     cache
         .write(&result)
@@ -75,7 +81,7 @@ pub(crate) async fn evaluate_all(
     serde_json::to_string(&values).map_err(|e| EvaluateError::Serialize(e.to_string()))
 }
 
-fn dry_run_assets(assets: &[(String, String)]) -> Result<Vec<serde_json::Value>, EvaluateError> {
+fn dry_run_assets(assets: &[(String, String)]) -> Result<Vec<Value>, EvaluateError> {
     assets
         .iter()
         .map(|(_name, yaml)| {
@@ -88,16 +94,16 @@ fn dry_run_assets(assets: &[(String, String)]) -> Result<Vec<serde_json::Value>,
 async fn evaluate_assets(
     assets: &[(String, String)],
     cache_dir: Option<&Path>,
-) -> Result<Vec<serde_json::Value>, EvaluateError> {
-    let default_timeout = crate::runtime::config::resolve_default_timeout();
+) -> Result<Vec<Value>, EvaluateError> {
+    let default_timeout = config::resolve_default_timeout();
     let handles: Vec<_> = assets
         .iter()
         .map(|(name, yaml)| {
             let name = name.clone();
             let yaml = yaml.clone();
             let cache = cache_dir.map(PathBuf::from);
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Handle::current();
+            spawn_blocking(move || {
+                let rt = Handle::current();
                 let json = rt.block_on(evaluate_from_compiled(
                     &yaml,
                     cache.as_deref(),
@@ -105,9 +111,9 @@ async fn evaluate_assets(
                     None,
                     default_timeout,
                 ))?;
-                let value: serde_json::Value = serde_json::from_str(&json)
+                let value: Value = serde_json::from_str(&json)
                     .map_err(|e| EvaluateError::Serialize(e.to_string()))?;
-                Ok::<(String, serde_json::Value), EvaluateError>((name, value))
+                Ok::<(String, Value), EvaluateError>((name, value))
             })
         })
         .collect();
