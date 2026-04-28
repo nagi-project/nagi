@@ -205,6 +205,15 @@ pub fn validate_no_duplicate_condition_names(
 }
 
 impl DesiredCondition {
+    /// Returns the serde tag value for this condition variant.
+    pub fn condition_type_name(&self) -> &'static str {
+        match self {
+            DesiredCondition::Freshness { .. } => "Freshness",
+            DesiredCondition::Sql { .. } => "SQL",
+            DesiredCondition::Command { .. } => "Command",
+        }
+    }
+
     pub fn name(&self) -> &str {
         match self {
             DesiredCondition::Freshness { name, .. } => name,
@@ -740,5 +749,23 @@ onDrift:
         let mut env = HashMap::new();
         env.insert("FOO".to_string(), "bar".to_string());
         assert!(DesiredCondition::validate_command(&run, &env).is_ok());
+    }
+
+    macro_rules! condition_type_name_test {
+        ($($name:ident: $yaml:expr => $expected:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let condition: DesiredCondition = serde_yaml::from_str($yaml).unwrap();
+                    assert_eq!(condition.condition_type_name(), $expected);
+                }
+            )*
+        };
+    }
+
+    condition_type_name_test! {
+        condition_type_name_freshness: "name: f\ntype: Freshness\nmaxAge: 1h\ninterval: 1h" => "Freshness";
+        condition_type_name_sql: "name: s\ntype: SQL\nquery: SELECT true" => "SQL";
+        condition_type_name_command: "name: c\ntype: Command\nrun: [echo, ok]" => "Command";
     }
 }

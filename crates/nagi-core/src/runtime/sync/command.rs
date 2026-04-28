@@ -1,5 +1,6 @@
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
 use tokio::process::Command;
@@ -89,9 +90,6 @@ fn build_traceparent(execution_id: &str) -> String {
 }
 
 fn generate_span_id() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

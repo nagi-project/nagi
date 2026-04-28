@@ -22,12 +22,15 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::runtime::config::ExportConfig;
+use crate::runtime::export::generate_export_resources;
 use crate::runtime::kind::asset::{
     validate_no_duplicate_condition_names, AssetSpec, DesiredCondition, OnDriftEntry,
 };
 use crate::runtime::kind::connection::{
     connection_identity_ref, resolve_connection_by_name, ConnectionSpec, ResolvedConnection,
 };
+use crate::runtime::kind::origin;
 use crate::runtime::kind::sync::SyncSpec;
 use crate::runtime::kind::{KindError, Metadata, NagiKind};
 
@@ -132,14 +135,14 @@ pub(crate) struct ResolvedOnDriftEntry {
 pub(crate) fn compile(
     resources_dir: &Path,
     target_dir: &Path,
-    export_config: Option<&crate::runtime::config::ExportConfig>,
+    export_config: Option<&ExportConfig>,
 ) -> Result<CompileOutput, CompileError> {
     let resources = load_resources(resources_dir)?;
 
-    let mut resources = crate::runtime::kind::origin::generate(resources)?;
+    let mut resources = origin::generate(resources)?;
 
     if let Some(cfg) = export_config {
-        resources.extend(crate::runtime::export::generate_export_resources(cfg));
+        resources.extend(generate_export_resources(cfg));
     }
 
     let mut output = resolve(resources)?;
@@ -148,11 +151,9 @@ pub(crate) fn compile(
         let rt =
             tokio::runtime::Runtime::new().map_err(|e| CompileError::Runtime(e.to_string()))?;
         let mapping = rt
-            .block_on(
-                crate::runtime::kind::origin::dbt::cloud::fetch_job_model_mapping(
-                    std::path::Path::new(&cred_path),
-                ),
-            )
+            .block_on(origin::dbt::cloud::fetch_job_model_mapping(Path::new(
+                &cred_path,
+            )))
             .map_err(|e| CompileError::DbtCloud(e.to_string()))?;
         dbt::apply_cloud_job_mapping(&mut output, &mapping);
     }

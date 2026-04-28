@@ -26,10 +26,12 @@ mod state;
 mod suspended;
 
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
+use chrono::Utc;
 use tokio::sync::watch;
 
 use crate::runtime::compile::{
@@ -271,7 +273,7 @@ fn build_remote_backend_stores(backend: &BackendConfig) -> Result<BackendStores,
 ///
 /// If `selectors` is empty, lists suspended assets without removing.
 /// If `selectors` is non-empty, removes the suspended flag for each matching asset.
-pub fn resume(selectors: &[&str], state_dir: &StateDir) -> Result<Vec<String>, std::io::Error> {
+pub fn resume(selectors: &[&str], state_dir: &StateDir) -> Result<Vec<String>, io::Error> {
     let dir = state_dir.suspended_dir();
     if selectors.is_empty() {
         let items = list_suspended(&dir)?;
@@ -298,7 +300,7 @@ pub fn halt(
 ) -> Result<Vec<String>, ServeError> {
     let asset_names = resolve_compiled_asset_names(target_dir, &[], &[])?;
     let store = LocalSuspendedStore::new(state_dir.suspended_dir());
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = Utc::now().to_rfc3339();
 
     let mut halted = Vec::new();
     for name in asset_names {

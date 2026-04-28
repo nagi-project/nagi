@@ -1,10 +1,15 @@
+use std::array::from_fn;
 use std::fmt::Write;
+
+use serde_json::Value;
+
+use crate::runtime::inspect::{ComparisonItem, SyncInspection, SyncJob};
 
 /// Formats a JSON value as a table with column-aligned output.
 ///
 /// Expects a JSON array of objects. Each object becomes a row.
 /// Columns are derived from `columns` (display header, JSON key path).
-pub fn format_table(value: &serde_json::Value, columns: &[(&str, &str)]) -> Result<String, String> {
+pub fn format_table(value: &Value, columns: &[(&str, &str)]) -> Result<String, String> {
     let rows = value
         .as_array()
         .ok_or_else(|| "expected JSON array".to_string())?;
@@ -53,7 +58,7 @@ pub fn format_table(value: &serde_json::Value, columns: &[(&str, &str)]) -> Resu
 }
 
 /// Extracts a display string from a JSON value using a dot-separated key path.
-fn extract_cell(value: &serde_json::Value, key: &str) -> String {
+fn extract_cell(value: &Value, key: &str) -> String {
     let mut current = value;
     for part in key.split('.') {
         current = match current.get(part) {
@@ -64,17 +69,17 @@ fn extract_cell(value: &serde_json::Value, key: &str) -> String {
     value_to_display(current)
 }
 
-fn value_to_display(v: &serde_json::Value) -> String {
+fn value_to_display(v: &Value) -> String {
     match v {
-        serde_json::Value::Null => "null".to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(arr) => {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(value_to_display).collect();
             items.join(", ")
         }
-        serde_json::Value::Object(map) => {
+        Value::Object(map) => {
             let items: Vec<String> = map
                 .iter()
                 .map(|(k, v)| match v.as_str() {
@@ -115,8 +120,7 @@ pub const LS_SYNC_COLUMNS: &[(&str, &str)] = &[("NAME", "name")];
 /// Formats a JSON string as text using the given column definitions.
 /// Parses the JSON, then calls `format_table`.
 pub fn json_to_text(json_str: &str, columns: &[(&str, &str)]) -> Result<String, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_str(json_str).map_err(|e| format!("invalid JSON: {e}"))?;
     format_table(&value, columns)
 }
 
@@ -128,8 +132,7 @@ type TableSection = (
 
 /// Formats ls output as text with sections per resource kind.
 pub fn ls_to_text(json_str: &str) -> Result<String, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_str(json_str).map_err(|e| format!("invalid JSON: {e}"))?;
 
     let mut out = String::new();
     let sections: &[TableSection] = &[
@@ -162,8 +165,6 @@ pub fn ls_to_text(json_str: &str) -> Result<String, String> {
 
 /// Formats inspection JSON (array of SyncInspection) as human-readable text.
 pub fn inspect_to_text(json_str: &str) -> Result<String, String> {
-    use crate::runtime::inspect::SyncInspection;
-
     let inspections: Vec<SyncInspection> =
         serde_json::from_str(json_str).map_err(|e| e.to_string())?;
 
@@ -195,7 +196,7 @@ pub fn inspect_to_text(json_str: &str) -> Result<String, String> {
     Ok(out)
 }
 
-fn write_comparison_table(out: &mut String, items: &[crate::runtime::inspect::ComparisonItem]) {
+fn write_comparison_table(out: &mut String, items: &[ComparisonItem]) {
     let headers = ["Type", "Name", "Before", "After"];
     let rows: Vec<[String; 4]> = items
         .iter()
@@ -209,7 +210,7 @@ fn write_comparison_table(out: &mut String, items: &[crate::runtime::inspect::Co
         })
         .collect();
 
-    let widths: [usize; 4] = std::array::from_fn(|col| {
+    let widths: [usize; 4] = from_fn(|col| {
         let header_len = headers[col].len();
         let max_row = rows.iter().map(|r| r[col].len()).max().unwrap_or(0);
         header_len.max(max_row) + 2
@@ -230,7 +231,7 @@ fn write_comparison_table(out: &mut String, items: &[crate::runtime::inspect::Co
     }
 }
 
-fn write_jobs_section(out: &mut String, jobs: &[crate::runtime::inspect::SyncJob]) {
+fn write_jobs_section(out: &mut String, jobs: &[SyncJob]) {
     writeln!(out, "Sync executed").unwrap();
     for job in jobs {
         let stmt = job.statement_type.as_deref().unwrap_or("");
@@ -241,13 +242,13 @@ fn write_jobs_section(out: &mut String, jobs: &[crate::runtime::inspect::SyncJob
 /// Converts a comparison value to a display string.
 ///
 /// Handles Nagi's `ConditionStatus` format (`{"state": "...", "reason": "..."}`).
-fn value_to_cell(v: &serde_json::Value) -> String {
+fn value_to_cell(v: &Value) -> String {
     match v {
-        serde_json::Value::Null => "-".to_string(),
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Object(obj) => {
+        Value::Null => "-".to_string(),
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Object(obj) => {
             if let Some(state) = obj.get("state").and_then(|s| s.as_str()) {
                 match obj.get("reason").and_then(|r| r.as_str()) {
                     Some(reason) if !reason.is_empty() => format!("{state} ({reason})"),

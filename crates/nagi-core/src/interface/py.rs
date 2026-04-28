@@ -1,20 +1,36 @@
+use std::fmt::Display;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use serde_json::Value;
+use tokio::runtime::Runtime;
 
-use crate::runtime::config::InitConfigResult;
+use crate::interface::evaluate;
+use crate::interface::export;
+use crate::interface::format;
+use crate::interface::init::{self, DbtProjectEntry};
+use crate::interface::inspect;
+use crate::interface::ls;
+use crate::interface::sync::{self, ProposeSyncParams, SyncFromCompiledParams};
+use crate::runtime::compile;
+use crate::runtime::config::{self, InitConfigResult, StateDir};
+use crate::runtime::inspect::InspectionStore;
 use crate::runtime::kind::connection::dbt::DbtProfilesFile;
+use crate::runtime::kind::origin::dbt;
+use crate::runtime::log::subscriber;
+use crate::runtime::status;
 
-static TOKIO_RT: LazyLock<tokio::runtime::Runtime> =
-    LazyLock::new(|| tokio::runtime::Runtime::new().expect("failed to create tokio runtime"));
+static TOKIO_RT: LazyLock<Runtime> =
+    LazyLock::new(|| Runtime::new().expect("failed to create tokio runtime"));
 
 /// Default project directory for CLI commands.
-fn project_dir() -> &'static std::path::Path {
-    std::path::Path::new(".")
+fn project_dir() -> &'static Path {
+    Path::new(".")
 }
 
-fn to_py_err(e: impl std::fmt::Display) -> PyErr {
+fn to_py_err(e: impl Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
@@ -28,7 +44,7 @@ fn load_dbt_profiles() -> PyResult<String> {
 
 fn profiles_to_json(f: &DbtProfilesFile) -> PyResult<String> {
     let info = f.profiles_info();
-    let profiles: Vec<serde_json::Value> = info
+    let profiles: Vec<Value> = info
         .iter()
         .map(|(name, default_target, targets)| {
             serde_json::json!({
@@ -51,13 +67,13 @@ fn evaluate_all(
     excludes: Vec<String>,
     dry_run: bool,
 ) -> PyResult<String> {
-    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
-    let state_dir = crate::runtime::config::resolve_state_dir(project_dir());
+    let rt = Runtime::new().map_err(to_py_err)?;
+    let state_dir = config::resolve_state_dir(project_dir());
     let cache_dir = state_dir.evaluate_cache_dir();
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
-    rt.block_on(crate::interface::evaluate::evaluate_all(
-        std::path::Path::new(target_dir),
+    rt.block_on(evaluate::evaluate_all(
+        Path::new(target_dir),
         &selector_refs,
         &exclude_refs,
         Some(cache_dir.as_path()),
@@ -75,15 +91,14 @@ fn compile_assets(
     target_dir: &str,
     project_dir: Option<&str>,
 ) -> PyResult<String> {
-    let resources_path = std::path::Path::new(resources_dir);
-    let target_path = std::path::Path::new(target_dir);
+    let resources_path = Path::new(resources_dir);
+    let target_path = Path::new(target_dir);
     let config = project_dir
-        .map(|d| crate::runtime::config::load_config_from_dir(std::path::Path::new(d)))
+        .map(|d| config::load_config_from_dir(Path::new(d)))
         .transpose()
         .map_err(to_py_err)?;
     let export_config = config.as_ref().and_then(|c| c.project.export.as_ref());
-    let output = crate::runtime::compile::compile(resources_path, target_path, export_config)
-        .map_err(to_py_err)?;
+    let output = compile::compile(resources_path, target_path, export_config).map_err(to_py_err)?;
     let summary = serde_json::json!({
         "nodes": output.graph.nodes.len(),
         "edges": output.graph.edges.len(),
@@ -96,9 +111,8 @@ fn compile_assets(
 /// Returns a comma-separated string of directories, or empty string if none.
 #[pyfunction]
 fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
-    let resources_path = std::path::Path::new(resources_dir);
-    let origins = crate::runtime::kind::origin::dbt::generate::list_origin_dirs(resources_path)
-        .map_err(to_py_err)?;
+    let resources_path = Path::new(resources_dir);
+    let origins = dbt::generate::list_origin_dirs(resources_path).map_err(to_py_err)?;
     let dirs: Vec<&str> = origins.iter().map(|(_, dir)| dir.as_str()).collect();
     Ok(dirs.join(", "))
 }
@@ -108,8 +122,7 @@ fn list_dbt_origin_dirs(resources_dir: &str) -> PyResult<String> {
 #[pyo3(signature = (target_dir, kinds))]
 fn list_resources(target_dir: &str, kinds: Vec<String>) -> PyResult<String> {
     let kind_refs: Vec<&str> = kinds.iter().map(|s| s.as_str()).collect();
-    let output = crate::interface::ls::ls(std::path::Path::new(target_dir), &kind_refs)
-        .map_err(to_py_err)?;
+    let output = ls::ls(Path::new(target_dir), &kind_refs).map_err(to_py_err)?;
     serde_json::to_string(&output).map_err(to_py_err)
 }
 
@@ -127,31 +140,29 @@ fn propose_sync(
     excludes: Vec<String>,
     stages: Option<&str>,
 ) -> PyResult<String> {
-    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
+    let rt = Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     let proposals = rt
-        .block_on(crate::interface::sync::propose_sync(
-            crate::interface::sync::ProposeSyncParams {
-                target_dir: std::path::Path::new(target_dir),
-                selectors: &selector_refs,
-                excludes: &exclude_refs,
-                sync_type,
-                stages,
-                cache_dir: None,
-                db_path: None,
-                logs_dir: None,
-            },
-        ))
+        .block_on(sync::propose_sync(ProposeSyncParams {
+            target_dir: Path::new(target_dir),
+            selectors: &selector_refs,
+            excludes: &exclude_refs,
+            sync_type,
+            stages,
+            cache_dir: None,
+            db_path: None,
+            logs_dir: None,
+        }))
         .map_err(to_py_err)?;
 
     // Serialize proposals with yaml_content included (under `_yaml` key) so
     // execute_sync_proposal can use it without re-reading files.
-    let json: Vec<serde_json::Value> = proposals
+    let json: Vec<Value> = proposals
         .iter()
         .map(|p| {
             let mut v = serde_json::to_value(p).map_err(to_py_err)?;
-            v["_yaml"] = serde_json::Value::String(p.yaml_content.clone());
+            v["_yaml"] = Value::String(p.yaml_content.clone());
             Ok(v)
         })
         .collect::<PyResult<Vec<_>>>()?;
@@ -167,7 +178,7 @@ fn execute_sync_proposal(
     stages: Option<&str>,
     force: bool,
 ) -> PyResult<String> {
-    let v: serde_json::Value = serde_json::from_str(proposal_json).map_err(to_py_err)?;
+    let v: Value = serde_json::from_str(proposal_json).map_err(to_py_err)?;
     let yaml = v["_yaml"]
         .as_str()
         .ok_or_else(|| PyRuntimeError::new_err("proposal missing _yaml field"))?;
@@ -176,24 +187,22 @@ fn execute_sync_proposal(
         .and_then(|e| e.get("evaluationId"))
         .and_then(|id| id.as_str());
 
-    let default_timeout = crate::runtime::config::resolve_default_timeout();
+    let default_timeout = config::resolve_default_timeout();
     TOKIO_RT
-        .block_on(crate::interface::sync::sync_from_compiled(
-            crate::interface::sync::SyncFromCompiledParams {
-                yaml,
-                sync_type,
-                stages,
-                db_path: None,
-                logs_dir: None,
-                cache_dir: None,
-                state_dir: None,
-                dry_run: false,
-                force,
-                evaluation_id,
-                default_timeout,
-                project_dir: Some(project_dir()),
-            },
-        ))
+        .block_on(sync::sync_from_compiled(SyncFromCompiledParams {
+            yaml,
+            sync_type,
+            stages,
+            db_path: None,
+            logs_dir: None,
+            cache_dir: None,
+            state_dir: None,
+            dry_run: false,
+            force,
+            evaluation_id,
+            default_timeout,
+            project_dir: Some(project_dir()),
+        }))
         .map_err(to_py_err)
 }
 
@@ -207,12 +216,12 @@ fn asset_status(
     selectors: Vec<String>,
     excludes: Vec<String>,
 ) -> PyResult<String> {
-    let config = crate::runtime::config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
-    let state_dir = &config.project.state_dir;
+    let nagi_config = config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
+    let state_dir = &nagi_config.project.state_dir;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
-    let result = crate::runtime::status::asset_status(
-        std::path::Path::new(target_dir),
+    let result = status::asset_status(
+        Path::new(target_dir),
         &selector_refs,
         &exclude_refs,
         Some(state_dir.evaluate_cache_dir().as_path()),
@@ -230,9 +239,8 @@ fn asset_status(
 #[pyfunction]
 #[pyo3(signature = (select=None))]
 fn export_dry_run(select: Option<&str>) -> PyResult<String> {
-    let config = crate::runtime::config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
-    let results =
-        crate::interface::export::dry_run_for_config(&config, select).map_err(to_py_err)?;
+    let nagi_config = config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
+    let results = export::dry_run_for_config(&nagi_config, select).map_err(to_py_err)?;
     serde_json::to_string(&results).map_err(to_py_err)
 }
 
@@ -240,12 +248,12 @@ fn export_dry_run(select: Option<&str>) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (select=None, resources_dir="resources"))]
 fn export_logs(select: Option<&str>, resources_dir: &str) -> PyResult<String> {
-    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
-    let config = crate::runtime::config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
+    let rt = Runtime::new().map_err(to_py_err)?;
+    let nagi_config = config::load_config_from_dir(project_dir()).map_err(to_py_err)?;
     let results = rt
-        .block_on(crate::interface::export::export_for_config(
-            &config,
-            std::path::Path::new(resources_dir),
+        .block_on(export::export_for_config(
+            &nagi_config,
+            Path::new(resources_dir),
             select,
         ))
         .map_err(to_py_err)?;
@@ -257,13 +265,13 @@ fn export_logs(select: Option<&str>, resources_dir: &str) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (resources_dir="resources", project_dir="."))]
 fn try_export(resources_dir: &str, project_dir: &str) {
-    let rt = match tokio::runtime::Runtime::new() {
+    let rt = match Runtime::new() {
         Ok(rt) => rt,
         Err(_) => return,
     };
-    rt.block_on(crate::interface::export::try_export(
-        std::path::Path::new(resources_dir),
-        std::path::Path::new(project_dir),
+    rt.block_on(export::try_export(
+        Path::new(resources_dir),
+        Path::new(project_dir),
     ));
 }
 
@@ -311,21 +319,15 @@ fn init_workspace(
     force: bool,
 ) -> PyResult<PyInitConfigResult> {
     let nd = state_dir
-        .map(|d| crate::runtime::config::StateDir::new(std::path::PathBuf::from(d)))
-        .unwrap_or_else(crate::runtime::config::default_state_dir);
-    let result = crate::interface::init::init_workspace(std::path::Path::new(base_dir), &nd, force)
-        .map_err(to_py_err)?;
+        .map(|d| StateDir::new(PathBuf::from(d)))
+        .unwrap_or_else(config::default_state_dir);
+    let result = init::init_workspace(Path::new(base_dir), &nd, force).map_err(to_py_err)?;
     Ok(result.into())
 }
 
 #[pyfunction]
 fn run_dbt_debug(project_dir: &str, profile: &str, target: Option<&str>) -> PyResult<()> {
-    crate::runtime::kind::origin::dbt::run_dbt_debug(
-        std::path::Path::new(project_dir),
-        profile,
-        target,
-    )
-    .map_err(to_py_err)
+    dbt::run_dbt_debug(Path::new(project_dir), profile, target).map_err(to_py_err)
 }
 
 // ── Serve ───────────────────────────────────────────────────────────────────
@@ -341,15 +343,15 @@ fn serve(
     excludes: Vec<String>,
     project_dir: Option<&str>,
 ) -> PyResult<()> {
-    let rt = tokio::runtime::Runtime::new().map_err(to_py_err)?;
+    let rt = Runtime::new().map_err(to_py_err)?;
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let exclude_refs: Vec<&str> = excludes.iter().map(|s| s.as_str()).collect();
     rt.block_on(crate::runtime::serve::serve(
-        std::path::Path::new(resources_dir),
-        std::path::Path::new(target_dir),
+        Path::new(resources_dir),
+        Path::new(target_dir),
         &selector_refs,
         &exclude_refs,
-        project_dir.map(std::path::Path::new),
+        project_dir.map(Path::new),
     ))
     .map_err(to_py_err)
 }
@@ -357,7 +359,7 @@ fn serve(
 #[pyfunction]
 #[pyo3(signature = (selectors))]
 fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
-    let state_dir = crate::runtime::config::resolve_state_dir(project_dir());
+    let state_dir = config::resolve_state_dir(project_dir());
     let selector_refs: Vec<&str> = selectors.iter().map(|s| s.as_str()).collect();
     let result = crate::runtime::serve::resume(&selector_refs, &state_dir).map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
@@ -366,10 +368,10 @@ fn serve_resume(selectors: Vec<String>) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (target_dir, reason=None))]
 fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
-    let state_dir = crate::runtime::config::resolve_state_dir(project_dir());
+    let state_dir = config::resolve_state_dir(project_dir());
     let r = reason.unwrap_or("manual halt");
-    let result = crate::runtime::serve::halt(std::path::Path::new(target_dir), r, &state_dir)
-        .map_err(to_py_err)?;
+    let result =
+        crate::runtime::serve::halt(Path::new(target_dir), r, &state_dir).map_err(to_py_err)?;
     serde_json::to_string(&result).map_err(to_py_err)
 }
 
@@ -379,11 +381,8 @@ fn serve_halt(target_dir: &str, reason: Option<&str>) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (base_dir, entries_json))]
 fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<String> {
-    let entries: Vec<crate::interface::init::DbtProjectEntry> =
-        serde_json::from_str(entries_json).map_err(to_py_err)?;
-    let result =
-        crate::interface::init::write_init_dbt_files(std::path::Path::new(base_dir), &entries)
-            .map_err(to_py_err)?;
+    let entries: Vec<DbtProjectEntry> = serde_json::from_str(entries_json).map_err(to_py_err)?;
+    let result = init::write_init_dbt_files(Path::new(base_dir), &entries).map_err(to_py_err)?;
     let json = serde_json::json!({
         "connectionPath": result.connection_path.map(|p| p.to_string_lossy().into_owned()),
         "originPath": result.origin_path.map(|p| p.to_string_lossy().into_owned()),
@@ -395,14 +394,14 @@ fn write_init_dbt_files(base_dir: &str, entries_json: &str) -> PyResult<String> 
 /// Must be called before any other nagi function for the level to take effect.
 #[pyfunction]
 fn set_log_level(level: &str) {
-    crate::runtime::log::subscriber::set_log_level(level);
+    subscriber::set_log_level(level);
 }
 
 /// Initializes the tracing subscriber with default settings.
 /// Uses NAGI_LOG_LEVEL env var if set, otherwise defaults to warn.
 #[pyfunction]
 fn init_log() {
-    crate::runtime::log::subscriber::init();
+    subscriber::init();
 }
 
 // ── Format ──────────────────────────────────────────────────────────────────
@@ -410,27 +409,25 @@ fn init_log() {
 /// Formats JSON output as text table for evaluate results.
 #[pyfunction]
 fn format_evaluate_text(json_str: &str) -> PyResult<String> {
-    crate::interface::format::json_to_text(json_str, crate::interface::format::EVALUATE_COLUMNS)
-        .map_err(to_py_err)
+    format::json_to_text(json_str, format::EVALUATE_COLUMNS).map_err(to_py_err)
 }
 
 /// Formats JSON output as text table for status results.
 #[pyfunction]
 fn format_status_text(json_str: &str) -> PyResult<String> {
-    crate::interface::format::json_to_text(json_str, crate::interface::format::STATUS_COLUMNS)
-        .map_err(to_py_err)
+    format::json_to_text(json_str, format::STATUS_COLUMNS).map_err(to_py_err)
 }
 
 /// Formats JSON output as text table for ls results.
 #[pyfunction]
 fn format_ls_text(json_str: &str) -> PyResult<String> {
-    crate::interface::format::ls_to_text(json_str).map_err(to_py_err)
+    format::ls_to_text(json_str).map_err(to_py_err)
 }
 
 /// Formats inspection JSON as human-readable text.
 #[pyfunction]
 fn format_inspect_text(json_str: &str) -> PyResult<String> {
-    crate::interface::format::inspect_to_text(json_str).map_err(to_py_err)
+    format::inspect_to_text(json_str).map_err(to_py_err)
 }
 
 /// Lists recent inspections for an asset as JSON.
@@ -446,8 +443,8 @@ fn list_inspections(
     target_dir: Option<&str>,
     changed_only: bool,
 ) -> PyResult<String> {
-    let resolved_state_dir = crate::runtime::config::resolve_state_dir(std::path::Path::new("."));
-    let store = crate::runtime::inspect::InspectionStore::new(resolved_state_dir.root());
+    let resolved_state_dir = config::resolve_state_dir(Path::new("."));
+    let store = InspectionStore::new(resolved_state_dir.root());
     let mut inspections = if changed_only {
         store.list_changed(asset_name, limit).map_err(to_py_err)?
     } else {
@@ -455,11 +452,11 @@ fn list_inspections(
     };
 
     if let Some(td) = target_dir {
-        let default_timeout = crate::runtime::config::resolve_default_timeout();
-        TOKIO_RT.block_on(crate::interface::inspect::backfill_jobs(
+        let default_timeout = config::resolve_default_timeout();
+        TOKIO_RT.block_on(inspect::backfill_jobs(
             &store,
             &mut inspections,
-            std::path::Path::new(td),
+            Path::new(td),
             asset_name,
             default_timeout,
         ));

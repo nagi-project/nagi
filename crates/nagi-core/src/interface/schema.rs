@@ -1,4 +1,8 @@
+use std::io;
+use std::path::Path;
+
 use schemars::schema_for;
+use serde_json::Value;
 
 use crate::runtime::config::NagiConfig;
 use crate::runtime::evaluate::AssetEvalResult;
@@ -12,10 +16,10 @@ use crate::runtime::serve::SuspendedInfo;
 use crate::runtime::storage::lock::LockInfo;
 
 /// Generates JSON Schema for all Nagi resource kinds and writes them to the given directory.
-pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
+pub fn generate_schemas(output_dir: &Path) -> io::Result<()> {
     std::fs::create_dir_all(output_dir)?;
 
-    let schemas: Vec<(&str, serde_json::Value)> = vec![
+    let schemas: Vec<(&str, Value)> = vec![
         (
             "NagiKind",
             serde_json::to_value(schema_for!(NagiKind)).unwrap(),
@@ -89,12 +93,12 @@ pub fn generate_schemas(output_dir: &std::path::Path) -> std::io::Result<()> {
 
 /// Generates JSON Schema for all specs and writes to `docs/schemas/`.
 /// Intended to be called from `mise run gen-schema`.
-pub fn generate_schemas_to_docs() -> std::io::Result<()> {
+pub fn generate_schemas_to_docs() -> io::Result<()> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    let root = std::path::Path::new(&manifest_dir)
+    let root = Path::new(&manifest_dir)
         .parent()
         .and_then(|p| p.parent())
-        .unwrap_or(std::path::Path::new("."));
+        .unwrap_or(Path::new("."));
     let output_dir = root.join("docs").join("schemas");
     generate_schemas(&output_dir)
 }

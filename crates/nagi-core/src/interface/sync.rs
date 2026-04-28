@@ -1,10 +1,14 @@
 use std::path::Path;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use crate::runtime::compile::CompiledAsset;
+use crate::runtime::compile::{load_compiled_assets, CompiledAsset};
+use crate::runtime::config;
 use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::log::LogStore;
+use crate::runtime::storage;
 use crate::runtime::sync::{
     dry_run_sync, evaluate_and_cache, generate_uuid, parse_sync_type, resolve_sync_spec,
     run_sync_workflow, DryRunStage, Stage, SyncError, SyncType, SyncWorkflowParams,
@@ -28,14 +32,10 @@ pub(crate) struct ProposeSyncParams<'a> {
 pub(crate) async fn propose_sync(
     params: ProposeSyncParams<'_>,
 ) -> Result<Vec<SyncProposal>, SyncError> {
-    let assets = crate::runtime::compile::load_compiled_assets(
-        params.target_dir,
-        params.selectors,
-        params.excludes,
-    )?;
+    let assets = load_compiled_assets(params.target_dir, params.selectors, params.excludes)?;
     let st = parse_sync_type(params.sync_type)?;
     let log_store = open_log_store(params.db_path, params.logs_dir)?;
-    let default_timeout = crate::runtime::config::resolve_default_timeout();
+    let default_timeout = config::resolve_default_timeout();
     let mut proposals = Vec::with_capacity(assets.len());
 
     for (name, yaml) in &assets {
@@ -76,7 +76,7 @@ async fn evaluate_for_proposal(
     compiled: &CompiledAsset,
     cache_dir: Option<&Path>,
     log_store: Option<&LogStore>,
-    default_timeout: std::time::Duration,
+    default_timeout: Duration,
 ) -> Result<SyncProposalEvaluation, SyncError> {
     let conn = compiled
         .connection
@@ -128,7 +128,7 @@ pub(crate) struct SyncProposal {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SyncProposalEvaluation {
     pub ready: bool,
-    pub conditions: Vec<serde_json::Value>,
+    pub conditions: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evaluation_id: Option<String>,
 }
@@ -159,7 +159,7 @@ pub(crate) struct SyncFromCompiledParams<'a> {
     pub dry_run: bool,
     pub force: bool,
     pub evaluation_id: Option<&'a str>,
-    pub default_timeout: std::time::Duration,
+    pub default_timeout: Duration,
     /// When set, loads config from this directory to build a sync lock.
     pub project_dir: Option<&'a Path>,
 }
@@ -187,7 +187,7 @@ pub(crate) async fn sync_from_compiled(
     // Acquire lock if project_dir is provided.
     let lock_state = params
         .project_dir
-        .map(crate::runtime::storage::build_sync_lock_from_project)
+        .map(storage::build_sync_lock_from_project)
         .transpose()
         .map_err(|e| SyncError::LockStorage(e.to_string()))?;
     if let Some((ref lock, ttl)) = lock_state {

@@ -4,6 +4,7 @@ pub mod bigquery;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -91,9 +92,9 @@ impl SyncInspection {
 /// The resulting string sorts lexicographically in chronological order.
 /// Normalizes to UTC so that files from different timezones sort correctly.
 fn timestamp_to_basic_format(rfc3339: &str) -> Result<String, InspectError> {
-    let dt = chrono::DateTime::parse_from_rfc3339(rfc3339)
+    let dt = DateTime::<FixedOffset>::parse_from_rfc3339(rfc3339)
         .map_err(|e| InspectError::InvalidTimestamp(format!("{rfc3339}: {e}")))?
-        .with_timezone(&chrono::Utc);
+        .with_timezone(&Utc);
     Ok(dt.format("%Y%m%dT%H%M%S%.3fZ").to_string())
 }
 

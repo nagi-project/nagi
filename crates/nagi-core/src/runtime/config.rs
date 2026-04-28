@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration as StdDuration;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::runtime::duration::Duration;
+use crate::runtime::storage::remote::{create_remote_store, RemoteObjectStore};
 use crate::runtime::storage::ProjectConfigStore;
 
 #[derive(Debug, thiserror::Error)]
@@ -123,7 +125,7 @@ fn schema_default_state_dir() -> StateDir {
 
 /// Returns the default timeout from `nagi.yaml` in the current directory.
 /// Falls back to `NagiConfig::default()` if the config file is missing or unreadable.
-pub fn resolve_default_timeout() -> std::time::Duration {
+pub fn resolve_default_timeout() -> StdDuration {
     load_local_config(Path::new("."))
         .unwrap_or_default()
         .project
@@ -396,12 +398,12 @@ pub fn load_config(
 /// Returns `None` for local backends.
 pub(crate) fn build_project_config_store(
     backend: &BackendConfig,
-) -> Result<Option<crate::runtime::storage::remote::RemoteObjectStore>, ConfigError> {
+) -> Result<Option<RemoteObjectStore>, ConfigError> {
     match backend.backend_type {
         BackendType::Local => Ok(None),
         BackendType::Gcs | BackendType::S3 => {
-            let store = crate::runtime::storage::remote::create_remote_store(backend)
-                .map_err(|e| ConfigError::Storage(e.to_string()))?;
+            let store =
+                create_remote_store(backend).map_err(|e| ConfigError::Storage(e.to_string()))?;
             Ok(Some(store))
         }
     }

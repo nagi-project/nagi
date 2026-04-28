@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::runtime::compile::CompileError;
+use crate::runtime::compile::{resolve_compiled_asset_names, CompileError};
+use crate::runtime::config::resolve_state_dir;
 use crate::runtime::evaluate::AssetEvalResult;
 use crate::runtime::log::{LogError, LogStore, SyncLogEntry};
 use crate::runtime::serve::SuspendedInfo;
@@ -80,12 +81,13 @@ pub fn asset_status(
     logs_dir: &Path,
     suspended_dir: Option<&Path>,
 ) -> Result<StatusResult, StatusError> {
-    let asset_names =
-        crate::runtime::compile::resolve_compiled_asset_names(target_dir, selectors, excludes)?;
+    let asset_names = resolve_compiled_asset_names(target_dir, selectors, excludes)?;
 
-    let cache = LocalCache::new(cache_dir.map(PathBuf::from).unwrap_or_else(|| {
-        crate::runtime::config::resolve_state_dir(Path::new(".")).evaluate_cache_dir()
-    }));
+    let cache = LocalCache::new(
+        cache_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| resolve_state_dir(Path::new(".")).evaluate_cache_dir()),
+    );
     let store = if db_path.exists() {
         Some(LogStore::open(db_path, logs_dir)?)
     } else {
