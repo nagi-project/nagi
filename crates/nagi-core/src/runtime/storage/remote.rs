@@ -832,6 +832,9 @@ mod tests {
                 timeout: None,
             }),
             default_timeout: crate::runtime::duration::Duration::from_secs(1800),
+            max_consecutive_sync_failures: 3,
+            cooldown_initial_secs: 30,
+            cooldown_max_secs: 1800,
         };
         store.write_project_config(&config).unwrap();
         let loaded = store.read_project_config().unwrap().unwrap();

@@ -21,6 +21,8 @@ pub enum ConfigError {
     RemoteConfigNotFound,
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("invalid config: {0}")]
+    Validation(String),
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, JsonSchema)]
@@ -55,6 +57,18 @@ fn default_lock_retry_interval_seconds() -> u64 {
 
 fn default_lock_retry_max_attempts() -> u32 {
     3
+}
+
+pub(crate) fn default_max_consecutive_sync_failures() -> u32 {
+    3
+}
+
+pub(crate) fn default_cooldown_initial_secs() -> u64 {
+    30
+}
+
+pub(crate) fn default_cooldown_max_secs() -> u64 {
+    1800
 }
 
 /// State directory path. Contains logs, cache, locks, and other runtime data.
@@ -239,6 +253,16 @@ pub struct ProjectConfig {
     pub export: Option<ExportConfig>,
     #[serde(default = "default_timeout")]
     pub default_timeout: Duration,
+    /// Number of consecutive Sync failures before the Asset is suspended.
+    #[serde(default = "default_max_consecutive_sync_failures")]
+    pub max_consecutive_sync_failures: u32,
+    /// Initial cooldown duration in seconds after a Sync failure.
+    /// Each consecutive failure doubles the wait time.
+    #[serde(default = "default_cooldown_initial_secs")]
+    pub cooldown_initial_secs: u64,
+    /// Maximum cooldown duration in seconds.
+    #[serde(default = "default_cooldown_max_secs")]
+    pub cooldown_max_secs: u64,
 }
 
 impl Default for ProjectConfig {
@@ -255,7 +279,31 @@ impl Default for ProjectConfig {
             state_dir: StateDir::default(),
             export: None,
             default_timeout: default_timeout(),
+            max_consecutive_sync_failures: default_max_consecutive_sync_failures(),
+            cooldown_initial_secs: default_cooldown_initial_secs(),
+            cooldown_max_secs: default_cooldown_max_secs(),
         }
+    }
+}
+
+impl ProjectConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.max_consecutive_sync_failures == 0 {
+            return Err(ConfigError::Validation(
+                "maxConsecutiveSyncFailures must be at least 1".to_string(),
+            ));
+        }
+        if self.cooldown_initial_secs == 0 {
+            return Err(ConfigError::Validation(
+                "cooldownInitialSecs must be at least 1".to_string(),
+            ));
+        }
+        if self.cooldown_max_secs == 0 {
+            return Err(ConfigError::Validation(
+                "cooldownMaxSecs must be at least 1".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -310,11 +358,13 @@ fn check_config_hash(project_dir: &Path) -> Result<bool, ConfigError> {
 /// Does not check config hash or load remote config.
 pub(crate) fn load_local_config(project_dir: &Path) -> Result<NagiConfig, ConfigError> {
     let path = project_dir.join(CONFIG_FILE);
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => Ok(serde_yaml::from_str(&contents)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(NagiConfig::default()),
-        Err(e) => Err(ConfigError::Io(e)),
-    }
+    let config: NagiConfig = match std::fs::read_to_string(&path) {
+        Ok(contents) => serde_yaml::from_str(&contents)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => NagiConfig::default(),
+        Err(e) => return Err(ConfigError::Io(e)),
+    };
+    config.project.validate()?;
+    Ok(config)
 }
 
 /// Result of `init_config` indicating what happened with the remote config.
@@ -388,6 +438,7 @@ pub fn load_config(
                 .read_project_config()
                 .map_err(|e| ConfigError::Storage(e.to_string()))?
                 .ok_or(ConfigError::RemoteConfigNotFound)?;
+            project.validate()?;
             Ok(NagiConfig::from_parts(local_config.backend, project))
         }
         None => Ok(local_config),
@@ -445,6 +496,9 @@ mod tests {
             config.project.default_timeout.as_std(),
             std::time::Duration::from_secs(3600)
         );
+        assert_eq!(config.project.max_consecutive_sync_failures, 3);
+        assert_eq!(config.project.cooldown_initial_secs, 30);
+        assert_eq!(config.project.cooldown_max_secs, 1800);
     }
 
     #[test]
@@ -650,6 +704,37 @@ export:
         let config = load_local_config(dir.path()).unwrap();
         assert_eq!(config.project.max_evaluate_concurrency, Some(5));
         assert_eq!(config.project.max_sync_concurrency, Some(2));
+    }
+
+    #[test]
+    fn load_custom_cooldown_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "maxConsecutiveSyncFailures: 5\ncooldownInitialSecs: 60\ncooldownMaxSecs: 3600";
+        std::fs::write(dir.path().join("nagi.yaml"), yaml).unwrap();
+        let config = load_local_config(dir.path()).unwrap();
+        assert_eq!(config.project.max_consecutive_sync_failures, 5);
+        assert_eq!(config.project.cooldown_initial_secs, 60);
+        assert_eq!(config.project.cooldown_max_secs, 3600);
+    }
+
+    macro_rules! cooldown_validation_test {
+        ($($name:ident: $yaml:expr;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let dir = tempfile::tempdir().unwrap();
+                    std::fs::write(dir.path().join("nagi.yaml"), $yaml).unwrap();
+                    let err = load_local_config(dir.path()).unwrap_err();
+                    assert!(matches!(err, ConfigError::Validation(_)));
+                }
+            )*
+        };
+    }
+
+    cooldown_validation_test! {
+        reject_zero_max_consecutive_sync_failures: "maxConsecutiveSyncFailures: 0";
+        reject_zero_cooldown_initial_secs: "cooldownInitialSecs: 0";
+        reject_zero_cooldown_max_secs: "cooldownMaxSecs: 0";
     }
 
     // ── StateDir ──────────────────────────────────────────────────────────

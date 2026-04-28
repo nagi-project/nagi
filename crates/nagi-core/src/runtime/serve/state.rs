@@ -8,7 +8,7 @@ use crate::runtime::storage::SuspendedStore;
 use crate::runtime::sync::SyncError;
 
 use super::graph::build_edge_maps;
-use super::guardrail::{GuardrailState, MAX_CONSECUTIVE_FAILURES};
+use super::guardrail::{GuardrailConfig, GuardrailState};
 use super::queue::WorkQueue;
 use super::scheduler::SchedulerState;
 use super::suspended::SuspendedInfo;
@@ -107,7 +107,7 @@ pub struct ServeState {
     pub sync_queue: WorkQueue,
     /// Asset names currently being synced (for dedup and completion tracking).
     pub syncing: HashSet<String>,
-    /// Tracks consecutive sync failures and exponential backoff.
+    /// Tracks consecutive sync failures and cooldown timers.
     pub guardrail: GuardrailState,
     /// Store for suspended flag files.
     suspended_store: Arc<dyn SuspendedStore>,
@@ -118,7 +118,11 @@ pub struct ServeState {
 }
 
 impl ServeState {
-    pub fn new(edges: &[GraphEdge], suspended_store: Arc<dyn SuspendedStore>) -> Self {
+    pub fn new(
+        edges: &[GraphEdge],
+        suspended_store: Arc<dyn SuspendedStore>,
+        guardrail_config: GuardrailConfig,
+    ) -> Self {
         let edge_maps = build_edge_maps(edges);
         Self {
             scheduler: SchedulerState::new(),
@@ -130,7 +134,7 @@ impl ServeState {
             sync_configs: HashMap::new(),
             sync_queue: WorkQueue::new(),
             syncing: HashSet::new(),
-            guardrail: GuardrailState::new(),
+            guardrail: GuardrailState::new(guardrail_config),
             suspended_store,
             last_ready_count: HashMap::new(),
             awaiting_post_sync_evaluate: HashSet::new(),
@@ -228,19 +232,19 @@ impl ServeState {
     /// - `auto_sync` is true and a sync spec exists
     /// - the asset is not already queued or syncing
     /// - the asset is not suspended
-    /// - the asset is not in a backoff period
+    /// - the asset is not in a cooldown period
     pub fn request_sync(&mut self, asset_name: &str) -> bool {
         let Some(config) = self.sync_configs.get(asset_name) else {
             return false;
         };
         // Sync is allowed only when the asset opts in (auto_sync + has_sync),
-        // is not already syncing, not suspended, and not in backoff.
+        // is not already syncing, not suspended, and not in cooldown.
         let is_suspended = self.suspended_store.exists(asset_name).unwrap_or(false);
         let eligible = config.auto_sync
             && config.has_sync
             && !self.syncing.contains(asset_name)
             && !is_suspended
-            && !self.guardrail.is_backoff_active(asset_name);
+            && !self.guardrail.is_in_cooldown(asset_name);
         if !eligible {
             return false;
         }
@@ -295,7 +299,7 @@ impl ServeState {
     /// state, and enqueues the asset for re-evaluation.
     ///
     /// On failure: increments consecutive failure count and applies exponential
-    /// backoff. If failures reach the threshold, writes a suspended flag file
+    /// cooldown. If failures reach the threshold, writes a suspended flag file
     /// to prevent further sync attempts until manually resumed.
     /// Returns the suspension reason if the asset was suspended.
     pub fn handle_sync_result(
@@ -333,7 +337,8 @@ impl ServeState {
         if !self.guardrail.should_suspend(asset_name) {
             return None;
         }
-        let reason = format!("{MAX_CONSECUTIVE_FAILURES} consecutive sync failures");
+        let max = self.guardrail.config.max_consecutive_failures;
+        let reason = format!("{max} consecutive sync failures");
         self.suspend_asset(asset_name, &reason, execution_id);
         Some(reason)
     }
@@ -601,7 +606,7 @@ mod tests {
     #[test]
     fn serve_state_init_enqueues_and_registers() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         let assets = vec![
             asset_entry("a", Some(StdDuration::from_secs(60))),
             asset_entry("b", None),
@@ -617,7 +622,7 @@ mod tests {
 
     #[test]
     fn next_spawnable_skips_in_flight() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.evaluate_queue.enqueue("a".to_string());
         state.evaluate_queue.enqueue("b".to_string());
         state.in_flight.insert("a".to_string());
@@ -631,7 +636,7 @@ mod tests {
 
     #[test]
     fn handle_evaluate_result_clears_in_flight_and_reschedules() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry("a", Some(StdDuration::from_secs(60)))]);
         state.in_flight.insert("a".to_string());
 
@@ -644,7 +649,7 @@ mod tests {
 
     #[test]
     fn handle_evaluate_result_error_marks_not_ready() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.in_flight.insert("a".to_string());
 
         state.handle_evaluate_result("a", &evaluate_ok("a", true));
@@ -662,7 +667,7 @@ mod tests {
     #[test]
     fn propagate_downstream_requests_sync_on_transition() {
         let edges = vec![edge("a", "b"), edge("a", "c")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("b"), asset_entry_with_sync("c")]);
         state.readiness.record("a", false);
 
@@ -676,7 +681,7 @@ mod tests {
     #[test]
     fn propagate_downstream_skips_without_transition() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("b")]);
         state.readiness.record("a", false);
         state.propagate_downstream("a", true);
@@ -688,7 +693,7 @@ mod tests {
     #[test]
     fn propagate_downstream_subsumes_when_already_syncing() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("b")]);
         state.readiness.record("a", false);
         state.syncing.insert("b".to_string());
@@ -700,7 +705,7 @@ mod tests {
     #[test]
     fn propagate_downstream_does_not_enqueue_evaluate() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("b")]);
         // Drain initial evaluate_queue entries from init
         while state.evaluate_queue.dequeue().is_some() {}
@@ -720,7 +725,7 @@ mod tests {
         // the running sync subsumes C's propagation: X is not re-enqueued,
         // but propagation reports X as handled.
         let edges = vec![edge("b", "x"), edge("c", "x")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("x")]);
         while state.evaluate_queue.dequeue().is_some() {}
 
@@ -745,7 +750,7 @@ mod tests {
 
     #[test]
     fn request_sync_enqueues_when_auto_sync_enabled() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.evaluate_queue.dequeue();
 
@@ -755,7 +760,7 @@ mod tests {
 
     #[test]
     fn request_sync_skips_when_auto_sync_false() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry("a", None)]);
         state.evaluate_queue.dequeue();
 
@@ -765,7 +770,7 @@ mod tests {
 
     #[test]
     fn request_sync_skips_when_already_syncing() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.evaluate_queue.dequeue();
 
@@ -775,7 +780,7 @@ mod tests {
 
     #[test]
     fn request_sync_dedup() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.evaluate_queue.dequeue();
 
@@ -785,7 +790,7 @@ mod tests {
 
     #[test]
     fn next_syncable_allows_different_assets_with_same_sync_ref() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a"), asset_entry_with_sync("b")]);
         state.request_sync("a");
         state.request_sync("b");
@@ -797,7 +802,7 @@ mod tests {
 
     #[test]
     fn handle_sync_result_clears_syncing_and_enqueues_re_eval() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.evaluate_queue.dequeue();
 
@@ -810,7 +815,7 @@ mod tests {
 
     #[test]
     fn next_syncable_prevents_same_asset_concurrent_sync() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.request_sync("a");
 
@@ -826,7 +831,7 @@ mod tests {
 
     #[test]
     fn handle_evaluate_not_ready_with_auto_sync_requests_sync() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
@@ -838,7 +843,7 @@ mod tests {
 
     #[test]
     fn handle_evaluate_ready_does_not_request_sync() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
 
@@ -851,8 +856,8 @@ mod tests {
     // ── Guardrail integration tests ────────────────────────────────────
 
     #[test]
-    fn handle_sync_failure_applies_backoff() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+    fn handle_sync_failure_applies_cooldown() {
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.evaluate_queue.dequeue();
 
@@ -868,10 +873,11 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
-        for _ in 0..MAX_CONSECUTIVE_FAILURES {
+        for _ in 0..GuardrailConfig::default().max_consecutive_failures {
             state.syncing.insert("a".to_string());
             state.handle_sync_result("a", false, None);
         }
@@ -886,6 +892,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
@@ -905,7 +912,7 @@ mod tests {
     #[test]
     fn on_evaluate_complete_updates_state() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry("a", None), asset_entry_with_sync("b")]);
         state.in_flight.insert("a".to_string());
         while state.evaluate_queue.dequeue().is_some() {}
@@ -922,7 +929,7 @@ mod tests {
 
     #[test]
     fn on_sync_complete_success_resets_guardrail() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         while state.evaluate_queue.dequeue().is_some() {}
 
@@ -945,7 +952,7 @@ mod tests {
 
     #[test]
     fn on_sync_complete_failure_increments_guardrail() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
 
         state.syncing.insert("a".to_string());
@@ -955,7 +962,7 @@ mod tests {
             });
         state.on_sync_complete(Some(Ok(("a".to_string(), sync_result))));
 
-        assert!(state.guardrail.is_backoff_active("a"));
+        assert!(state.guardrail.is_in_cooldown("a"));
     }
 
     fn susp_store() -> Arc<dyn crate::runtime::storage::SuspendedStore> {
@@ -974,6 +981,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
@@ -1009,6 +1017,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.in_flight.insert("a".to_string());
@@ -1041,6 +1050,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
@@ -1072,6 +1082,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
@@ -1099,7 +1110,7 @@ mod tests {
 
     #[test]
     fn release_sync_slot_clears_syncing() {
-        let mut state = ServeState::new(&[], susp_store());
+        let mut state = ServeState::new(&[], susp_store(), GuardrailConfig::default());
         state.register_assets(&[asset_entry_with_sync("a")]);
         state.syncing.insert("a".to_string());
 
@@ -1116,6 +1127,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
@@ -1130,10 +1142,11 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
-        for _ in 0..MAX_CONSECUTIVE_FAILURES - 1 {
+        for _ in 0..GuardrailConfig::default().max_consecutive_failures - 1 {
             assert!(state.handle_sync_failure("a", None).is_none());
         }
         let result = state.handle_sync_failure("a", None);
@@ -1147,10 +1160,11 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.register_assets(&[asset_entry_with_sync("a")]);
 
-        for _ in 0..MAX_CONSECUTIVE_FAILURES {
+        for _ in 0..GuardrailConfig::default().max_consecutive_failures {
             state.handle_sync_failure("a", Some("exec-123"));
         }
         let info = susp.list().unwrap();
@@ -1165,6 +1179,7 @@ mod tests {
         let state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
 
         state.suspend_asset("a", "test reason", Some("exec-1"));
@@ -1181,6 +1196,7 @@ mod tests {
         let state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
 
         state.suspend_asset("a", "test reason", None);
@@ -1198,6 +1214,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.last_ready_count.insert("a".to_string(), 1);
 
@@ -1207,7 +1224,7 @@ mod tests {
 
     #[test]
     fn check_degradation_returns_none_when_unchanged() {
-        let mut state = ServeState::new(&[], susp_store());
+        let mut state = ServeState::new(&[], susp_store(), GuardrailConfig::default());
         state.last_ready_count.insert("a".to_string(), 2);
 
         assert!(state.check_degradation("a", 2).is_none());
@@ -1219,6 +1236,7 @@ mod tests {
         let mut state = ServeState::new(
             &[],
             susp.clone() as Arc<dyn crate::runtime::storage::SuspendedStore>,
+            GuardrailConfig::default(),
         );
         state.last_ready_count.insert("a".to_string(), 3);
 
@@ -1231,14 +1249,14 @@ mod tests {
 
     #[test]
     fn all_upstreams_ready_no_upstreams() {
-        let state = ServeState::new(&[], susp_store());
+        let state = ServeState::new(&[], susp_store(), GuardrailConfig::default());
         assert!(state.all_upstreams_ready("a"));
     }
 
     #[test]
     fn all_upstreams_ready_single_upstream_ready() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, susp_store());
+        let mut state = ServeState::new(&edges, susp_store(), GuardrailConfig::default());
         state.readiness.record("a", true);
         assert!(state.all_upstreams_ready("b"));
     }
@@ -1246,14 +1264,14 @@ mod tests {
     #[test]
     fn all_upstreams_ready_single_upstream_not_ready() {
         let edges = vec![edge("a", "b")];
-        let state = ServeState::new(&edges, susp_store());
+        let state = ServeState::new(&edges, susp_store(), GuardrailConfig::default());
         assert!(!state.all_upstreams_ready("b"));
     }
 
     #[test]
     fn all_upstreams_ready_mixed() {
         let edges = vec![edge("a", "c"), edge("b", "c")];
-        let mut state = ServeState::new(&edges, susp_store());
+        let mut state = ServeState::new(&edges, susp_store(), GuardrailConfig::default());
         state.readiness.record("a", true);
         // b is not ready
         assert!(!state.all_upstreams_ready("c"));
@@ -1262,7 +1280,7 @@ mod tests {
     #[test]
     fn init_only_enqueues_root_assets() {
         let edges = vec![edge("a", "b"), edge("b", "c")];
-        let mut state = ServeState::new(&edges, susp_store());
+        let mut state = ServeState::new(&edges, susp_store(), GuardrailConfig::default());
         state.register_assets(&[
             asset_entry("a", None),
             asset_entry("b", None),
@@ -1276,7 +1294,7 @@ mod tests {
     #[test]
     fn enqueue_due_skips_when_upstream_not_ready() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, susp_store());
+        let mut state = ServeState::new(&edges, susp_store(), GuardrailConfig::default());
         state.register_assets(&[
             asset_entry("a", None),
             asset_entry("b", Some(StdDuration::from_secs(1))),
@@ -1296,7 +1314,7 @@ mod tests {
     #[test]
     fn enqueue_due_allows_when_upstream_ready() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, susp_store());
+        let mut state = ServeState::new(&edges, susp_store(), GuardrailConfig::default());
         state.register_assets(&[
             asset_entry("a", None),
             asset_entry("b", Some(StdDuration::from_secs(1))),
@@ -1316,7 +1334,7 @@ mod tests {
 
     #[test]
     fn next_spawnable_respects_max_eval_concurrency() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.evaluate_queue.enqueue("a".to_string());
         state.evaluate_queue.enqueue("b".to_string());
         state.evaluate_queue.enqueue("c".to_string());
@@ -1334,7 +1352,7 @@ mod tests {
     #[test]
     fn restore_readiness_skips_initial_evaluate_for_ready_assets() {
         let edges = vec![edge("a", "b")];
-        let mut state = ServeState::new(&edges, mem_suspended_store());
+        let mut state = ServeState::new(&edges, mem_suspended_store(), GuardrailConfig::default());
 
         let mut persisted = HashMap::new();
         persisted.insert("a".to_string(), true);
@@ -1354,7 +1372,7 @@ mod tests {
 
     #[test]
     fn restore_readiness_enqueues_not_ready_assets() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
 
         let mut persisted = HashMap::new();
         persisted.insert("a".to_string(), false);
@@ -1367,7 +1385,7 @@ mod tests {
 
     #[test]
     fn next_syncable_respects_max_sync_concurrency() {
-        let mut state = ServeState::new(&[], mem_suspended_store());
+        let mut state = ServeState::new(&[], mem_suspended_store(), GuardrailConfig::default());
         state.register_assets(&[
             asset_entry_with_sync("a"),
             asset_entry_with_sync("b"),
