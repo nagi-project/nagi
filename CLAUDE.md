@@ -46,6 +46,9 @@ mise run check
 - Only use crates with significant community adoption (e.g. dtolnay crates, tokio ecosystem, serde ecosystem). Do not add community-maintained crates without clear evidence of wide adoption.
 - Define error types with `thiserror`. Use `anyhow` only in binary crates.
 - At PyO3 boundaries, convert Rust errors to `PyErr`. Never let panics leak into Python.
+- Place all `use` statements at the module top level. Do not use function-level `use` in non-test code.
+- Use top-level imports instead of fully qualified paths in function bodies. Exception: `tracing::` macros (`tracing::info!`, `tracing::warn!`, etc.) and derive/attribute macros (`#[derive(serde::Deserialize)]`, `#[async_trait::async_trait]`, `#[tokio::test]`) may remain fully qualified. When an import would conflict with a local name (e.g. a pyfunction named `serve` vs `crate::runtime::serve`), use the fully qualified path for the module.
+- When a value maps to an enum variant, derive it from the enum rather than hardcoding a string literal.
 - Write doc comments only where behavior, constraints, or defaults are non-obvious from the name alone. Do not comment what the code already says.
 - Comments in English.
 - Use the Rust 2018 module style: `src/foo.rs` + `src/foo/bar.rs` instead of `src/foo/mod.rs`.
@@ -54,6 +57,8 @@ mise run check
 
 - Keep Python-side logic minimal. It should be glue code that calls into the Rust core.
 - If business logic is leaking into Python, question the design.
+- Use keyword arguments for all function calls to PyO3 bindings and project-internal functions.
+- Use named constants instead of string literals for fixed sets of values (e.g. output formats).
 
 ### Security
 
