@@ -86,8 +86,8 @@ class TestSyncExecution:
             )
         assert result.exit_code == 0
         mock_exec.assert_called_once()
-        args = mock_exec.call_args[0]
-        assert args[1] == "sync"
+        kwargs = mock_exec.call_args.kwargs
+        assert kwargs["sync_type"] == "sync"
 
     def test_auto_approve_skips_confirmation(
         self,

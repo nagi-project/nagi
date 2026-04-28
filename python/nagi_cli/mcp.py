@@ -43,7 +43,7 @@ def create_server(*, allow_sync: bool = False) -> FastMCP:
             target_dir: Directory containing compiled output.
             selectors: Asset selector expressions (dbt-compatible).
         """
-        return asset_status(target_dir, selectors or [])
+        return asset_status(target_dir=target_dir, selectors=selectors or [])
 
     @mcp.tool(annotations=READ_ONLY)
     def nagi_evaluate(
@@ -60,7 +60,11 @@ def create_server(*, allow_sync: bool = False) -> FastMCP:
             selectors: Asset selector expressions (dbt-compatible).
             dry_run: When true, list assets without executing queries.
         """
-        return evaluate_all(target_dir, selectors or [], dry_run=dry_run)
+        return evaluate_all(
+            target_dir=target_dir,
+            selectors=selectors or [],
+            dry_run=dry_run,
+        )
 
     if allow_sync:
         _register_sync_tools(mcp)
@@ -98,12 +102,20 @@ def _run_sync(
 ) -> str:
     try:
         proposals = json.loads(
-            propose_sync(target_dir, selectors or [], sync_type, stages=stages)
+            propose_sync(
+                target_dir=target_dir,
+                selectors=selectors or [],
+                sync_type=sync_type,
+                stages=stages,
+            )
         )
         results = []
         for proposal in proposals:
             result_json = execute_sync_proposal(
-                json.dumps(proposal), sync_type, stages, force
+                proposal_json=json.dumps(proposal),
+                sync_type=sync_type,
+                stages=stages,
+                force=force,
             )
             results.append(json.loads(result_json))
         return json.dumps(results)

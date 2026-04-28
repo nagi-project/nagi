@@ -99,7 +99,10 @@ def _make_sync_command(sync_type: str) -> click.Command:
 
             try:
                 result_json = execute_sync_proposal(
-                    json.dumps(proposal), sync_type, stages, force
+                    proposal_json=json.dumps(proposal),
+                    sync_type=sync_type,
+                    stages=stages,
+                    force=force,
                 )
             except RuntimeError as e:
                 click.echo(json.dumps({"error": str(e), "asset": proposal["asset"]}))

@@ -93,8 +93,8 @@ class TestLsSuccess:
             result = runner.invoke(ls, ["--target-dir", str(target_dir)] + kinds)
         assert result.exit_code == 0
         mock.assert_called_once()
-        call_args = mock.call_args
-        assert list(call_args[0][1]) == expected_kinds
+        kwargs = mock.call_args.kwargs
+        assert list(kwargs["kinds"]) == expected_kinds
 
 
 class TestLsFailure:

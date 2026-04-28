@@ -148,14 +148,16 @@ class TestHalt:
         assert "Halted: asset-a" in result.output
         assert "Halted: asset-b" in result.output
         assert "2 asset(s) halted." in result.output
-        mock_halt.assert_called_once_with("target", None)
+        mock_halt.assert_called_once_with(target_dir="target", reason=None)
 
     @patch("nagi_cli.commands.serve._serve_halt")
     def test_halt_with_reason(self, mock_halt: MagicMock, runner: CliRunner) -> None:
         mock_halt.return_value = json.dumps(["asset-a"])
         result = runner.invoke(halt, ["--reason", "deploy in progress"])
         assert result.exit_code == 0
-        mock_halt.assert_called_once_with("target", "deploy in progress")
+        mock_halt.assert_called_once_with(
+            target_dir="target", reason="deploy in progress"
+        )
 
     @patch("nagi_cli.commands.serve._serve_halt")
     def test_halt_all_already_suspended(

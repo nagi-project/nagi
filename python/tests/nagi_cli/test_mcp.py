@@ -56,7 +56,7 @@ class TestMcpToolExecution:
         tools = {t.name: t for t in server._tool_manager.list_tools()}
         fn = tools["nagi_status"].fn
         result = fn(target_dir="t", selectors=["s1"])
-        mock_status.assert_called_once_with("t", ["s1"])
+        mock_status.assert_called_once_with(target_dir="t", selectors=["s1"])
         assert result == '{"assets":[]}'
 
     def test_nagi_status_defaults_none_selectors(self, mocker: MockerFixture) -> None:
@@ -67,7 +67,7 @@ class TestMcpToolExecution:
         tools = {t.name: t for t in server._tool_manager.list_tools()}
         fn = tools["nagi_status"].fn
         fn(target_dir="t", selectors=None)
-        mock_status.assert_called_once_with("t", [])
+        mock_status.assert_called_once_with(target_dir="t", selectors=[])
 
     def test_nagi_evaluate_calls_core(self, mocker: MockerFixture) -> None:
         mock_eval = mocker.patch(
@@ -77,7 +77,7 @@ class TestMcpToolExecution:
         tools = {t.name: t for t in server._tool_manager.list_tools()}
         fn = tools["nagi_evaluate"].fn
         result = fn(target_dir="t", selectors=["a"], dry_run=True)
-        mock_eval.assert_called_once_with("t", ["a"], dry_run=True)
+        mock_eval.assert_called_once_with(target_dir="t", selectors=["a"], dry_run=True)
         assert result == '{"results":[]}'
 
     def test_nagi_sync_proposes_and_executes(self, mocker: MockerFixture) -> None:

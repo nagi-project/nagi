@@ -1,7 +1,7 @@
 import click
 
 from nagi_cli._nagi_core import format_inspect_text, list_inspections
-from nagi_cli.output import OUTPUT_FORMATS, echo_output
+from nagi_cli.output import FORMAT_TEXT, OUTPUT_FORMATS, echo_output
 
 
 @click.command()
@@ -47,6 +47,11 @@ def inspect(
     no_pager: bool,
 ) -> None:
     """Show sync execution inspection records for an asset."""
-    json_str = list_inspections(asset_name, limit, target_dir, changed_only)
-    output = format_inspect_text(json_str) if output_format == "text" else json_str
+    json_str = list_inspections(
+        asset_name=asset_name,
+        limit=limit,
+        target_dir=target_dir,
+        changed_only=changed_only,
+    )
+    output = format_inspect_text(json_str) if output_format == FORMAT_TEXT else json_str
     echo_output(output, no_pager=no_pager)

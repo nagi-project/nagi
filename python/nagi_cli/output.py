@@ -2,7 +2,9 @@ import sys
 
 import click
 
-OUTPUT_FORMATS = ("json", "text")
+FORMAT_JSON = "json"
+FORMAT_TEXT = "text"
+OUTPUT_FORMATS = (FORMAT_JSON, FORMAT_TEXT)
 
 
 def echo_output(text: str, *, no_pager: bool) -> None:

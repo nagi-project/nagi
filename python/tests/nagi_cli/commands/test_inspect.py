@@ -64,8 +64,8 @@ class TestInspectCommand:
                 ["daily-sales", "--limit", "2", "--output", "json", "--no-pager"]
             )
         assert result.exit_code == 0, result.output
-        _, kwargs = mock.call_args
-        assert kwargs == {} or mock.call_args[0][1] == 2
+        kwargs = mock.call_args.kwargs
+        assert kwargs["limit"] == 2
 
     def test_changed_only_is_passed(self) -> None:
         with patch(
@@ -82,9 +82,9 @@ class TestInspectCommand:
                 ]
             )
         assert result.exit_code == 0, result.output
-        args = mock.call_args[0]
-        assert args[0] == "daily-sales"
-        assert args[3] is True
+        kwargs = mock.call_args.kwargs
+        assert kwargs["asset_name"] == "daily-sales"
+        assert kwargs["changed_only"] is True
 
     def test_empty_asset(self) -> None:
         with patch(

@@ -142,7 +142,7 @@ def resume(selectors: tuple[str, ...]) -> None:
 def halt(target_dir: str, reason: str | None) -> None:
     """Halt all assets by suspending them."""
     try:
-        result_json = _serve_halt(target_dir, reason)
+        result_json = _serve_halt(target_dir=target_dir, reason=reason)
         names: list[str] = json.loads(result_json)
         if names:
             for name in names:

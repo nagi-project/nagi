@@ -3,7 +3,7 @@ import json
 import click
 
 from nagi_cli._nagi_core import asset_status, format_status_text
-from nagi_cli.output import OUTPUT_FORMATS, echo_output
+from nagi_cli.output import FORMAT_TEXT, OUTPUT_FORMATS, echo_output
 
 
 @click.command()
@@ -57,5 +57,8 @@ def status(
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(1)
 
-    output = format_status_text(result_json) if output_format == "text" else result_json
+    if output_format == FORMAT_TEXT:
+        output = format_status_text(result_json)
+    else:
+        output = result_json
     echo_output(output, no_pager=no_pager)
