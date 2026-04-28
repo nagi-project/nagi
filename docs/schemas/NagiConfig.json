@@ -130,6 +130,20 @@
       "$ref": "#/$defs/BackendConfig",
       "description": "State storage backend configuration."
     },
+    "cooldownInitialSecs": {
+      "default": 30,
+      "description": "Initial cooldown duration in seconds after a Sync failure.\nEach consecutive failure doubles the wait time.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cooldownMaxSecs": {
+      "default": 1800,
+      "description": "Maximum cooldown duration in seconds.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "defaultTimeout": {
       "$ref": "#/$defs/Duration",
       "default": "1h"
@@ -160,6 +174,13 @@
     "lockTtlSeconds": {
       "default": 3600,
       "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "maxConsecutiveSyncFailures": {
+      "default": 3,
+      "description": "Number of consecutive Sync failures before the Asset is suspended.",
+      "format": "uint32",
       "minimum": 0,
       "type": "integer"
     },
