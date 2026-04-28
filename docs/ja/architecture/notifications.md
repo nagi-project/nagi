@@ -6,10 +6,9 @@
 
 | イベント | 発生条件 |
 | --- | --- |
-| EvalFailed | Evaluate がエラーで失敗した場合 |
+| EvaluateFailed | Evaluate がエラーで失敗した場合 |
 | Suspended | Guardrails が Sync を停止した場合 |
 | SyncLockSkipped | Sync のロック取得がリトライ上限に達し、Sync がスキップされた場合 |
-| Halted | [`nagi serve halt`](../reference/cli.md#serve-halt) による全 Asset 一括停止 |
 
 !!! tip
     通知が未設定の場合や通知の送信に失敗した場合でも、serve ループの動作には影響しません。送信に失敗した場合は warning レベルのログが出力されます。

@@ -22,6 +22,12 @@ Evaluate
 Sync
 : 収束を実現するための具体的なアクション。データを期待状態へ戻すための操作を実行する。
 
+Halt
+: すべての Asset を一括で Suspended 状態にする操作（`nagi serve halt`）。
+
+Resume
+: 選択した Asset の Suspended 状態を解除する操作（`nagi serve resume`）。
+
 ## Resources
 
 Asset
@@ -47,11 +53,11 @@ Ready
 Drifted
 : データが期待状態からドリフトした状態。対応する Sync が実行される。
 
-Suspended
-: Sync が自動停止された状態。Sync 実行後に状態が悪化した場合や、Sync が連続して失敗した場合に発生する。
+Cooldown
+: Sync 失敗後、次の Sync 起動が一時的に抑制される状態。連続失敗ごとに待機時間が倍増する。時間経過または Sync 成功で自動的に解除される。
 
-Halted
-: Asset の Sync を一括停止した状態。
+Suspended
+: Asset の Sync が停止された状態。Evaluate は継続する。
 
 ## Serve Architecture
 
@@ -59,7 +65,7 @@ Controller
 : Evaluate と Sync のスケジューリングを管理する実行単位。
 
 Guardrails
-: Sync による状態悪化の拡大を防ぐ仕組み。状態悪化や連続失敗を検知すると、当該 Asset の Sync を自動停止する。
+: Sync による状態悪化や繰り返しの失敗から被害が拡大することを防ぐ仕組み。
 
 Graceful Shutdown
 : 停止シグナルを受けたとき、実行中の Sync の完了を待ってから終了する動作。

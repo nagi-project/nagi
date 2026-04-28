@@ -102,12 +102,32 @@ An Asset can have multiple pairs of desired state and convergence operation. Nag
 
 ### Guardrails
 
-If an Asset's state does not improve, Sync for that Asset is automatically stopped. The stop conditions are:
+Guardrails prevent further damage when Sync causes state degradation or fails repeatedly.
 
-- Fewer desired states are satisfied after the Sync than before it was executed
-- Consecutive Syncs for the same Asset have failed
+| State | Description |
+| --- | --- |
+| Cooldown | Sync initiation is temporarily suppressed after a failure |
+| Suspend | Sync for an Asset is stopped. Evaluate continues |
 
-Even when Sync is stopped, Evaluate continues. If the Asset's state returns to Ready, Sync is automatically resumed. It can also be resumed manually.
+#### Cooldown transitions
+
+| Event | Transition |
+| --- | --- |
+| 1st Sync failure | Cooldown starts (eligible for next Sync after the initial wait) |
+| 2nd Sync failure | Cooldown extended (wait time doubles) |
+| Cooldown timer expires | Cooldown cleared |
+| Sync succeeds | Cooldown cleared (failure counter reset) |
+| Consecutive failures reach threshold | Transitions to Suspend |
+
+#### Suspend transitions
+
+| Event | Transition |
+| --- | --- |
+| Consecutive Sync failures reach threshold | Suspend starts (automatic) |
+| Fewer Ready conditions after Sync than before | Suspend starts (automatic) |
+| `nagi serve halt` | All Assets enter Suspend (manual) |
+| Asset becomes Ready | Suspend cleared (automatic) |
+| `nagi serve resume` | Suspend cleared (manual) |
 
 ## Execution Context
 
@@ -119,10 +139,9 @@ Nagi can notify other applications of Evaluate failures or Guardrails activation
 
 Notified events:
 
-- EvalFailed — When Evaluate fails
+- EvaluateFailed — When Evaluate fails
 - Suspended — When Guardrails stops Sync
 - SyncLockSkipped — When Sync lock acquisition reaches the retry limit and Sync is skipped
-- Halted — When a bulk stop of Sync for all Assets is performed
 
 ## What's Next
 
