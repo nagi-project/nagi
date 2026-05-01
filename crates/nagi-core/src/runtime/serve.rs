@@ -182,6 +182,11 @@ fn spawn_controllers(
             lock_config: lc,
             concurrency,
             default_timeout,
+            guardrail_config: guardrail::GuardrailConfig {
+                max_consecutive_failures: config.project.max_consecutive_sync_failures,
+                cooldown_initial_secs: config.project.cooldown_initial_secs,
+                cooldown_max_secs: config.project.cooldown_max_secs,
+            },
         };
         handles.push(tokio::spawn(run_controller(
             input,

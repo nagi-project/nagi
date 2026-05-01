@@ -297,6 +297,7 @@ pub(super) struct ControllerConfig {
     pub lock_config: reconciler::LockConfig,
     pub concurrency: ConcurrencyLimits,
     pub default_timeout: std::time::Duration,
+    pub guardrail_config: super::guardrail::GuardrailConfig,
 }
 
 /// Runs the reconciliation loop for one connected component.
@@ -321,7 +322,7 @@ pub(super) async fn run_controller(
         suspended_store,
         readiness_store,
     } = backend;
-    let mut state = ServeState::new(&edges, suspended_store);
+    let mut state = ServeState::new(&edges, suspended_store, config.guardrail_config);
     let mut evaluate_tasks: JoinSet<(String, reconciler::EvaluateOutcome)> = JoinSet::new();
     let mut sync_tasks: JoinSet<(
         String,
@@ -903,7 +904,11 @@ mod tests {
 
         let store: Arc<dyn crate::runtime::storage::SuspendedStore> =
             Arc::new(MemSuspendedStore::default());
-        ServeState::new(&[], store)
+        ServeState::new(
+            &[],
+            store,
+            crate::runtime::serve::guardrail::GuardrailConfig::default(),
+        )
     }
 
     #[test]

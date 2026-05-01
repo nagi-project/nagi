@@ -6,10 +6,9 @@ Sends notifications for events that occur during [`nagi serve`](../reference/cli
 
 | Event | Trigger condition |
 | --- | --- |
-| EvalFailed | When Evaluate fails with an error |
+| EvaluateFailed | When Evaluate fails with an error |
 | Suspended | When Guardrails stops a Sync |
 | SyncLockSkipped | When Sync lock acquisition reaches the retry limit and the Sync is skipped |
-| Halted | When all Assets are stopped at once via [`nagi serve halt`](../reference/cli.md#serve-halt) |
 
 !!! tip
     Even if notifications are not configured or notification delivery fails, the serve loop is not affected. If delivery fails, a warning-level log is emitted.

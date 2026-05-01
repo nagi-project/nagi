@@ -34,6 +34,8 @@ terminationGracePeriodSeconds: 300
 | `backend.prefix` | string | — | - | Path prefix for remote storage (e.g. `my-project/nagi`). When set, all remote paths are prefixed with this value. Ignored for the local backend. |
 | `backend.region` | string | — | - | AWS region for S3 backend (e.g. `us-east-1`). Required when type is `s3`. |
 | `backend.type` | BackendType | — | - | Backend type. Defaults to `local`. |
+| `cooldownInitialSecs` | integer | — | 30 | Initial cooldown duration in seconds after a Sync failure. Each consecutive failure doubles the wait time. |
+| `cooldownMaxSecs` | integer | — | 1800 | Maximum cooldown duration in seconds. |
 | `defaultTimeout` | Duration | — | 1h | - |
 | `export.connection` | string | Yes | - | Reference to a `kind: Connection` resource name. |
 | `export.dataset` | string | Yes | - | Data warehouse dataset (BigQuery) or schema (Snowflake) to export into. |
@@ -43,6 +45,7 @@ terminationGracePeriodSeconds: 300
 | `lockRetryIntervalSeconds` | integer | — | 900 | - |
 | `lockRetryMaxAttempts` | integer | — | 3 | - |
 | `lockTtlSeconds` | integer | — | 3600 | - |
+| `maxConsecutiveSyncFailures` | integer | — | 3 | Number of consecutive Sync failures before the Asset is suspended. |
 | `maxControllers` | integer | — | - | - |
 | `maxEvaluateConcurrency` | integer | — | - | - |
 | `maxSyncConcurrency` | integer | — | - | - |

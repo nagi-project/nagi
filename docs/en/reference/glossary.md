@@ -22,6 +22,12 @@ Evaluate
 Sync
 : The concrete action that performs convergence. Executes operations to bring data back to its desired state.
 
+Halt
+: Transitions all Assets into the Suspended state at once (`nagi serve halt`).
+
+Resume
+: Clears the Suspended state for selected Assets (`nagi serve resume`).
+
 ## Resources
 
 Asset
@@ -47,11 +53,11 @@ Ready
 Drifted
 : The data has drifted from its desired state. The corresponding Sync is run.
 
-Suspended
-: Sync has been automatically stopped. This occurs when state degrades after a Sync or when Syncs fail repeatedly.
+Cooldown
+: Sync initiation for an Asset is temporarily suppressed after a failure. The wait time increases exponentially with each consecutive failure. Cleared automatically when the timer expires or when a Sync succeeds.
 
-Halted
-: All Asset Syncs have been stopped at once.
+Suspended
+: Sync for an Asset has been stopped. Evaluate continues while Sync is stopped.
 
 ## Serve Architecture
 
@@ -59,7 +65,7 @@ Controller
 : The execution unit that manages scheduling of Evaluate and Sync.
 
 Guardrails
-: Prevents further state degradation caused by Sync. Detects state degradation or repeated failures and automatically suspends Sync for the affected Asset.
+: Prevents further damage when Sync causes state degradation or fails repeatedly.
 
 Graceful Shutdown
 : On receiving a stop signal, waits for running Syncs to complete before exiting.
